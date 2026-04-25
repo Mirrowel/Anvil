@@ -181,6 +181,10 @@ export interface TestRun {
   flakyQuarantined: string[];
   findings: TestFinding[];
   verdict: 'pass' | 'fail' | 'warn';
+  /** Tail of runner stdout/stderr — empty when the runner never spawned. */
+  rawOutput?: string;
+  /** Set when the runner binary failed to launch (missing deps, bad cwd, etc.). */
+  spawnError?: string;
 }
 
 // ── TestLearnings ────────────────────────────────────────────────────────

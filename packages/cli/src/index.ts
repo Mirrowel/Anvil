@@ -9,6 +9,13 @@ import { dashboardCommand } from './commands/dashboard.js';
 import { planCommand } from './commands/plan.js';
 import { reviewCommand } from './commands/review.js';
 import { testCommand } from './commands/test.js';
+import { incidentsCommand } from './commands/incidents.js';
+import { policyCommand } from './commands/policy.js';
+import { costCommand } from './commands/cost.js';
+import { checkpointsCommand } from './commands/checkpoints.js';
+import { contractsCommand } from './commands/contracts.js';
+import { testsRankCommand } from './commands/tests-rank.js';
+import { triageCommand } from './commands/triage.js';
 
 const program = new Command();
 
@@ -26,6 +33,13 @@ program.addCommand(dashboardCommand);
 program.addCommand(planCommand);
 program.addCommand(reviewCommand);
 program.addCommand(testCommand);
+program.addCommand(incidentsCommand);
+program.addCommand(policyCommand);
+program.addCommand(costCommand);
+program.addCommand(checkpointsCommand);
+program.addCommand(contractsCommand);
+program.addCommand(testsRankCommand);
+program.addCommand(triageCommand);
 
 // ── Future CLI commands (disabled for MVP 1) ─────────────────────────
 const comingSoon = (name: string, desc: string) => {

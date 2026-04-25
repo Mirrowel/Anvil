@@ -343,6 +343,24 @@ export function findInterruptedPipelines(anvilHome: string): PipelineCheckpoint[
 
 // ── Pipeline Runner ───────────────────────────────────────────────────
 
+/**
+ * Hook fired after each stage completes. Returning a rejected promise cancels
+ * the pipeline; resolving with `{ pause: true }` suspends execution until
+ * `resume()` is called.
+ */
+export interface AfterStageHook {
+  (info: {
+    runId: string;
+    project: string;
+    stageIndex: number;
+    stageName: string;
+    artifact: string;
+    cost: number;
+    totalCost: number;
+    touchedFiles?: string[];
+  }): Promise<void>;
+}
+
 export class PipelineRunner extends EventEmitter {
   private agentManager: AgentManager;
   private projectLoader: ProjectLoader;
@@ -356,6 +374,9 @@ export class PipelineRunner extends EventEmitter {
   private cancelled = false;
   private memoryStore: MemoryStore;
   private kbManager: KnowledgeBaseManager | null;
+  private afterStageHook: AfterStageHook | null = null;
+
+  setAfterStageHook(hook: AfterStageHook | null): void { this.afterStageHook = hook; }
 
   // For interactive clarify — resolves when user provides input
   private inputResolve: ((text: string) => void) | null = null;
@@ -803,6 +824,26 @@ export class PipelineRunner extends EventEmitter {
           this.broadcastState();
           this.checkpoint(); // Save: stage completed
           this.emit('stage-complete', i, result.artifact, result.cost);
+
+          // ── After-stage hook — policy-driven pause / learning / etc. ──
+          if (this.afterStageHook) {
+            try {
+              await this.afterStageHook({
+                runId: this.state.runId,
+                project: this.config.project,
+                stageIndex: i,
+                stageName: stage.name,
+                artifact: result.artifact,
+                cost: result.cost,
+                totalCost: this.state.totalCost,
+              });
+              if (this.cancelled) break;
+            } catch (err) {
+              console.warn(`[pipeline] after-stage hook rejected at ${stage.name}:`, err);
+              this.cancelled = true;
+              break;
+            }
+          }
 
           // Write artifact to feature folder
           this.writeStageArtifact(i, stage, result.artifact);

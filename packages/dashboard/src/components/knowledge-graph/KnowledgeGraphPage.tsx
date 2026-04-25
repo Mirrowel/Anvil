@@ -45,8 +45,31 @@ export function KnowledgeGraphPage({
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [graphSearch, setGraphSearch] = useState('');
   const [expanded, setExpanded] = useState(false);
-  const graphContainerRef = useRef<HTMLDivElement>(null);
   const [graphSize, setGraphSize] = useState({ width: 800, height: 500 });
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  // Callback ref — attaches the ResizeObserver whenever the container
+  // actually mounts (the "no KB" and "has KB" branches are different
+  // subtrees, so a plain useRef + useEffect([]) misses the real element).
+  const graphContainerRef = useCallback((el: HTMLDivElement | null) => {
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
+    if (!el) return;
+    // Seed from the actual element synchronously so first paint uses real dims.
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setGraphSize({ width: rect.width, height: rect.height });
+    }
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setGraphSize({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        });
+      }
+    });
+    observer.observe(el);
+    resizeObserverRef.current = observer;
+  }, []);
 
   // Project graph (LLM) state
   const [pgStatus, setPgStatus] = useState<{
@@ -59,21 +82,7 @@ export function KnowledgeGraphPage({
 
   const repos = kbStatus?.repos ?? [];
 
-  // Measure graph container
-  useEffect(() => {
-    const el = graphContainerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setGraphSize({
-          width: entry.contentRect.width,
-          height: entry.contentRect.height,
-        });
-      }
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  // graphContainerRef above is a callback ref that manages the ResizeObserver.
 
   // Fetch graph data
   const fetchGraphData = useCallback((level: 'project' | 'repo', repo?: string) => {

@@ -40,6 +40,10 @@ export interface SpawnConfig {
   permissionMode?: string;
   disallowedTools?: string[];
   allowedTools?: string[];
+  /** Pipeline runId, used by cost/checkpoint hooks to group entries. */
+  runId?: string;
+  /** Stable cross-retry id for the checkpoint cache. Defaults to runId. */
+  runFamily?: string;
 }
 
 export interface AgentManagerEvents {
@@ -47,6 +51,51 @@ export interface AgentManagerEvents {
   'agent-activity': (data: { agentId: string; activity: AgentActivity }) => void;
   'agent-done': (data: { agent: AgentState }) => void;
   'agent-error': (data: { agentId: string; error: string }) => void;
+}
+
+/**
+ * Cost hook — invoked after every agent result so a ledger can record
+ * token usage and trigger breach flows. Fire-and-forget; hook impls must
+ * never throw back into the manager.
+ */
+export interface AgentCostHook {
+  (info: {
+    runId?: string;
+    project?: string;
+    stage?: string;
+    agent: string;
+    persona: string;
+    model: string;
+    tokensIn: number;
+    tokensOut: number;
+    usd: number;
+  }): void | Promise<void>;
+}
+
+/**
+ * Checkpoint hook — consulted BEFORE spawning. If it returns a cached
+ * output, the manager synthesizes a done-event and skips the spawn.
+ */
+export interface AgentCheckpointHook {
+  lookup(input: {
+    project: string;
+    stage: string;
+    persona: string;
+    model: string;
+    prompt: string;
+    runFamily?: string;
+  }): { hit: true; output: string; cost?: CostInfo } | { hit: false };
+
+  record?(input: {
+    project: string;
+    stage: string;
+    persona: string;
+    model: string;
+    prompt: string;
+    runFamily?: string;
+    output: string;
+    cost: CostInfo;
+  }): void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -94,7 +143,12 @@ function pushActivity(agent: AgentState, activity: AgentActivity): void {
 // ── AgentManager ─────────────────────────────────────────────────────────
 
 export class AgentManager extends EventEmitter {
-  private agents = new Map<string, { state: AgentState; process: AgentProcess }>();
+  private agents = new Map<string, { state: AgentState; process: AgentProcess; spawnConfig?: SpawnConfig }>();
+  private costHook: AgentCostHook | null = null;
+  private checkpointHook: AgentCheckpointHook | null = null;
+
+  setCostHook(hook: AgentCostHook | null): void { this.costHook = hook; }
+  setCheckpointHook(hook: AgentCheckpointHook | null): void { this.checkpointHook = hook; }
 
   // ── Typed event helpers ──────────────────────────────────────────────
 
@@ -133,6 +187,31 @@ export class AgentManager extends EventEmitter {
       error: null,
     };
 
+    // ── Checkpoint cache lookup ───────────────────────────────────────
+    // If a cached run exists for this (project,stage,persona,model,prompt),
+    // skip the subprocess and synthesize a done-event.
+    if (this.checkpointHook) {
+      try {
+        const hit = this.checkpointHook.lookup({
+          project: config.project, stage: config.stage, persona: config.persona,
+          model: config.model, prompt: config.prompt, runFamily: config.runFamily ?? config.runId,
+        });
+        if (hit.hit) {
+          agent.status = 'done';
+          agent.startedAt = Date.now();
+          agent.finishedAt = Date.now();
+          appendOutput(agent, hit.output);
+          if (hit.cost) agent.cost = hit.cost;
+          this.agents.set(agentId, { state: agent, process: null as unknown as AgentProcess, spawnConfig: config });
+          // Emit after the caller receives the AgentState so listeners see 'done'.
+          process.nextTick(() => this.emit('agent-done', { agent }));
+          return agent;
+        }
+      } catch (err) {
+        console.warn('[agent-manager] checkpoint lookup failed:', err);
+      }
+    }
+
     const proc = new AgentProcess({
       prompt: config.prompt,
       model: config.model,
@@ -151,7 +230,7 @@ export class AgentManager extends EventEmitter {
     agent.status = 'running';
     agent.startedAt = Date.now();
 
-    this.agents.set(agentId, { state: agent, process: proc });
+    this.agents.set(agentId, { state: agent, process: proc, spawnConfig: config });
     return agent;
   }
 
@@ -258,6 +337,46 @@ export class AgentManager extends EventEmitter {
 
       if (result) {
         appendOutput(agent, result);
+      }
+
+      // ── Cost ledger hook ─────────────────────────────────────────
+      if (this.costHook) {
+        const entry = this.agents.get(agentId);
+        const cfg = entry?.spawnConfig;
+        try {
+          void this.costHook({
+            runId: cfg?.runId,
+            project: cfg?.project,
+            stage: cfg?.stage,
+            agent: agentId,
+            persona: agent.persona,
+            model: agent.model,
+            tokensIn: cost.inputTokens,
+            tokensOut: cost.outputTokens,
+            usd: cost.totalUsd,
+          });
+        } catch (err) {
+          console.warn('[agent-manager] cost hook threw:', err);
+        }
+      }
+
+      // ── Checkpoint record ────────────────────────────────────────
+      if (this.checkpointHook?.record) {
+        const entry = this.agents.get(agentId);
+        const cfg = entry?.spawnConfig;
+        if (cfg) {
+          try {
+            this.checkpointHook.record({
+              project: cfg.project, stage: cfg.stage, persona: cfg.persona,
+              model: cfg.model, prompt: cfg.prompt,
+              runFamily: cfg.runFamily ?? cfg.runId,
+              output: result ?? agent.output,
+              cost: agent.cost,
+            });
+          } catch (err) {
+            console.warn('[agent-manager] checkpoint record threw:', err);
+          }
+        }
       }
 
       this.emit('agent-done', { agent });

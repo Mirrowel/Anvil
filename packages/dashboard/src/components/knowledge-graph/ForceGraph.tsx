@@ -58,6 +58,18 @@ export function ForceGraph({
     return () => clearTimeout(timer);
   }, [data]);
 
+  // Re-fit whenever the canvas resizes. The simulation was centered on an
+  // earlier (usually smaller) bounding box, so without this the cluster
+  // stays pinned to the old center and most of the viewport reads empty.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      graphRef.current?.zoomToFit(300, 40);
+      // Nudge d3 to re-center on the new dimensions.
+      graphRef.current?.d3ReheatSimulation?.();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [width, height]);
+
   const handleNodeHover = useCallback((node: any) => {
     const id = node?.id ?? null;
     setHoveredNode(id);

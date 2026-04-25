@@ -11,8 +11,10 @@ import { HomePage } from './components/home/HomePage.js';
 import { KnowledgeGraphPage } from './components/knowledge-graph/KnowledgeGraphPage.js';
 
 import { ReviewPage } from './components/review/ReviewPage.js';
-import { TestGenPage } from './components/test-gen/TestGenPage.js';
 import { TestSpecPage } from './components/test/TestSpecPage.js';
+import { BoundTestsRegistry } from './components/bound-tests/BoundTestsRegistry.js';
+import { ContractsMapPage } from './components/contracts/ContractsMapPage.js';
+import { TriagePanel } from './components/ci-triage/TriagePanel.js';
 import { PlanPage } from './components/plan/PlanPage.js';
 import { PlanCompare } from './components/plan/PlanCompare.js';
 import { SettingsPage } from './components/settings/SettingsPage.js';
@@ -1083,20 +1085,25 @@ function App() {
           />
         );
 
+      // ── Stateful pages — kept mounted as siblings below so progress
+      //    (running specs, generating plans, streaming reviews) survives
+      //    route changes. Return null here; the persistent host renders them.
       case 'review':
-        return <ReviewPage project={currentProject?.name ?? null} ws={wsRef.current} />;
-
       case 'tests':
-        return <TestSpecPage project={currentProject?.name ?? null} ws={wsRef.current} />;
-
-      case 'test-gen':
-        return <ComingSoonOverlay label="Test Generation"><TestGenPage project={currentProject?.name ?? null} ws={wsRef.current} /></ComingSoonOverlay>;
-
       case 'plan':
-        return <PlanPage project={currentProject?.name ?? null} ws={wsRef.current} />;
+        return null;
 
       case 'plan-compare':
         return <PlanCompare ws={wsRef.current} />;
+
+      case 'guards':
+        return <BoundTestsRegistry project={currentProject?.name ?? null} ws={wsRef.current} />;
+
+      case 'contracts':
+        return <ContractsMapPage project={currentProject?.name ?? null} ws={wsRef.current} />;
+
+      case 'triage':
+        return <TriagePanel project={currentProject?.name ?? null} ws={wsRef.current} />;
 
       case 'settings':
         return <SettingsPage project={currentProject?.name ?? null} ws={wsRef.current} />;
@@ -1241,6 +1248,47 @@ function App() {
         headerRight={headerRight}
       >
         {renderView()}
+        {/* ── Persistent page host ─────────────────────────────────────
+            These pages stay mounted across route changes so in-flight
+            work (a running test spec, a streaming plan, an open review)
+            is not lost. `key={projectName}` forces a clean remount when
+            the user switches projects. */}
+        <div
+          style={{
+            height: '100%',
+            display: currentRoute.id === 'tests' ? 'block' : 'none',
+          }}
+        >
+          <TestSpecPage
+            key={currentProject?.name ?? '__no_project__'}
+            project={currentProject?.name ?? null}
+            ws={wsRef.current}
+          />
+        </div>
+        <div
+          style={{
+            height: '100%',
+            display: currentRoute.id === 'plan' ? 'block' : 'none',
+          }}
+        >
+          <PlanPage
+            key={currentProject?.name ?? '__no_project__'}
+            project={currentProject?.name ?? null}
+            ws={wsRef.current}
+          />
+        </div>
+        <div
+          style={{
+            height: '100%',
+            display: currentRoute.id === 'review' ? 'block' : 'none',
+          }}
+        >
+          <ReviewPage
+            key={currentProject?.name ?? '__no_project__'}
+            project={currentProject?.name ?? null}
+            ws={wsRef.current}
+          />
+        </div>
       </DashboardLayout>
       <CommandPalette commands={commands} isOpen={cmdPaletteOpen} onClose={() => setCmdPaletteOpen(false)} />
     </ProjectProvider>
@@ -1257,38 +1305,6 @@ function PendingView({ label }: { label: string }) {
       <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
         {label}
       </span>
-    </div>
-  );
-}
-
-/** Overlay that blurs the child page and shows a "Coming Soon" badge */
-function ComingSoonOverlay({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ position: 'relative', height: '100%', overflow: 'hidden' }}>
-      <div style={{ filter: 'blur(2px) grayscale(0.4)', opacity: 0.45, pointerEvents: 'none', height: '100%' }}>
-        {children}
-      </div>
-      <div style={{
-        position: 'absolute', inset: 0,
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        gap: 12,
-      }}>
-        <span style={{
-          padding: '6px 16px',
-          borderRadius: 'var(--radius-full)',
-          background: 'var(--bg-elevated-2)',
-          border: '1px solid var(--separator)',
-          color: 'var(--text-secondary)',
-          fontSize: 14, fontWeight: 600,
-          fontFamily: 'var(--font-sans)',
-          letterSpacing: '-0.01em',
-        }}>
-          {label} — Coming Soon
-        </span>
-        <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-          This feature is under development.
-        </span>
-      </div>
     </div>
   );
 }

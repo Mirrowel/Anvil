@@ -28,6 +28,7 @@ import {
 import { FindingList, type FindingGroup } from '../common/FindingList.js';
 import { Toast } from '../common/Toast.js';
 import { useResolvableFinding } from '../common/useResolvableFinding.js';
+import { IncidentsPanel } from './IncidentsPanel.js';
 
 export interface TestSpecPageProps {
   project: string | null;
@@ -220,13 +221,14 @@ const runVerdictConfig: Record<'pass' | 'fail' | 'warn', {
   },
 };
 
-type Tab = 'overview' | 'behaviors' | 'cases' | 'runs';
+type Tab = 'overview' | 'behaviors' | 'cases' | 'runs' | 'incidents';
 
-const tabs: Array<{ id: Tab; label: string }> = [
+const tabs: Array<{ id: Tab; label: string; icon?: React.ComponentType<any> }> = [
   { id: 'overview',  label: 'Overview' },
   { id: 'behaviors', label: 'Behaviors' },
   { id: 'cases',     label: 'Cases' },
   { id: 'runs',      label: 'Runs' },
+  { id: 'incidents', label: 'Incidents', icon: AlertTriangle },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -808,6 +810,7 @@ export function TestSpecPage({ project, ws }: TestSpecPageProps) {
             }}>
               {tabs.map((t) => {
                 const active = activeTab === t.id;
+                const Icon = t.icon;
                 return (
                   <button
                     key={t.id}
@@ -824,6 +827,7 @@ export function TestSpecPage({ project, ws }: TestSpecPageProps) {
                       marginBottom: -1,
                     }}
                   >
+                    {Icon && <Icon size={13} strokeWidth={1.75} aria-hidden="true" />}
                     {t.label}
                     {t.id === 'behaviors' && spec.behaviors.length > 0 && (
                       <TabBadge count={spec.behaviors.length} />
@@ -999,6 +1003,10 @@ export function TestSpecPage({ project, ws }: TestSpecPageProps) {
                 onResolve={resolve}
                 resolvingId={resolvingId}
               />
+            )}
+
+            {activeTab === 'incidents' && (
+              <IncidentsPanel project={project!} ws={ws} specSlug={spec.slug} />
             )}
 
             <div style={{ height: 40 }} />
@@ -2048,6 +2056,37 @@ function RunRow({
           {/* Per-case heatmap */}
           <RunHeatmap results={run.results} />
 
+          {/* Spawn error — runner never launched */}
+          {run.spawnError && (
+            <div style={{
+              padding: '8px 10px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.35)',
+              fontSize: 12,
+              fontFamily: 'var(--font-mono)',
+              color: 'var(--color-error, #ef4444)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              <div style={{
+                fontSize: 10, fontWeight: 600, letterSpacing: 0.4,
+                textTransform: 'uppercase', marginBottom: 4,
+                color: 'var(--color-error, #ef4444)',
+                fontFamily: 'var(--font-sans)',
+              }}>
+                Runner error
+              </div>
+              {run.spawnError}
+            </div>
+          )}
+
+          {/* Per-case failure details */}
+          <RunFailures results={run.results} />
+
+          {/* Runner output (stdout/stderr tail) */}
+          {run.rawOutput && <RunnerOutput text={run.rawOutput} />}
+
           {/* Quarantined list */}
           {run.flakyQuarantined.length > 0 && (
             <div>
@@ -2135,6 +2174,95 @@ function RunHeatmap({ results }: { results: TestRunResult[] }) {
         })}
       </div>
     </div>
+  );
+}
+
+function RunFailures({ results }: { results: TestRunResult[] }) {
+  const failing = results.filter((r) => !r.pass && r.failure);
+  if (failing.length === 0) return null;
+  return (
+    <div>
+      <div style={{
+        fontSize: 11, color: 'var(--text-tertiary)',
+        textTransform: 'uppercase', marginBottom: 4,
+      }}>
+        Failures ({failing.length})
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {failing.map((r) => (
+          <details
+            key={r.caseId}
+            style={{
+              background: 'var(--bg-elevated-1)',
+              border: '1px solid var(--separator)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '6px 10px',
+              fontSize: 12,
+            }}
+          >
+            <summary style={{
+              cursor: 'pointer',
+              fontFamily: 'var(--font-mono)',
+              color: 'var(--color-error, #ef4444)',
+              listStyle: 'revert',
+            }}>
+              {r.caseId}
+              <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}>
+                {r.durationMs} ms
+              </span>
+            </summary>
+            <pre style={{
+              marginTop: 6, marginBottom: 0,
+              padding: '6px 8px',
+              background: 'var(--bg-base)',
+              borderRadius: 'var(--radius-xs, 3px)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              color: 'var(--text-secondary)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: 220,
+              overflow: 'auto',
+            }}>{r.failure}</pre>
+          </details>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RunnerOutput({ text }: { text: string }) {
+  return (
+    <details style={{
+      background: 'var(--bg-elevated-1)',
+      border: '1px solid var(--separator)',
+      borderRadius: 'var(--radius-sm)',
+      padding: '6px 10px',
+      fontSize: 12,
+    }}>
+      <summary style={{
+        cursor: 'pointer',
+        fontSize: 11, fontWeight: 600, letterSpacing: 0.3,
+        textTransform: 'uppercase',
+        color: 'var(--text-tertiary)',
+        listStyle: 'revert',
+      }}>
+        Runner output
+      </summary>
+      <pre style={{
+        marginTop: 6, marginBottom: 0,
+        padding: '6px 8px',
+        background: 'var(--bg-base)',
+        borderRadius: 'var(--radius-xs, 3px)',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 11,
+        color: 'var(--text-secondary)',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        maxHeight: 320,
+        overflow: 'auto',
+      }}>{text}</pre>
+    </details>
   );
 }
 

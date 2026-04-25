@@ -16,9 +16,9 @@
  *     to a regex-aggregate path and surface the parse failure via onLog.
  */
 
-import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawn, execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import type {
   Runner,
@@ -104,6 +104,13 @@ export async function executeTestRun(opts: ExecuteOptions): Promise<ExecuteResul
       durationMs: Date.now() - start,
     };
   }
+
+  // ── Materialize case.code onto disk so the runner can find it ─────
+  // Cases store their full test source inline. The runner needs files,
+  // so we write them now and restore on the way out.
+  const materialized = materializeTestFiles(opts.cases, opts.repoLocalPath, log);
+
+  try {
 
   // Pass 1 — run the full set (optionally filtered to provided filePaths).
   const firstPass = await runOnce(opts, opts.filePaths ?? collectFiles(opts.cases), timeoutMs, log);
@@ -247,6 +254,86 @@ export async function executeTestRun(opts: ExecuteOptions): Promise<ExecuteResul
     rawOutput: tailOutput(lastRaw || firstPass.spawn.combined),
     durationMs: Date.now() - start,
   };
+
+  } finally {
+    cleanupMaterializedFiles(materialized, log);
+  }
+}
+
+// ── Test file materialization ────────────────────────────────────────────
+
+interface MaterializedFile {
+  absPath: string;
+  relPath: string;
+  existedBefore: boolean;
+  previousContent: string | null;
+}
+
+/**
+ * Group cases by `filePath` and write their merged `code` to disk. When multiple
+ * cases share a path, the second+ case's source has its leading `import`
+ * statements stripped and only its `describe()` / top-level statements are
+ * appended to the first case's source — vitest/jest tolerate multiple
+ * describes in one file, so the whole set runs.
+ */
+function materializeTestFiles(
+  cases: TestCase[],
+  repoLocalPath: string,
+  log: (stream: 'stdout' | 'stderr', line: string) => void,
+): MaterializedFile[] {
+  const grouped = new Map<string, TestCase[]>();
+  for (const c of cases) {
+    if (!c.filePath || !c.code) continue;
+    const arr = grouped.get(c.filePath) ?? [];
+    arr.push(c);
+    grouped.set(c.filePath, arr);
+  }
+
+  const written: MaterializedFile[] = [];
+  for (const [relPath, group] of grouped) {
+    const absPath = join(repoLocalPath, relPath);
+    let previousContent: string | null = null;
+    const existedBefore = existsSync(absPath);
+    if (existedBefore) {
+      try { previousContent = readFileSync(absPath, 'utf-8'); } catch { previousContent = null; }
+    }
+
+    const merged = mergeCaseSources(group.map((c) => c.code));
+    try {
+      mkdirSync(dirname(absPath), { recursive: true });
+      writeFileSync(absPath, merged, 'utf-8');
+      written.push({ absPath, relPath, existedBefore, previousContent });
+      log('stdout', `[test-executor] wrote ${relPath} (${group.length} case(s), ${merged.length} bytes)`);
+    } catch (err) {
+      log('stderr', `[test-executor] failed to write ${relPath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return written;
+}
+
+/** Concatenate test-file sources, keeping the first source's imports and stripping them from the rest. */
+function mergeCaseSources(sources: string[]): string {
+  if (sources.length === 1) return sources[0];
+  const [first, ...rest] = sources;
+  const stripped = rest.map((src) => src.replace(/^\s*(?:import\s[^;\n]*;?\s*\n|import\s\{[\s\S]*?\}\s*from\s*['"][^'"]+['"];?\s*\n)+/g, '').trimStart());
+  return `${first.trimEnd()}\n\n${stripped.join('\n\n')}\n`;
+}
+
+function cleanupMaterializedFiles(
+  files: MaterializedFile[],
+  log: (stream: 'stdout' | 'stderr', line: string) => void,
+): void {
+  for (const f of files) {
+    try {
+      if (f.existedBefore && f.previousContent !== null) {
+        writeFileSync(f.absPath, f.previousContent, 'utf-8');
+      } else {
+        unlinkSync(f.absPath);
+      }
+    } catch (err) {
+      log('stderr', `[test-executor] cleanup failed for ${f.relPath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 }
 
 // ── Command selection ────────────────────────────────────────────────────

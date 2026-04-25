@@ -315,7 +315,7 @@ export class KnowledgeBaseManager {
       const workspaceMaps = new Map<string, any>();
       try {
         const { detectWorkspace } = await import(
-          '@anvil-dev/cli/knowledge/workspace-detector' as string
+          '@esankhan3/anvil-cli/knowledge/workspace-detector' as string
         );
         for (const repoName of repoNames) {
           const repoPath = repoPaths[repoName];
@@ -453,7 +453,7 @@ export class KnowledgeBaseManager {
     try {
       // Use the in-house AST graph builder via workspace package export
       const { buildAstGraph, generateGraphReport } = await import(
-        '@anvil-dev/cli/knowledge/ast-graph-builder' as string
+        '@esankhan3/anvil-cli/knowledge/ast-graph-builder' as string
       );
 
       const graph = await buildAstGraph(repoPath, { workspaceMap });
@@ -1074,10 +1074,10 @@ export class KnowledgeBaseManager {
   ): Promise<void> {
     try {
       const { ProjectGraphBuilder } = await import(
-        '@anvil-dev/cli/knowledge/project-graph-builder' as string
+        '@esankhan3/anvil-cli/knowledge/project-graph-builder' as string
       );
       const { detectCrossRepoEdges } = await import(
-        '@anvil-dev/cli/knowledge/cross-repo-detector' as string
+        '@esankhan3/anvil-cli/knowledge/cross-repo-detector' as string
       );
 
       const graphBuilder = new ProjectGraphBuilder();
