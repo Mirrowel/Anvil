@@ -1,5 +1,7 @@
 # Plan: Extract `@anvil/knowledge-core` shared workspace package
 
+> **Status: Shipped 2026-04-28.** See [`KNOWLEDGE-CORE-ADR.md`](./KNOWLEDGE-CORE-ADR.md) §"What actually shipped" for the per-phase commit map and the deviations from the original plan. Final repo state: cli/src/knowledge → 2 files, mcp/src/core → 1 file, knowledge-core/src → 27 files including 5 tests.
+
 ## Goals (what "done" means)
 
 - Both `packages/cli` and `packages/code-search-mcp` consume a single shared package for: chunking, file-walking, AST/tree-sitter, embedders, vector store, BM25, hybrid retriever, reranker, project graph, structural hashing.

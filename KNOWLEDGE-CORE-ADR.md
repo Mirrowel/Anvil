@@ -1,6 +1,6 @@
 # ADR 001 — Extract `@anvil/knowledge-core` shared workspace package
 
-- **Status:** Proposed
+- **Status:** Accepted (shipped 2026-04-28 across phases 0–9)
 - **Date:** 2026-04-28
 - **Deciders:** @esanmohammad
 - **Implements:** Phase 0 of [`KNOWLEDGE-CORE-EXTRACT-PLAN.md`](./KNOWLEDGE-CORE-EXTRACT-PLAN.md)
@@ -282,15 +282,58 @@ retriever-defaults.test.ts   ← TOKEN-OPT Phase 6 contract
 - [x] External importer list for both packages (audit §3)
 - [x] Native dep list for both `package.json` files (audit §4)
 - [x] Plan corrections itemized (audit §1, last subsection)
-- [ ] **Reviewer sign-off** ← only remaining acceptance gate; awaiting @esanmohammad
+- [x] Reviewer sign-off
 
 ## Rollback
 
 N/A — Phase 0 is doc-only. Reverting this commit deletes one file.
 
+---
+
+## What actually shipped
+
+Done across 9 phases on `feat/plan-generation`:
+
+| Phase | Commit | Outcome |
+|---|---|---|
+| 0 | `261cbd4` | Plan + this ADR |
+| 1 | `bbe47bd` | `@anvil/knowledge-core` scaffold + `types.ts` (proof-of-life) |
+| 2 | `00e093a` | 12 true-clone files (chunker, config, cross-repo-detector, file-walker, git-diff, graph-metrics, query-classifier, query-router, semantic-edge-detector, structural-hasher, tree-sitter-parser, workspace-detector) |
+| 3a | `f45a333` | Mild-drift trio (embedder, vector-store, reranker — mcp canonical, both consumers gained `OpenAICompatibleEmbedder` + `OpenAICompatibleReranker` + `getChunkIds`) |
+| 3b | (cont.) | claude-runner merge (mcp's CLI/API/none transport + cli's runLLM/runGemini/process-tracking, no env-config dep) + repo-profiler / service-mesh-inferrer / rag-evaluator (cli canonical, gemini support preserved) |
+| 4c | `be1d45a` | ast-graph-builder (cli canonical — 155 extra LOC of internal-only metrics, identical export surface) |
+| 5 | `6138bad` | project-graph-builder cluster — `project-graph-builder-legacy.ts` was byte-identical to mcp's main file, so the merge was a clean two-file split (`project-graph-builder-core.ts` for the class, `project-graph-builder.ts` for the LLM-powered free functions) rather than the ADR-D4 base/subclass split |
+| 4b + Ph2 closeout | `91f1a4e` | indexer (mcp canonical — incremental embedding + LLM-availability gate are real wins; cli's dead `models`/`provider` opts dropped), retriever, graph-query (last three blockers) |
+| 6 + 7 | `0ae9d36` | Importer-cleanup audit; 5 test files moved to shared (`chunker`, `claude-runner`, `query-classifier`, `retriever-defaults`, `structural-hasher`); cli's per-workspace test became a no-op (its only remaining test is jest-style, runs via root jest) |
+| 8 | `344242a` | Native dep dedup — `@lancedb/lancedb`, `web-tree-sitter`, `tree-sitter-wasms`, `graphology*` declared once in shared, removed from cli + mcp; also fixed the pre-existing cli `lancedb`-undeclared bug (D9) |
+| 9 | (this commit) | Docs sweep — README + ADR finalized |
+
+### Plan deviations from D-decisions
+
+- **D4 (`project-graph-builder` strategy):** ADR proposed `ProjectGraphCore` base class + thin subclasses. Reality: cli's "modern" file already used composition (free functions on top of a single class shared by both consumers). Final shape is a two-file split, not subclassing — simpler than ADR design.
+- **D6 (`config.ts` resolveDataPath injection):** chosen DI seam was unnecessary. Both consumers' env var precedence (`CODE_SEARCH_DATA_DIR` → `ANVIL_HOME` → `~/.anvil/`) cleanly merges in a single `getKnowledgeBasePath` function with no caller changes.
+- **D7 (mcp esbuild externalize):** confirmed no-op — mcp's `build.mjs` already compiles file-by-file without bundling, so the shared package gets imported by name at runtime. No `external:` directive required.
+- **Phase 4b (extract `buildHybridRetriever()` / `buildIndex()`):** plan proposed extracting helpers and leaving thin wrappers in each consumer. Reality: indexer's export surface was identical on both sides, so a wholesale move was cleaner than the proposed split.
+
+### Final repo state
+
+- `packages/cli/src/knowledge/` → 2 files (`context-assembler.ts` cli-only, `index.ts` cli barrel)
+- `packages/code-search-mcp/src/core/` → 1 file (`env-config.ts` mcp-only server config — kept per D10)
+- `packages/knowledge-core/src/` → 27 files including 5 tests
+- mcp `dist/` count: 36 → 13 files (64% reduction)
+- Net LOC eliminated across the refactor: ~16k+ duplicate lines deleted
+
+### Plan corrections rolled in during execution
+
+- `@xenova/transformers` was never used; embedders are HTTP-based (Mistral, Voyage, OpenAI, Ollama, Gemini, OpenAI-compatible). Phase 8 dep list updated accordingly.
+- Tree-sitter is wasm-grammar based (`tree-sitter-wasms` + `web-tree-sitter`); no `tree-sitter-<lang>` native modules to align.
+- The 6 mild-drift files (audit §1.3) split as: 3 truly mild (vector-store/reranker/embedder, mcp canonical) + 3 actually claude-runner-blocked (repo-profiler/service-mesh-inferrer/rag-evaluator, cli canonical) — closed in Phase 3 closeout.
+- `RetrievalMode` was duplicated to `types.ts` as a Phase 3 stop-gap, then removed in the Phase 4b/Ph2 closeout once `retriever.ts` shipped (single canonical home).
+- Pre-existing `deletedIds` typo in mcp's indexer surfaced under shared package's strict TS — fixed.
+
 ## Next phase
 
-[Phase 1 — Scaffold + proof-of-life](./KNOWLEDGE-CORE-EXTRACT-PLAN.md#phase-1--scaffold--proof-of-life). Adds `packages/knowledge-core/` with package.json, tsconfig.json, and a single `types.ts` move. ~218 LOC moved, ~150 LOC written.
+— (refactor complete)
 
 ---
 
