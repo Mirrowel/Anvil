@@ -481,7 +481,7 @@ export class KnowledgeIndexer {
     if (embeddedChunks.length > 0) {
       await vectorStore.addChunks(embeddedChunks);
     }
-    log(`Stored ${embeddedChunks.length} new chunks in LanceDB (${deletedIds.length} removed)`);
+    log(`Stored ${embeddedChunks.length} new chunks in LanceDB (${deletedFiles.length} removed)`);
 
     // Update metadata
     const repoNames = [...new Set(chunks.map((c) => c.repoName))];
@@ -498,7 +498,7 @@ export class KnowledgeIndexer {
     }
 
     const durationMs = Date.now() - startTime;
-    report({ phase: 'done', message: `Embedded ${newChunks.length} new chunks (${deletedIds.length} removed) in ${formatEta(Math.ceil(durationMs / 1000))}`, percent: 100, etaSeconds: 0 });
+    report({ phase: 'done', message: `Embedded ${newChunks.length} new chunks (${deletedFiles.length} removed) in ${formatEta(Math.ceil(durationMs / 1000))}`, percent: 100, etaSeconds: 0 });
 
     return {
       project,

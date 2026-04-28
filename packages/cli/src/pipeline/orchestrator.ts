@@ -536,7 +536,7 @@ async function buildPersonaProjectPrompt(
   // Try semantic retrieval first (new project), fall back to legacy KB
   let knowledgeGraph: string | null = null;
   try {
-    const { getRetriever } = await import('../knowledge/indexer.js');
+    const { getRetriever } = await import('@anvil/knowledge-core');
     const retriever = await getRetriever(project);
     const result = await retriever.retrieve(feature, {
       maxTokens: tokenBudget,

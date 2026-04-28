@@ -4,7 +4,7 @@
 
 import type { ServerContext } from '../server.js';
 import { loadAllProfiles, loadProfile } from '@anvil/knowledge-core';
-import { discoverRepos } from '../core/indexer.js';
+import { discoverRepos } from '@anvil/knowledge-core';
 
 export function registerProfileTools() {
   return [

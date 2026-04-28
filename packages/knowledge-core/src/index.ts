@@ -33,6 +33,9 @@ export * from './ast-graph-builder.js';
 // project-graph-builder.ts re-exports the class from project-graph-builder-core.ts,
 // so a single barrel entry covers both modules without duplicate-name conflicts.
 export * from './project-graph-builder.js';
+export * from './retriever.js';
+export * from './graph-query.js';
+export * from './indexer.js';
 
 // `tree-sitter-parser` exports a `computeStructuralHash` that collides with
 // `structural-hasher`'s function of the same name (different signatures, used

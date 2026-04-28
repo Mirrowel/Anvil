@@ -62,17 +62,10 @@ export interface ScoredChunk {
   source: 'vector' | 'bm25' | 'graph' | 'fused';
 }
 
-/**
- * Retrieval mode flag passed by callers (eval harness, CLI tooling). Lives on
- * the shared types module so consumers like `rag-evaluator` can reference it
- * without depending on the still-local `retriever.ts`.
- */
-export type RetrievalMode =
-  | 'vector'
-  | 'bm25'
-  | 'vector+bm25'
-  | 'vector+graph'
-  | 'vector+bm25+graph';
+// `RetrievalMode` is re-exported via retriever.ts now that retriever lives in
+// the shared package. Kept that as the canonical home (lives next to the class
+// that consumes it). The duplicate definition was a Phase 3 stop-gap so
+// rag-evaluator could move while retriever was still in cli/mcp.
 
 // Full retrieval result
 export interface RetrievalResult {
