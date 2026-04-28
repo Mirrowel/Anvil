@@ -3,9 +3,12 @@
 // Phase 1: types.
 // Phase 2: chunking, file-walking, AST parsing, BM25/graph primitives,
 //          structural hashing, workspace detection.
-// Deferred — `retriever.ts` and `graph-query.ts` stay in cli/mcp until their
-//   structural deps (`vector-store`, `reranker`, `project-graph-builder`) move
-//   in Phase 3 / Phase 5.
+// Phase 3: embedders, vector store, reranker (mild-drift bucket — mcp was
+//          canonical, both consumers gain the OpenAI-compatible / custom
+//          provider classes).
+// Deferred — `retriever.ts` and `graph-query.ts` stay in cli/mcp until
+//   `project-graph-builder.ts` moves in Phase 5. (`vector-store` + `reranker`
+//   landed here in Phase 3, removing two of the three blockers.)
 
 export * from './types.js';
 export * from './config.js';
@@ -19,6 +22,9 @@ export * from './query-router.js';
 export * from './semantic-edge-detector.js';
 export * from './structural-hasher.js';
 export * from './workspace-detector.js';
+export * from './embedder.js';
+export * from './vector-store.js';
+export * from './reranker.js';
 
 // `tree-sitter-parser` exports a `computeStructuralHash` that collides with
 // `structural-hasher`'s function of the same name (different signatures, used

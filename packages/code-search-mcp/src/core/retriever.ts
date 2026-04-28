@@ -9,9 +9,9 @@
  */
 
 import type { ScoredChunk, RetrievalResult, EmbeddingProvider } from '@anvil/knowledge-core';
-import type { VectorStore } from './vector-store.js';
+import type { VectorStore } from '@anvil/knowledge-core';
 import type { ProjectGraphBuilder } from './project-graph-builder.js';
-import type { Reranker } from './reranker.js';
+import type { Reranker } from '@anvil/knowledge-core';
 import type { QueryRouter } from '@anvil/knowledge-core';
 import { classifyQuery } from '@anvil/knowledge-core';
 

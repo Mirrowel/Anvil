@@ -7,8 +7,8 @@ import type { FileIndexEntry } from '@anvil/knowledge-core';
 import { buildAstGraph, generateGraphReport, incrementalGraphUpdate } from './ast-graph-builder.js';
 import { getAllChanges, getChangedFilesList, getDeletedFilesList } from '@anvil/knowledge-core';
 import type { GitDiff } from '@anvil/knowledge-core';
-import { createEmbeddingProvider } from './embedder.js';
-import { VectorStore } from './vector-store.js';
+import { createEmbeddingProvider } from '@anvil/knowledge-core';
+import { VectorStore } from '@anvil/knowledge-core';
 import { ProjectGraphBuilder } from './project-graph-builder.js';
 import { detectCrossRepoEdges } from '@anvil/knowledge-core';
 import { detectWorkspace } from '@anvil/knowledge-core';
@@ -677,7 +677,7 @@ export async function getRetriever(project: string): Promise<HybridRetriever> {
   // Create reranker (ollama by default, graceful fallback)
   let reranker = null;
   try {
-    const { createReranker } = await import('./reranker.js');
+    const { createReranker } = await import('@anvil/knowledge-core');
     reranker = createReranker(config.retrieval.reranker);
   } catch {
     // Reranker module unavailable — proceed without
