@@ -26,7 +26,11 @@ export const DEFAULT_CONFIG: KnowledgeConfig = {
   embedding: { provider: 'auto', dimensions: 1024 },
   chunking: { maxTokens: 500, contextEnrichment: 'structural' },
   retrieval: {
-    maxChunks: 20,
+    // Phase 6 — with the cross-encoder rerank default-on, the retriever can
+    // emit a much tighter top-K with equal precision: the reranker picks the
+    // best 8 from the larger fused+AST candidate pool (~15+ chunks). Override
+    // via project.yaml when callers want a wider window.
+    maxChunks: 8,
     maxTokens: 12000,
     hybridWeights: { vector: 0.5, bm25: 0.3, graph: 0.2 },
     reranker: 'ollama',
