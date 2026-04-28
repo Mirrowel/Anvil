@@ -25,6 +25,15 @@
     "dev": "tsc -b --watch",
     "test": "tsc -b && node --test dist/__tests__/*.test.js"
   },
+  "dependencies": {
+    "@lancedb/lancedb": "0.27.2",
+    "graphology": "0.26.0",
+    "graphology-communities-louvain": "2.0.2",
+    "graphology-metrics": "2.4.0",
+    "graphology-types": "0.24.8",
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.26.8"
+  },
   "devDependencies": {
     "@types/node": "^22.15.2"
   }
