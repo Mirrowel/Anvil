@@ -10,7 +10,7 @@
 
 import type { ScoredChunk, RetrievalResult, EmbeddingProvider } from '@anvil/knowledge-core';
 import type { VectorStore } from '@anvil/knowledge-core';
-import type { ProjectGraphBuilder } from './project-graph-builder.js';
+import type { ProjectGraphBuilder } from '@anvil/knowledge-core';
 import type { Reranker } from '@anvil/knowledge-core';
 import type { QueryRouter } from '@anvil/knowledge-core';
 import { classifyQuery } from '@anvil/knowledge-core';

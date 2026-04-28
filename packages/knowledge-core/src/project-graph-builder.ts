@@ -10,7 +10,7 @@
  */
 
 // Re-export legacy class for backward compat
-export { ProjectGraphBuilder } from './project-graph-builder-legacy.js';
+export { ProjectGraphBuilder } from './project-graph-builder-core.js';
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';

@@ -9,7 +9,7 @@ import { getAllChanges, getChangedFilesList, getDeletedFilesList } from '@anvil/
 import type { GitDiff } from '@anvil/knowledge-core';
 import { createEmbeddingProvider } from '@anvil/knowledge-core';
 import { VectorStore } from '@anvil/knowledge-core';
-import { ProjectGraphBuilder } from './project-graph-builder.js';
+import { ProjectGraphBuilder } from '@anvil/knowledge-core';
 import { detectCrossRepoEdges } from '@anvil/knowledge-core';
 import { detectWorkspace } from '@anvil/knowledge-core';
 import { HybridRetriever } from './retriever.js';

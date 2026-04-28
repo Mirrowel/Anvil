@@ -9,7 +9,7 @@
  */
 
 import type { CodeChunk, RetrievalResult, ScoredChunk } from '@anvil/knowledge-core';
-import { loadProjectGraph, formatProjectGraphForPrompt } from './project-graph-builder.js';
+import { loadProjectGraph, formatProjectGraphForPrompt } from '@anvil/knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Helpers

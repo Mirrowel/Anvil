@@ -1,4 +1,4 @@
-import type { ProjectGraphBuilder } from './project-graph-builder.js';
+import type { ProjectGraphBuilder } from '@anvil/knowledge-core';
 
 /** Find all nodes related to a query by matching labels/file paths */
 export function findRelatedNodes(

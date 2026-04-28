@@ -3,7 +3,7 @@
 
 export * from '@anvil/knowledge-core';
 export * from '@anvil/knowledge-core';
-export { ProjectGraphBuilder } from './project-graph-builder.js';
+export { ProjectGraphBuilder } from '@anvil/knowledge-core';
 export {
   assembleKnowledgeContext,
   assembleLayeredContext,
@@ -21,5 +21,5 @@ export {
   estimateProjectGraphCost,
   renderProjectSummary,
   formatProjectGraphForPrompt,
-} from './project-graph-builder.js';
+} from '@anvil/knowledge-core';
 export { walkDir, langFromExt, extractImports, extractNamedImports, SOURCE_EXTENSIONS, SKIP_DIRS } from '@anvil/knowledge-core';
