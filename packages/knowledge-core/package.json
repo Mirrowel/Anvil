@@ -22,7 +22,8 @@
   ],
   "scripts": {
     "build": "tsc -b",
-    "dev": "tsc -b --watch"
+    "dev": "tsc -b --watch",
+    "test": "tsc -b && node --test dist/__tests__/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^22.15.2"
