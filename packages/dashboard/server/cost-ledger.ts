@@ -110,6 +110,8 @@ class CostLedger {
       model: input.model,
       tokensIn: input.tokensIn,
       tokensOut: input.tokensOut,
+      cacheReadTokens: input.cacheReadTokens,
+      cacheWriteTokens: input.cacheWriteTokens,
       usd,
       at,
     };
@@ -138,6 +140,9 @@ class CostLedger {
       totalUsd: 0,
       totalTokensIn: 0,
       totalTokensOut: 0,
+      cacheHitRatio: 0,
+      totalCacheReadTokens: 0,
+      totalCacheWriteTokens: 0,
       byStage: { plan: 0, implement: 0, review: 0, test: 0, ship: 0, other: 0 },
       byModel: {},
       byAgent: {},
@@ -148,6 +153,8 @@ class CostLedger {
       summary.totalUsd += e.usd;
       summary.totalTokensIn += e.tokensIn;
       summary.totalTokensOut += e.tokensOut;
+      summary.totalCacheReadTokens += e.cacheReadTokens ?? 0;
+      summary.totalCacheWriteTokens += e.cacheWriteTokens ?? 0;
       summary.byStage[e.stage] = (summary.byStage[e.stage] ?? 0) + e.usd;
       summary.byModel[e.model] = (summary.byModel[e.model] ?? 0) + e.usd;
       const agentKey = e.agent || '(unspecified)';
@@ -155,6 +162,12 @@ class CostLedger {
     }
     // Round 6dp to stabilise float arithmetic across summaries.
     summary.totalUsd = Math.round(summary.totalUsd * 1_000_000) / 1_000_000;
+    // Phase 1 KPI: cache hit ratio = cacheRead / (tokensIn + cacheRead).
+    // Denominator excludes cache writes — those are paid full price.
+    const cacheDen = summary.totalTokensIn + summary.totalCacheReadTokens;
+    summary.cacheHitRatio = cacheDen > 0
+      ? Math.round((summary.totalCacheReadTokens / cacheDen) * 10_000) / 10_000
+      : 0;
     summary.startedAt = entries[0]?.at;
     summary.lastAt = entries[entries.length - 1]?.at;
     return summary;

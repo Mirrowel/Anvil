@@ -29,6 +29,14 @@ export interface CostEntry {
   tokensIn: number;
   /** Output tokens produced. */
   tokensOut: number;
+  /**
+   * Phase 1: cache-read tokens (provider returned a cached prefix). Optional
+   * because not every provider reports it (Gemini CLI, Ollama). Older NDJSON
+   * lines won't have it — readers must default to 0.
+   */
+  cacheReadTokens?: number;
+  /** Cache-write (cache_creation) tokens. Same optional semantics. */
+  cacheWriteTokens?: number;
   /** Computed USD cost (to 6 decimal places). */
   usd: number;
   /** ISO 8601 timestamp. */
@@ -41,6 +49,16 @@ export interface RunCostSummary {
   totalUsd: number;
   totalTokensIn: number;
   totalTokensOut: number;
+  /**
+   * Phase 1 KPI: sum(cacheReadTokens) / sum(tokensIn + cacheReadTokens).
+   * 0 when no cache events were recorded (legacy entries or providers that
+   * don't report cache reads).
+   */
+  cacheHitRatio: number;
+  /** Cumulative cache-read tokens across the run. */
+  totalCacheReadTokens: number;
+  /** Cumulative cache-write (creation) tokens across the run. */
+  totalCacheWriteTokens: number;
   byStage: Record<CostStage, number>;
   byModel: Record<string, number>;
   byAgent: Record<string, number>;

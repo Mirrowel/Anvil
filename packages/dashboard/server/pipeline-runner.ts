@@ -21,7 +21,7 @@ import type { ProjectInfo } from './project-loader.js';
 import { FeatureStore } from './feature-store.js';
 import { MemoryStore } from './memory-store.js';
 import { KnowledgeBaseManager } from './knowledge-base-manager.js';
-import { estimateTokens, getModelTokenLimit, budgetPromptContext } from './context-budget.js';
+import { budgetPromptContext } from './context-budget.js';
 import { resolveModelByTier } from './model-tier-resolver.js';
 import { parseTasks, bundleFiles, groupTasksForExecution } from './engineer-task-bundler.js';
 import type { ParsedTask } from './engineer-task-bundler.js';
@@ -431,6 +431,139 @@ export class PipelineRunner extends EventEmitter {
     } catch {
       return {};
     }
+  }
+
+  // ── Phase 1 cache-stability memoization ─────────────────────────────
+  //
+  // Stable inputs to the system prompt are computed ONCE per run so the
+  // resulting bytes are byte-identical across stages — that's what lets the
+  // provider's prompt cache fire (Anthropic explicit, OpenAI auto, Gemini
+  // auto). Reset is implicit: a new PipelineRunner instance gets fresh caches.
+  //
+  // Set ANVIL_PROMPT_ENVELOPE_DISABLED=1 to bypass these wins and fall back
+  // to per-stage recomputation (rollback hatch documented in the plan).
+  private envelopeDisabled = process.env.ANVIL_PROMPT_ENVELOPE_DISABLED === '1';
+  private cachedMemoryBlock: string | null = null;
+  private cachedProjectYamlSlice: Map<number, string> = new Map();
+  private cachedKbBlock: Map<string, string> = new Map();
+  private lockedKbTierResolved: 'full' | 'repo-focused' | 'index-only' | null = null;
+
+  /**
+   * KB tier locked for the run. Stages 1–7 share one tier so the KB
+   * subsection of `projectPrompt` is byte-stable across them — that's the
+   * dominant byte mass and the dominant cache buster today. Clarify and
+   * Ship keep their existing exceptions (clarify needs the big-picture
+   * index; ship doesn't need any KB).
+   */
+  private getLockedKbTier(stage: StageDefinition): 'full' | 'repo-focused' | 'index-only' | 'none' {
+    if (this.envelopeDisabled) return this.kbTierForStage(stage.persona, stage.name);
+    if (stage.name === 'ship') return 'none';
+    if (stage.name === 'clarify') return 'index-only';
+    if (this.lockedKbTierResolved !== null) return this.lockedKbTierResolved;
+    // First lockable call wins. 'repo-focused' is the conservative balance:
+    // big enough for analyst/architect needs, small enough that engineers
+    // don't drown. Bump to 'full' here only if the project is unusually
+    // multi-repo and benefits from cross-repo context every stage.
+    this.lockedKbTierResolved = 'repo-focused';
+    return this.lockedKbTierResolved;
+  }
+
+  /** Memoised memory block (project + user profile, capped at 4KB). */
+  private getStableMemoryBlock(): string {
+    if (this.envelopeDisabled) {
+      const projectMemory = this.memoryStore.formatForPrompt(this.config.project, 'memory');
+      const userProfile = this.memoryStore.formatForPrompt(this.config.project, 'user');
+      const raw = [projectMemory, userProfile].filter(Boolean).join('\n\n');
+      return raw.length > 4000 ? raw.slice(0, 4000) + '\n... [memory truncated]' : raw;
+    }
+    if (this.cachedMemoryBlock !== null) return this.cachedMemoryBlock;
+    const projectMemory = this.memoryStore.formatForPrompt(this.config.project, 'memory');
+    const userProfile = this.memoryStore.formatForPrompt(this.config.project, 'user');
+    const raw = [projectMemory, userProfile].filter(Boolean).join('\n\n');
+    this.cachedMemoryBlock = raw.length > 4000 ? raw.slice(0, 4000) + '\n... [memory truncated]' : raw;
+    return this.cachedMemoryBlock;
+  }
+
+  /** Memoised project YAML slice — same maxLen returns same bytes. */
+  private getStableProjectYamlSlice(maxLen: number): string {
+    if (this.envelopeDisabled) {
+      return this.projectYaml.slice(0, maxLen) || '(not available)';
+    }
+    const cached = this.cachedProjectYamlSlice.get(maxLen);
+    if (cached !== undefined) return cached;
+    const value = this.projectYaml.slice(0, maxLen) || '(not available)';
+    this.cachedProjectYamlSlice.set(maxLen, value);
+    return value;
+  }
+
+  /**
+   * Memoised KB block keyed by (tier, repoName). Replaces inline kbManager
+   * compositions that varied per stage even when inputs were identical.
+   */
+  private getStableKbBlock(
+    tier: 'full' | 'repo-focused' | 'index-only' | 'none',
+    repoName?: string,
+  ): { content: string; sourceLabel: 'none' | 'repo-focused' | 'index-only' | 'full-with-index' | 'full-blob' } {
+    if (tier === 'none') return { content: '', sourceLabel: 'none' };
+    const key = `${tier}|${repoName ?? '__project__'}`;
+
+    if (!this.envelopeDisabled) {
+      const cached = this.cachedKbBlock.get(key);
+      if (cached !== undefined) {
+        // Recover the source label from the cached body. Encoded as a
+        // leading sentinel comment we strip on retrieval.
+        const label = (cached.match(/^<!-- anvil:kb-src:(\w[\w-]*) -->/) ?? [])[1] as
+          | 'repo-focused' | 'index-only' | 'full-with-index' | 'full-blob' | undefined;
+        const content = cached.replace(/^<!-- anvil:kb-src:[\w-]+ -->\n?/, '');
+        return { content, sourceLabel: label ?? 'none' };
+      }
+    }
+
+    let content = '';
+    let sourceLabel: 'none' | 'repo-focused' | 'index-only' | 'full-with-index' | 'full-blob' = 'none';
+    const indexPrompt = this.kbManager?.getIndexForPrompt(this.config.project) || '';
+
+    if (repoName) {
+      const repoKB = this.kbManager?.getGraphReport(this.config.project, repoName) || '';
+      if (tier === 'repo-focused') {
+        content = repoKB ? `## YOUR TARGET REPO: ${repoName}\n\n${repoKB}` : '';
+        if (content) sourceLabel = 'repo-focused';
+      } else if (tier === 'index-only') {
+        content = indexPrompt;
+        if (content) sourceLabel = 'index-only';
+      } else if (indexPrompt) {
+        const queryContext = this.kbManager?.getQueryContextForPrompt(this.config.project, this.config.feature) || '';
+        content = `${indexPrompt}\n\n---\n\n## YOUR TARGET REPO: ${repoName}\n\n${repoKB || '(no repo-specific KB)'}\n\n---\n\n${queryContext}`;
+        sourceLabel = 'full-with-index';
+      } else {
+        const fullKB = this.kbManager?.getAllGraphReports(this.config.project) || '';
+        if (repoKB) {
+          content = `## YOUR TARGET REPO: ${repoName}\n\n${repoKB}`;
+          const otherRepos = fullKB.split('\n\n---\n\n').filter((s) => !s.includes(`## ${repoName}\n`));
+          if (otherRepos.length > 0) {
+            content += `\n\n---\n\n## OTHER REPOS (for cross-repo context)\n\n${otherRepos.join('\n\n---\n\n')}`;
+          }
+        } else {
+          content = fullKB;
+        }
+        if (content) sourceLabel = 'full-blob';
+      }
+    } else {
+      // Project-wide (non-repo) prompt path.
+      if (indexPrompt) {
+        const queryContext = this.kbManager?.getQueryContextForPrompt(this.config.project, this.config.feature) || '';
+        content = `${indexPrompt}\n\n---\n\n${queryContext}`;
+        sourceLabel = 'full-with-index';
+      } else {
+        content = this.kbManager?.getAllGraphReports(this.config.project) || '';
+        if (content) sourceLabel = 'full-blob';
+      }
+    }
+
+    if (!this.envelopeDisabled && content) {
+      this.cachedKbBlock.set(key, `<!-- anvil:kb-src:${sourceLabel} -->\n${content}`);
+    }
+    return { content, sourceLabel };
   }
 
   // For interactive clarify — resolves when user provides input
@@ -2429,31 +2562,22 @@ export class PipelineRunner extends EventEmitter {
         ? this.state.repoNames.join(', ')
         : '(single-repo or monorepo)';
 
-      // Load persistent memory for this project (P10: cap at 4KB, P11: drop placeholder)
-      const projectMemory = this.memoryStore.formatForPrompt(this.config.project, 'memory');
-      const userProfile = this.memoryStore.formatForPrompt(this.config.project, 'user');
-      const memoryRaw = [projectMemory, userProfile].filter(Boolean).join('\n\n');
-      const memoryBlock = memoryRaw.length > 4000 ? memoryRaw.slice(0, 4000) + '\n... [memory truncated]' : memoryRaw;
+      // Phase 1: stable subsections come from memoised getters so the bytes
+      // are byte-identical across stages of the same run (cache stability).
+      const memoryBlock = this.getStableMemoryBlock();
 
-      // Load knowledge graph — prefer compact index + query-matched context over full blob
-      let knowledgeGraph = '';
-      const indexPrompt = this.kbManager?.getIndexForPrompt(this.config.project) || '';
-      if (indexPrompt) {
-        // Use index + pre-query for focused context
-        const queryContext = this.kbManager?.getQueryContextForPrompt(this.config.project, this.config.feature) || '';
-        knowledgeGraph = `${indexPrompt}\n\n---\n\n${queryContext}`;
-        console.log(`[pipeline] buildProjectPrompt("${stage.name}"): KB index (${indexPrompt.length} chars) + query context (${queryContext.length} chars) = ${knowledgeGraph.length} total`);
-      } else {
-        // Fallback: full KB blob (no index built yet)
-        knowledgeGraph = this.kbManager?.getAllGraphReports(this.config.project) || '';
-        console.log(`[pipeline] buildProjectPrompt("${stage.name}"): KB fallback full blob = ${knowledgeGraph ? `${knowledgeGraph.length} chars` : 'EMPTY'}`);
-      }
+      // Project-wide KB (no repo target). Locked tier within a run; clarify
+      // and ship retain their special tiers per getLockedKbTier().
+      const tier = this.getLockedKbTier(stage);
+      const kb = this.getStableKbBlock(tier);
+      const knowledgeGraph = kb.content;
+      console.log(`[pipeline] buildProjectPrompt("${stage.name}"): KB tier=${tier}, source=${kb.sourceLabel}, ${knowledgeGraph.length} chars`);
 
       // Emit explicit integration events for the output panel
       if (knowledgeGraph) {
         this.emit('project-event', {
           source: 'knowledge-base',
-          message: `Knowledge Base loaded for "${this.config.project}" (${knowledgeGraph.length} chars, ${indexPrompt ? 'index + query-matched' : 'full blob'}) → injecting into ${stage.persona} agent`,
+          message: `Knowledge Base loaded for "${this.config.project}" (${knowledgeGraph.length} chars, source=${kb.sourceLabel}) → injecting into ${stage.persona} agent`,
         });
       } else {
         this.emit('project-event', {
@@ -2462,10 +2586,11 @@ export class PipelineRunner extends EventEmitter {
           level: 'warn',
         });
       }
+      const projectYamlSlice = this.getStableProjectYamlSlice(8000);
       if (this.projectYaml && this.projectYaml.length > 10) {
         this.emit('project-event', {
           source: 'project-context',
-          message: `Project config loaded for "${this.config.project}" (${this.projectYaml.slice(0, 8000).length} chars) → injecting into ${stage.persona} agent`,
+          message: `Project config loaded for "${this.config.project}" (${projectYamlSlice.length} chars) → injecting into ${stage.persona} agent`,
         });
       }
 
@@ -2476,7 +2601,7 @@ export class PipelineRunner extends EventEmitter {
         knowledgeBase: knowledgeGraph,
         priorArtifacts: '', // Prior artifacts are in the user prompt, not project prompt
         memory: memoryBlock,
-        projectYaml: this.projectYaml.slice(0, 8000) || '(not available)',
+        projectYaml: projectYamlSlice,
         overrides: '', // Will be added after injection
         modelId: this.config.model,
       });
@@ -2559,48 +2684,13 @@ A pre-computed Knowledge Base has been injected into the "Codebase Knowledge Gra
       : `Repository: ${repoName}`;
 
     if (personaPrompt) {
-      // Memories: cap to ~4KB total and drop the empty-state placeholder (P10/P11).
-      const projectMemory = this.memoryStore.formatForPrompt(this.config.project, 'memory');
-      const userProfile = this.memoryStore.formatForPrompt(this.config.project, 'user');
-      const memoryRaw = [projectMemory, userProfile].filter(Boolean).join('\n\n');
-      const memoryBlock = memoryRaw.length > 4000 ? memoryRaw.slice(0, 4000) + '\n... [memory truncated]' : memoryRaw;
-
-      // Load KB. Tier picked by (persona, stage) — see kbTierForStage (P2).
-      // Coding personas get only the focused per-repo KB to keep the system
-      // prompt small and cache-stable; design-stage personas get the full
-      // index + per-repo + cross-repo + query context for breadth.
-      const tier = this.kbTierForStage(stage.persona, stage.name);
-      let knowledgeGraph = '';
-      let kbSourceLabel: 'none' | 'repo-focused' | 'index-only' | 'full-with-index' | 'full-blob' = 'none';
-      if (tier !== 'none') {
-        const indexPrompt = this.kbManager?.getIndexForPrompt(this.config.project) || '';
-        const repoKB = this.kbManager?.getGraphReport(this.config.project, repoName) || '';
-        if (tier === 'repo-focused') {
-          knowledgeGraph = repoKB ? `## YOUR TARGET REPO: ${repoName}\n\n${repoKB}` : '';
-          if (knowledgeGraph) kbSourceLabel = 'repo-focused';
-        } else if (tier === 'index-only') {
-          knowledgeGraph = indexPrompt;
-          if (knowledgeGraph) kbSourceLabel = 'index-only';
-        } else if (indexPrompt) {
-          // tier === 'full'
-          const queryContext = this.kbManager?.getQueryContextForPrompt(this.config.project, this.config.feature) || '';
-          knowledgeGraph = `${indexPrompt}\n\n---\n\n## YOUR TARGET REPO: ${repoName}\n\n${repoKB || '(no repo-specific KB)'}\n\n---\n\n${queryContext}`;
-          kbSourceLabel = 'full-with-index';
-        } else {
-          // Fallback: full blob approach when no index exists
-          const fullKB = this.kbManager?.getAllGraphReports(this.config.project) || '';
-          if (repoKB) {
-            knowledgeGraph += `## YOUR TARGET REPO: ${repoName}\n\n${repoKB}`;
-            const otherRepos = fullKB.split('\n\n---\n\n').filter((s) => !s.includes(`## ${repoName}\n`));
-            if (otherRepos.length > 0) {
-              knowledgeGraph += `\n\n---\n\n## OTHER REPOS (for cross-repo context)\n\n${otherRepos.join('\n\n---\n\n')}`;
-            }
-          } else {
-            knowledgeGraph = fullKB;
-          }
-          if (knowledgeGraph) kbSourceLabel = 'full-blob';
-        }
-      }
+      // Phase 1 cache stability: stable subsections come from memoised
+      // getters so byte-identical content is sent across stages of a run.
+      const memoryBlock = this.getStableMemoryBlock();
+      const tier = this.getLockedKbTier(stage);
+      const kb = this.getStableKbBlock(tier, repoName);
+      const knowledgeGraph = kb.content;
+      const kbSourceLabel = kb.sourceLabel;
 
       // Emit explicit integration events for per-repo prompt
       if (knowledgeGraph) {
@@ -2626,7 +2716,7 @@ A pre-computed Knowledge Base has been injected into the "Codebase Knowledge Gra
       // model has to read every spawn. The persona prompt already documents
       // what each block contains; an empty value is self-evident.
       const injected = injectTemplateVars(personaPrompt, {
-        project_yaml: this.projectYaml.slice(0, 4000),
+        project_yaml: this.getStableProjectYamlSlice(4000),
         task: `Feature: "${this.config.feature}"\nProject: ${this.config.project}\nTarget repository: ${repoName}`,
         conventions: '',
         memories: memoryBlock,

@@ -75,6 +75,10 @@ export interface AgentCostHook {
     model: string;
     tokensIn: number;
     tokensOut: number;
+    /** Phase 1: cache-read tokens reported by the provider (0 when unknown). */
+    cacheReadTokens: number;
+    /** Phase 1: cache-write/creation tokens reported by the provider. */
+    cacheWriteTokens: number;
     usd: number;
   }): void | Promise<void>;
 }
@@ -360,6 +364,8 @@ export class AgentManager extends EventEmitter {
             model: agent.model,
             tokensIn: cost.inputTokens,
             tokensOut: cost.outputTokens,
+            cacheReadTokens: cost.cacheReadTokens,
+            cacheWriteTokens: cost.cacheWriteTokens,
             usd: cost.totalUsd,
           });
         } catch (err) {

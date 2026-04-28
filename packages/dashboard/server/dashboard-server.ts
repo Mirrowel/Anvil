@@ -4821,6 +4821,8 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
             runId: info.runId, project: info.project, stage,
             agent: info.persona, model: info.model,
             tokensIn: info.tokensIn, tokensOut: info.tokensOut,
+            cacheReadTokens: info.cacheReadTokens,
+            cacheWriteTokens: info.cacheWriteTokens,
           });
         } catch { /* ledger best-effort */ }
         try {
