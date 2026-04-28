@@ -43,6 +43,7 @@
     "test": "tsc -b && node --test dist/knowledge/__tests__/*.test.js"
   },
   "dependencies": {
+    "@anvil/knowledge-core": "*",
     "commander": "^13.1.0",
     "graphology": "0.26.0",
     "graphology-communities-louvain": "2.0.2",

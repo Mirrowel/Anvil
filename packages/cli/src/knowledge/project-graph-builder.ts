@@ -24,7 +24,7 @@ import type {
   ProjectRelationship,
   KeyFlow,
   CommunityLabel,
-} from './types.js';
+} from '@anvil/knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Constants

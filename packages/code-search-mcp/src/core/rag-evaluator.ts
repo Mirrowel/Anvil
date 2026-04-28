@@ -6,7 +6,7 @@
  * stream-json output parsed for result + cost.
  */
 
-import type { ScoredChunk } from './types';
+import type { ScoredChunk } from '@anvil/knowledge-core';
 import type { RetrievalMode } from './retriever.js';
 import { runClaude, type ClaudeResult } from './claude-runner.js';
 

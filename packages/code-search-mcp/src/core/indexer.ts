@@ -15,7 +15,7 @@ import { detectWorkspace } from './workspace-detector.js';
 import { HybridRetriever } from './retriever.js';
 import { loadKnowledgeConfig, getKnowledgeBasePath, DEFAULT_CONFIG } from './config.js';
 import type { KnowledgeConfig } from './config.js';
-import type { CodeChunk, IndexStats, WorkspaceMap } from './types';
+import type { CodeChunk, IndexStats, WorkspaceMap } from '@anvil/knowledge-core';
 import { profileProject, loadAllProfiles } from './repo-profiler.js';
 import { inferServiceMesh } from './service-mesh-inferrer.js';
 import { computeStructuralHashes, deduplicateByStructure } from './structural-hasher.js';

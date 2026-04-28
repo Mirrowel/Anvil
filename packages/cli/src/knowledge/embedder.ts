@@ -2,7 +2,7 @@ import { execSync as execSyncCmd } from 'node:child_process';
 import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from 'node:fs';
 import { join as pathJoin } from 'node:path';
 import { homedir as osHomedir } from 'node:os';
-import type { EmbeddingProvider } from './types.js';
+import type { EmbeddingProvider } from '@anvil/knowledge-core';
 
 // ---------------------------------------------------------------------------
 // 1. Codestral (Mistral) Embedder

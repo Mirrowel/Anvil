@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
-import type { CrossRepoEdge, WorkspaceMap } from './types';
+import type { CrossRepoEdge, WorkspaceMap } from '@anvil/knowledge-core';
 import { detectWorkspace } from './workspace-detector.js';
 
 /** Recursively find files matching a predicate, skipping common non-source dirs */

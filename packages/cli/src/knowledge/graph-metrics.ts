@@ -1,4 +1,4 @@
-import type { GraphifyOutput, GraphifyNode, GraphifyEdge } from './types.js';
+import type { GraphifyOutput, GraphifyNode, GraphifyEdge } from '@anvil/knowledge-core';
 
 export interface GraphQualityReport {
   nodeCount: number;

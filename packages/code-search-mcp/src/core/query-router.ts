@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import type { EmbeddingProvider, RepoProfile } from './types';
+import type { EmbeddingProvider, RepoProfile } from '@anvil/knowledge-core';
 import { getKnowledgeBasePath } from './config.js';
 
 // ---------------------------------------------------------------------------

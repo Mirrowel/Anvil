@@ -1,7 +1,7 @@
 // Feature Factory CLI — knowledge exports
 // Only project-level graph and context assembly. Code search moved to @anvil-dev/code-search-mcp.
 
-export * from './types.js';
+export * from '@anvil/knowledge-core';
 export * from './config.js';
 export { ProjectGraphBuilder } from './project-graph-builder.js';
 export {

@@ -13,7 +13,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { GraphifyNode, GraphifyEdge, GraphifyOutput } from './types.js';
+import type { GraphifyNode, GraphifyEdge, GraphifyOutput } from '@anvil/knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Types

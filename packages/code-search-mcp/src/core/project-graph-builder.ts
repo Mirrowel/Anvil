@@ -1,5 +1,5 @@
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-import type { CrossRepoEdge, GraphifyOutput } from './types';
+import type { CrossRepoEdge, GraphifyOutput } from '@anvil/knowledge-core';
 
 // Graphology + Louvain — loaded dynamically to handle ESM/CJS compat
 let _Graph: any;

@@ -1,4 +1,4 @@
-import type { CodeChunk, ScoredChunk } from './types';
+import type { CodeChunk, ScoredChunk } from '@anvil/knowledge-core';
 
 export class VectorStore {
   private db: any; // lancedb.Connection

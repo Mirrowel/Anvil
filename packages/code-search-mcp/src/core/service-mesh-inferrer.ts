@@ -10,7 +10,7 @@
  */
 
 import { runClaude } from './claude-runner.js';
-import type { RepoProfile, ServiceEndpoint, CrossRepoEdge } from './types';
+import type { RepoProfile, ServiceEndpoint, CrossRepoEdge } from '@anvil/knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Helpers

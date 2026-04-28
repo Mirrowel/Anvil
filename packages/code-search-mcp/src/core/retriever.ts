@@ -8,7 +8,7 @@
  * Phase 4: Cross-encoder reranking via Ollama (or Cohere/Voyage)
  */
 
-import type { ScoredChunk, RetrievalResult, EmbeddingProvider } from './types';
+import type { ScoredChunk, RetrievalResult, EmbeddingProvider } from '@anvil/knowledge-core';
 import type { VectorStore } from './vector-store.js';
 import type { ProjectGraphBuilder } from './project-graph-builder.js';
 import type { Reranker } from './reranker.js';

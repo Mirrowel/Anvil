@@ -8,7 +8,7 @@
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import type { WorkspacePackage, WorkspaceMap } from './types';
+import type { WorkspacePackage, WorkspaceMap } from '@anvil/knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Manifest descriptor — one per ecosystem/file type

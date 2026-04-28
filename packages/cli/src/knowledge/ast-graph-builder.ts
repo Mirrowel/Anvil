@@ -21,7 +21,7 @@
 import { readFileSync } from 'node:fs';
 import { relative, extname, dirname, resolve, basename, join } from 'node:path';
 import { walkDir, langFromExt, extractImports, extractNamedImports } from './file-walker.js';
-import type { GraphifyNode, GraphifyEdge, GraphifyOutput, WorkspaceMap } from './types.js';
+import type { GraphifyNode, GraphifyEdge, GraphifyOutput, WorkspaceMap } from '@anvil/knowledge-core';
 import { initTreeSitter, parseFile as tsParseFile, supportedLanguages } from './tree-sitter-parser.js';
 import type { FileParseResult, TreeSitterEntity } from './tree-sitter-parser.js';
 
@@ -237,8 +237,8 @@ function extractPackageName(importPath: string): string {
   return slashIdx > 0 ? importPath.slice(0, slashIdx) : importPath;
 }
 
-function findOwningPackage(relPath: string, workspaceMap: WorkspaceMap): import('./types.js').WorkspacePackage | null {
-  let best: import('./types.js').WorkspacePackage | null = null;
+function findOwningPackage(relPath: string, workspaceMap: WorkspaceMap): import('@anvil/knowledge-core').WorkspacePackage | null {
+  let best: import('@anvil/knowledge-core').WorkspacePackage | null = null;
   let bestLen = -1;
   for (const pkg of workspaceMap.packages) {
     if (pkg.relativePath === '.') continue;
