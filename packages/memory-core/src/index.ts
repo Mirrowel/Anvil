@@ -35,4 +35,5 @@ export * from './sleeptime/index.js';
 export * from './reflect/index.js';
 export * from './episode/index.js';
 export * from './inspector/index.js';
+export * from './migrate/index.js';
 export { VERSION } from './version.js';
