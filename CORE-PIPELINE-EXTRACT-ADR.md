@@ -2,7 +2,7 @@
 
 > Companion to [`CORE-PIPELINE-EXTRACT-PLAN.md`](./CORE-PIPELINE-EXTRACT-PLAN.md). Locks decisions P1–P10, persistence-site inventory, public API migration table, schema shapes, and per-phase commit log.
 >
-> **Status:** draft — locked at Phase 0.
+> **Status:** Shipped through Phase 9. core-pipeline 40/40 tests pass; cli + agent-core (152/152) + memory-core (119/119) + knowledge-core (62/62) all green. Legacy if-tree retained as fallback per plan §8.5; ANVIL_USE_NEW_PIPELINE=1 routes the cli to the v2 walker.
 > **Depends on:** `@anvil/agent-core` (shipped), `@anvil/memory-core` (shipped — hooks subscribe to pipeline events to feed the proposal queue + reflection).
 
 ---
