@@ -15,7 +15,7 @@ import type {
   ProviderCapabilities,
   ProviderName,
 } from './types.js';
-import { emitContent } from './stream-format.js';
+import { emitContent } from '@anvil/agent-core';
 import { GeminiCliAdapter } from './gemini-cli-adapter.js';
 
 // ---------------------------------------------------------------------------

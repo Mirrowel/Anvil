@@ -15,7 +15,7 @@ import type {
   ProviderCapabilities,
   ProviderName,
 } from './types.js';
-import type { ResultMessage } from './stream-format.js';
+import type { ResultMessage } from '@anvil/agent-core';
 
 // ---------------------------------------------------------------------------
 // Pricing table — [inputPer1M, outputPer1M]

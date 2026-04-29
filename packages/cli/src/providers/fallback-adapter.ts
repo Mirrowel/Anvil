@@ -14,7 +14,7 @@ import type {
   ProviderCapabilities,
   ProviderName,
 } from './types.js';
-import { emitContent } from './stream-format.js';
+import { emitContent } from '@anvil/agent-core';
 
 // ---------------------------------------------------------------------------
 // Helpers

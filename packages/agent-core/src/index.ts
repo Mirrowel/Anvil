@@ -16,4 +16,5 @@
  */
 
 export * from './types.js';
+export * from './stream-format.js';
 export { VERSION } from './version.js';
