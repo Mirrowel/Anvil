@@ -722,6 +722,16 @@ export async function runPipeline(
   config: OrchestratorConfig,
   deps?: PipelineDependencies,
 ): Promise<OrchestratorResult> {
+  // Phase 8: dispatch to the new core-pipeline-backed runner when the
+  // feature flag is set. The legacy if-tree below remains as fallback
+  // until v2 reaches feature parity (interactive clarify, approval
+  // gates, resume-from-stage, parallel-per-project).
+  const { isNewPipelineEnabled } = await import('./steps/index.js');
+  if (isNewPipelineEnabled()) {
+    const { runPipelineV2 } = await import('./orchestrator-v2.js');
+    return runPipelineV2(config, deps);
+  }
+
   // 1. Generate run ID and feature slug
   const runId = generateRunId();
   const featureSlug = config.featureSlug || generateFeatureSlug(config.feature);
