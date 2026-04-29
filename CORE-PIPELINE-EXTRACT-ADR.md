@@ -151,7 +151,7 @@ Plan ships in 10 phases (0 through 9). Updated incrementally as phases land.
 
 | Phase | Status | Commit | Deviations |
 |---|---|---|---|
-| 0 — Audit + decisions | pending | — | — |
+| 0 — Audit + decisions | shipped | 65d5b25 | orchestrator.ts is 1,672 LOC (plan said 2,089); ratio unchanged. Stage I/O snapshot added as §4a. |
 | 1 — Scaffold `@anvil/core-pipeline` | pending | — | — |
 | 2 — EventBus wiring | pending | — | — |
 | 3 — Hook subscribers (audit, dashboard, learners, cost) | pending | — | — |
