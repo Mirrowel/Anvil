@@ -26,8 +26,15 @@ export interface Step<I, O> {
   retryPolicy?: StepRetryPolicy;
   /** Optional sub-steps; runs as a sequence within this step's frame. */
   subSteps?: Step<unknown, unknown>[];
-  /** Per-project parallelism hint. Default 'serial'. */
-  parallelism?: 'serial' | 'per-project';
+  /**
+   * Parallelism hint:
+   *   - 'serial'      (default) — single run() call, ctx.repoName undefined.
+   *   - 'per-project' — registry hint only; the walker does not fan out yet.
+   *   - 'per-repo'    — walker fans run() across `ctx.repoPaths`, populating
+   *                     `ctx.repoName` per call. Output is a
+   *                     `Record<string, O>` keyed by repo name. Phase 4a.
+   */
+  parallelism?: 'serial' | 'per-project' | 'per-repo';
 }
 
 export interface StepContext<I> {
@@ -37,6 +44,12 @@ export interface StepContext<I> {
   workspaceDir: string;
   /** Per-project paths (preserved from today's StageContext). */
   repoPaths?: Record<string, string>;
+  /**
+   * Populated only when the walker is running a `parallelism: 'per-repo'`
+   * step's per-repo fanout. Identifies the current repo iteration so the
+   * step's `run()` can scope its work. Undefined for serial steps.
+   */
+  repoName?: string;
   /** Strongly-typed input — output of the previous step. */
   input: I;
   /** Pipeline-wide read-only artifacts ledger; downstream steps can read prior outputs by id. */

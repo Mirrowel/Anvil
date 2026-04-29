@@ -27,6 +27,17 @@
  *   - `retryOn` is consulted before each retry; if it returns false the
  *     error is treated as terminal.
  *   - `step:retried` fires before each retry attempt.
+ *
+ * Per-repo fanout (Phase 4a of the dashboard consolidation):
+ *   - When a Step declares `parallelism: 'per-repo'`, the walker runs
+ *     `step.run()` once per key in `deps.repoPaths` in parallel. Each
+ *     invocation receives a `StepContext` with `repoName` populated.
+ *   - The step's output is aggregated into `Record<string, O>` keyed by
+ *     repo name. Mono-repo projects (no `repoPaths` keys) fall back to a
+ *     single serial run with `repoName` undefined.
+ *   - Per-repo + sub-steps is not yet supported and throws.
+ *   - Promise.all semantics: if any repo's run() rejects, the step fails.
+ *     Steps that need per-repo failure tolerance handle it inside `run()`.
  */
 
 import { InMemoryArtifactStore } from './artifacts.js';
@@ -162,6 +173,9 @@ export class Pipeline {
     step: Step<unknown, unknown>,
     input: unknown,
   ): Promise<unknown> {
+    if (step.parallelism === 'per-repo') {
+      return this.runPerRepoFanout(step, input);
+    }
     if (step.subSteps && step.subSteps.length > 0) {
       let subInput: unknown = input;
       for (const sub of step.subSteps) {
@@ -172,6 +186,47 @@ export class Pipeline {
       return this.runStepWithRetry(step, subInput);
     }
     return this.runStepWithRetry(step, input);
+  }
+
+  /**
+   * Per-repo fanout — Phase 4a of the dashboard consolidation.
+   *
+   * For a step declared `parallelism: 'per-repo'`, runs `step.run()` once per
+   * key in `deps.repoPaths` in parallel (Promise.all — first failure rejects
+   * the step). Each invocation gets its own `StepContext` with `repoName`
+   * populated so the step can scope its work.
+   *
+   * Output: a `Record<string, O>` keyed by repo name. Downstream serial steps
+   * receive this map as their input; downstream per-repo steps read their own
+   * slice via `ctx.input[ctx.repoName]`.
+   *
+   * If `repoPaths` is empty or undefined, falls back to a single serial run
+   * with `ctx.repoName` undefined — keeps mono-repo projects working.
+   *
+   * Sub-steps under a per-repo parent are not yet supported (Phase 4a). They
+   * throw rather than silently running with mismatched semantics.
+   */
+  private async runPerRepoFanout(
+    step: Step<unknown, unknown>,
+    input: unknown,
+  ): Promise<Record<string, unknown> | unknown> {
+    if (step.subSteps && step.subSteps.length > 0) {
+      throw new Error(
+        `Step "${step.id}" declares parallelism: 'per-repo' AND has sub-steps; `
+          + 'this combination is not supported.',
+      );
+    }
+    const repoPaths = this.deps.repoPaths;
+    const repoNames = repoPaths ? Object.keys(repoPaths) : [];
+    if (repoNames.length === 0) {
+      return this.runStepWithRetry(step, input);
+    }
+
+    const promises = repoNames.map((repoName) =>
+      this.runStepWithRetry(step, input, { repoName }).then((out) => [repoName, out] as const),
+    );
+    const settled = await Promise.all(promises);
+    return Object.fromEntries(settled);
   }
 
   private async runSubStep(
@@ -214,9 +269,10 @@ export class Pipeline {
   private async runStepWithRetry(
     step: Step<unknown, unknown>,
     input: unknown,
+    fanoutOpts?: { repoName?: string },
   ): Promise<unknown> {
     const policy = step.retryPolicy;
-    const ctx = this.buildContext(step, input);
+    const ctx = this.buildContext(step, input, fanoutOpts);
     if (!policy || policy.attempts <= 0) {
       return step.run(ctx);
     }
@@ -251,7 +307,11 @@ export class Pipeline {
     throw lastErr;
   }
 
-  private buildContext<I>(step: Step<I, unknown>, input: unknown): StepContext<I> {
+  private buildContext<I>(
+    step: Step<I, unknown>,
+    input: unknown,
+    fanoutOpts?: { repoName?: string },
+  ): StepContext<I> {
     const { runId, workspaceDir, repoPaths, memory, llm, bus, signal } = this.deps;
     const sig = signal ?? new AbortController().signal;
     const artifactsView = this.artifacts;
@@ -269,6 +329,7 @@ export class Pipeline {
       runId,
       workspaceDir,
       repoPaths,
+      repoName: fanoutOpts?.repoName,
       input: input as I,
       artifacts: artifactsView,
       emit,
