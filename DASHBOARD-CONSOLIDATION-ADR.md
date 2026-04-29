@@ -134,7 +134,7 @@ Plan ships in 7 phases (0 through 6). Updated incrementally as phases land.
 
 | Phase | Status | Commit | Deviations |
 |---|---|---|---|
-| 0 — Audit + decisions | pending | — | — |
+| 0 — Audit + decisions | landed | `6d4fa89` | — |
 | 1 — agent-core adapter consolidation | pending | — | — |
 | 2 — core-pipeline EventBus subscription | pending | — | — |
 | 3 — Cost-ledger ↔ spend-ledger bridge | pending | — | — |
