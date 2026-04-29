@@ -35,3 +35,20 @@ export type {
   TaskBundlerStepOptions,
   TaskBundleOutput,
 } from './task-bundler.step.js';
+export {
+  createClarifyStep,
+  parseClarifyQuestions,
+  formatQAPairs,
+  CLARIFY_QA_ARTIFACT_ID,
+} from './clarify.step.js';
+export type {
+  ClarifyStepOptions,
+  ClarifyResult,
+  ClarifyQAPair,
+  ClarifyEvent,
+} from './clarify.step.js';
+export { attachCostBudgetHook } from './cost-budget.hook.js';
+export type {
+  CostBudgetHookOptions,
+  CostBudgetHookHandle,
+} from './cost-budget.hook.js';
