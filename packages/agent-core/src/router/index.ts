@@ -38,3 +38,10 @@ export {
 export type { SpendRow, SpendQueryOpts } from './spend-ledger.js';
 export { CircuitBreaker, DEFAULT_CIRCUIT_BREAKER } from './circuit-breaker.js';
 export type { CircuitBreakerDeps, CircuitState } from './circuit-breaker.js';
+export {
+  loadRouterConfig,
+  findRouterConfigPath,
+  defaultRouterConfig,
+  mergeWithDefaults,
+} from './config-loader.js';
+export type { LoadRouterConfigOptions } from './config-loader.js';
