@@ -7,9 +7,7 @@
   },
   "references": [
     { "path": "../agent-core" },
-    { "path": "../knowledge-core" },
-    { "path": "../memory-core" },
-    { "path": "../core-pipeline" }
+    { "path": "../memory-core" }
   ],
   "include": ["src/**/*.ts"]
 }
