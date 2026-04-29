@@ -33,4 +33,5 @@ export * from './scrubber/index.js';
 export * from './retrieve/index.js';
 export * from './sleeptime/index.js';
 export * from './reflect/index.js';
+export * from './episode/index.js';
 export { VERSION } from './version.js';
