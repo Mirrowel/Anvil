@@ -1,10 +1,32 @@
 /**
- * Fallback (chain) ModelAdapter.
+ * Fallback (chain) ModelAdapter — @deprecated.
  *
- * A meta-adapter that wraps an ordered list of adapters and tries them in
- * sequence. Each adapter is attempted up to `maxRetries + 1` times before the
- * next adapter in the chain is tried. If every adapter is exhausted the
- * combined error is thrown.
+ * @deprecated Use `LlmRouter` from `./router/index.js` instead. The router
+ * supplies per-error retry policies, rate limits, spend ledger, circuit
+ * breakers, and OTel routing spans; this `ModelAdapter`-shaped chain
+ * predates all of that.
+ *
+ * Kept as a no-op shim for backwards compat: it preserves the original
+ * behavior (single `maxRetries` knob + fixed delay) while flagging the
+ * call site for migration. New callers should construct an `LlmRouter`
+ * with a `RouteConfig` instead. Migration recipe:
+ *
+ *   // before:
+ *   const adapter = new FallbackAdapter([sonnet, haiku], 2, 1000);
+ *
+ *   // after:
+ *   const router = new LlmRouter({
+ *     config: {
+ *       routes: [{
+ *         tag: 'planner',
+ *         primary: 'claude-sonnet-4-6',
+ *         fallbacks: [{ model: 'claude-haiku-4-5-20251001' }],
+ *       }],
+ *       retryPolicy: DEFAULT_RETRY_POLICY,
+ *     },
+ *     resolver: { resolve: (modelId) => registry.resolveFromModelId(modelId) },
+ *   });
+ *   const out = await router.invoke({ tag: 'planner', prompt: '...' });
  */
 
 import type {
@@ -28,11 +50,13 @@ function delay(ms: number): Promise<void> {
 // Adapter
 // ---------------------------------------------------------------------------
 
+/** @deprecated Use {@link LlmRouter} instead. */
 export class FallbackAdapter implements ModelAdapter {
   private chain: ModelAdapter[];
   private maxRetries: number;
   private retryDelayMs: number;
 
+  /** @deprecated Use {@link LlmRouter} instead. */
   constructor(
     chain: ModelAdapter[],
     maxRetries: number = 1,
