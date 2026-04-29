@@ -8,7 +8,7 @@
  * (consumed by Phases 8 + 10).
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS memory (
   prov_created_at TEXT NOT NULL,
   prov_proposed_at TEXT,
   prov_ratified_at TEXT,
+  prov_invalidated_run_id TEXT,
+  prov_invalidated_reason TEXT,
   embedding_id TEXT
 );
 

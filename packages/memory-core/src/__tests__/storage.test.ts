@@ -254,34 +254,39 @@ describe('SqliteHotIndex — bi-temporal', () => {
 // ── pruneExpired ─────────────────────────────────────────────────────────
 
 describe('SqliteHotIndex — pruneExpired', () => {
-  it('drops only entries past expiresAt with non-negative ttl_days', () => {
+  it('soft-deletes entries past expiresAt (Phase 5: invalid_at instead of DELETE)', () => {
     const dir = tempDir();
     try {
       const sqlite = new SqliteHotIndex(join(dir, 'm.sqlite'));
-      sqlite.upsert(
-        fakeMemory({
-          content: 'expired',
-          ttlDays: 1,
-          expiresAt: '2026-01-01T00:00:00.000Z',
-        }),
-      );
-      sqlite.upsert(
-        fakeMemory({
-          content: 'never expires',
-          ttlDays: -1,
-          expiresAt: '2026-01-01T00:00:00.000Z',
-        }),
-      );
-      sqlite.upsert(
-        fakeMemory({
-          content: 'still fresh',
-          ttlDays: 30,
-          expiresAt: '2099-01-01T00:00:00.000Z',
-        }),
-      );
-      const removed = sqlite.pruneExpired('2026-04-29T00:00:00.000Z');
-      assert.equal(removed, 1);
-      assert.equal(sqlite.count(), 2);
+      const expired = fakeMemory({
+        content: 'expired',
+        ttlDays: 1,
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+      const neverExpires = fakeMemory({
+        content: 'never expires',
+        ttlDays: -1,
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+      const fresh = fakeMemory({
+        content: 'still fresh',
+        ttlDays: 30,
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+      sqlite.upsert(expired);
+      sqlite.upsert(neverExpires);
+      sqlite.upsert(fresh);
+
+      const invalidated = sqlite.pruneExpired('2026-04-29T00:00:00.000Z');
+      assert.equal(invalidated, 1);
+      // All three rows still exist — Phase 5 never hard-deletes here.
+      assert.equal(sqlite.count(), 3);
+
+      const expiredRow = sqlite.findById(expired.id)!;
+      assert.ok(expiredRow.bitemporal.invalidAt, 'expired row should be invalidated');
+      assert.equal(expiredRow.provenance.invalidatedBy?.reason, 'ttl-expired');
+      assert.equal(sqlite.findById(fresh.id)!.bitemporal.invalidAt, undefined);
+      assert.equal(sqlite.findById(neverExpires.id)!.bitemporal.invalidAt, undefined);
       sqlite.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

@@ -47,10 +47,33 @@ export class SqliteHotIndex {
 
   private applySchema(): void {
     this.db.exec(SCHEMA_SQL);
+    this.applyAdditiveMigrations();
     const stmt = this.db.prepare(
       `INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (?, ?)`,
     );
     stmt.run(SCHEMA_VERSION, new Date().toISOString());
+  }
+
+  /**
+   * Idempotent column adds for SQLite files that predate the current
+   * SCHEMA_VERSION. CREATE TABLE IF NOT EXISTS won't add new columns to an
+   * existing table, so we PRAGMA-detect missing columns and ALTER on demand.
+   */
+  private applyAdditiveMigrations(): void {
+    const memoryCols = this.tableColumns('memory');
+    if (!memoryCols.has('prov_invalidated_run_id')) {
+      this.db.exec(`ALTER TABLE memory ADD COLUMN prov_invalidated_run_id TEXT`);
+    }
+    if (!memoryCols.has('prov_invalidated_reason')) {
+      this.db.exec(`ALTER TABLE memory ADD COLUMN prov_invalidated_reason TEXT`);
+    }
+  }
+
+  private tableColumns(table: string): Set<string> {
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+      name: string;
+    }>;
+    return new Set(rows.map((r) => r.name));
   }
 
   /** Idempotent insert / replace by id. Updates FTS + tag tables in lock-step. */
@@ -125,18 +148,78 @@ export class SqliteHotIndex {
     return rows.map((r) => this.rowToMemory(r));
   }
 
-  /** Drops memories whose `expires_at` is past `now`. `ttl_days = -1` means never expires. */
+  /**
+   * Soft-prune: TTL-expired rows get `invalid_at = now()` rather than being
+   * deleted (Phase 5 — plan §5.2.3). Rows already invalidated are skipped.
+   * Returns the number of rows newly invalidated. Use
+   * `hardDeleteInvalidatedOlderThan` to physically remove old invalidated
+   * rows after a retention window.
+   */
   pruneExpired(now: string = new Date().toISOString()): number {
     const tx = this.db.transaction(() => {
       const expired = this.db
-        .prepare(`SELECT id FROM memory WHERE ttl_days >= 0 AND expires_at < ?`)
+        .prepare(
+          `SELECT id FROM memory
+           WHERE ttl_days >= 0
+             AND expires_at < ?
+             AND invalid_at IS NULL`,
+        )
         .all(now) as Array<{ id: string }>;
       for (const { id } of expired) {
+        this.db
+          .prepare(
+            `UPDATE memory
+             SET invalid_at = ?,
+                 prov_invalidated_reason = COALESCE(prov_invalidated_reason, 'ttl-expired')
+             WHERE id = ?`,
+          )
+          .run(now, id);
+      }
+      return expired.length;
+    });
+    return tx();
+  }
+
+  /**
+   * Bi-temporal soft-delete (Phase 5 — plan §5.2.2). Sets `invalid_at` and
+   * stamps `prov_invalidated_*`. Idempotent: re-invalidating a row updates
+   * the reason but never moves `invalid_at` backwards. Returns true if a
+   * row was touched.
+   */
+  invalidate(
+    id: string,
+    invalidAt: string,
+    reason: string,
+    runId?: string,
+  ): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE memory
+         SET invalid_at = COALESCE(invalid_at, ?),
+             prov_invalidated_reason = ?,
+             prov_invalidated_run_id = ?
+         WHERE id = ?`,
+      )
+      .run(invalidAt, reason, runId ?? null, id);
+    return result.changes > 0;
+  }
+
+  /**
+   * Hard-delete invalidated rows whose `invalid_at` is older than the
+   * given cutoff. Used by retention policy after the soft-delete window.
+   * Returns the number of rows deleted.
+   */
+  hardDeleteInvalidatedOlderThan(cutoff: string): number {
+    const tx = this.db.transaction(() => {
+      const stale = this.db
+        .prepare(`SELECT id FROM memory WHERE invalid_at IS NOT NULL AND invalid_at < ?`)
+        .all(cutoff) as Array<{ id: string }>;
+      for (const { id } of stale) {
         this.db.prepare(`DELETE FROM memory WHERE id = ?`).run(id);
         this.db.prepare(`DELETE FROM memory_tag WHERE memory_id = ?`).run(id);
         this.db.prepare(`DELETE FROM memory_fts WHERE id = ?`).run(id);
       }
-      return expired.length;
+      return stale.length;
     });
     return tx();
   }
@@ -164,6 +247,7 @@ export class SqliteHotIndex {
         code_file, code_structural_hash, code_last_seen_sha, code_last_verified_at,
         prov_run_id, prov_message_id, prov_file, prov_commit,
         prov_created_by, prov_created_at, prov_proposed_at, prov_ratified_at,
+        prov_invalidated_run_id, prov_invalidated_reason,
         embedding_id
       ) VALUES (
         @id,
@@ -175,6 +259,7 @@ export class SqliteHotIndex {
         @code_file, @code_structural_hash, @code_last_seen_sha, @code_last_verified_at,
         @prov_run_id, @prov_message_id, @prov_file, @prov_commit,
         @prov_created_by, @prov_created_at, @prov_proposed_at, @prov_ratified_at,
+        @prov_invalidated_run_id, @prov_invalidated_reason,
         @embedding_id
       )
       ON CONFLICT(id) DO UPDATE SET
@@ -206,6 +291,8 @@ export class SqliteHotIndex {
         prov_created_at = excluded.prov_created_at,
         prov_proposed_at = excluded.prov_proposed_at,
         prov_ratified_at = excluded.prov_ratified_at,
+        prov_invalidated_run_id = excluded.prov_invalidated_run_id,
+        prov_invalidated_reason = excluded.prov_invalidated_reason,
         embedding_id = excluded.embedding_id
     `);
     stmt.run(this.memoryToRow(m));
@@ -263,6 +350,8 @@ export class SqliteHotIndex {
       prov_created_at: m.provenance.createdAt,
       prov_proposed_at: m.provenance.proposedAt ?? null,
       prov_ratified_at: m.provenance.ratifiedAt ?? null,
+      prov_invalidated_run_id: m.provenance.invalidatedBy?.runId ?? null,
+      prov_invalidated_reason: m.provenance.invalidatedBy?.reason ?? null,
       embedding_id: m.embedding ? `inline:${m.id}` : null,
     };
   }
@@ -293,6 +382,13 @@ export class SqliteHotIndex {
       proposedAt: (row.prov_proposed_at as string | null) ?? undefined,
       ratifiedAt: (row.prov_ratified_at as string | null) ?? undefined,
     };
+    const invalidatedReason = (row.prov_invalidated_reason as string | null) ?? null;
+    if (invalidatedReason) {
+      provenance.invalidatedBy = {
+        runId: (row.prov_invalidated_run_id as string | null) ?? undefined,
+        reason: invalidatedReason,
+      };
+    }
     let codeBinding: CodeFactBinding | undefined;
     if (row.code_file && row.code_structural_hash && row.code_last_seen_sha) {
       codeBinding = {

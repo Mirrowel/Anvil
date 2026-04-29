@@ -33,6 +33,12 @@ export interface NamespaceQueryOpts {
   validAt?: string;
   /** Max rows to return. */
   limit?: number;
+  /**
+   * If true, includes rows whose `invalid_at` is set (Phase 5).
+   * Defaults to `false` — invalidated rows are hidden from normal queries.
+   * Use for audit / admin paths only.
+   */
+  includeInvalidated?: boolean;
 }
 
 export interface OpenHybridOptions {
@@ -103,13 +109,60 @@ export class HybridMemoryStore {
   }
 
   /**
-   * Phase 4 namespace-scoped read. Picks one of the underlying
-   * SqliteHotIndex queries based on which `opts` field is set, applying
-   * the namespace filter to every candidate path. Precedence: `text` →
-   * `tags` → `validAt` → "all in namespace".
+   * Bi-temporal soft-delete (Phase 5). Marks the row invalid in SQLite
+   * and appends a tombstone record into the JSONL canonical so the
+   * audit trail survives auto-rebuilds. Returns true if the row existed.
+   */
+  invalidate(id: string, invalidAt: string, reason: string, runId?: string): boolean {
+    const before = this.sqlite.findById(id);
+    if (!before) return false;
+    const ok = this.sqlite.invalidate(id, invalidAt, reason, runId);
+    if (!ok) return false;
+    const after = this.sqlite.findById(id);
+    if (after) this.jsonl.append(after);
+    return true;
+  }
+
+  /**
+   * Retention enforcement: physically drop rows whose `invalid_at` is
+   * older than `cutoff`. Use after the soft-delete window (default 365d
+   * per ADR §M8). Note: does not rewrite the JSONL — those entries
+   * remain in the audit trail.
+   */
+  hardDeleteInvalidatedOlderThan(cutoff: string): number {
+    return this.sqlite.hardDeleteInvalidatedOlderThan(cutoff);
+  }
+
+  /**
+   * Phase 4 namespace-scoped read with Phase 5 bi-temporal defaults. Picks
+   * one of the underlying SqliteHotIndex queries based on which `opts`
+   * field is set, applying the namespace filter to every candidate path.
+   * Precedence: `text` → `tags` → `validAt` → "all in namespace".
+   *
+   * Bi-temporal default: rows whose `invalid_at` is set are filtered out
+   * unless `opts.includeInvalidated === true` or an explicit `validAt`
+   * (which already encodes the historical slice) is supplied.
    */
   query(ns: MemoryNamespace, opts: NamespaceQueryOpts = {}): Memory[] {
     const search: SearchOpts = { limit: opts.limit, namespace: ns };
+    return this.applyBitemporalFilter(this.runQuery(opts, search, ns), opts);
+  }
+
+  /**
+   * Cross-namespace admin query — same shape as `query` but skips the
+   * namespace filter. Use for migrations, dashboards, and `--scope=*`
+   * cli flags.
+   */
+  queryAll(opts: NamespaceQueryOpts = {}): Memory[] {
+    const search: SearchOpts = { limit: opts.limit };
+    return this.applyBitemporalFilter(this.runQuery(opts, search, undefined), opts);
+  }
+
+  private runQuery(
+    opts: NamespaceQueryOpts,
+    search: SearchOpts,
+    ns: MemoryNamespace | undefined,
+  ): Memory[] {
     if (opts.text && opts.text.trim().length > 0) {
       return this.sqlite.searchByText(opts.text, search);
     }
@@ -122,23 +175,9 @@ export class HybridMemoryStore {
     return this.allInNamespace(ns, opts.limit);
   }
 
-  /**
-   * Cross-namespace admin query — same shape as `query` but skips the
-   * namespace filter. Use for migrations, dashboards, and `--scope=*`
-   * cli flags.
-   */
-  queryAll(opts: NamespaceQueryOpts = {}): Memory[] {
-    const search: SearchOpts = { limit: opts.limit };
-    if (opts.text && opts.text.trim().length > 0) {
-      return this.sqlite.searchByText(opts.text, search);
-    }
-    if (opts.tags && opts.tags.length > 0) {
-      return this.sqlite.searchByTags(opts.tags, search);
-    }
-    if (opts.validAt) {
-      return this.sqlite.validAtTime(opts.validAt, search);
-    }
-    return this.allInNamespace(undefined, opts.limit);
+  private applyBitemporalFilter(rows: Memory[], opts: NamespaceQueryOpts): Memory[] {
+    if (opts.includeInvalidated || opts.validAt) return rows;
+    return rows.filter((m) => !m.bitemporal.invalidAt);
   }
 
   private allInNamespace(ns: MemoryNamespace | undefined, limit?: number): Memory[] {

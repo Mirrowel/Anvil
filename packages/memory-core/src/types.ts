@@ -64,6 +64,11 @@ export interface MemoryProvenance {
   proposedAt?: string;
   /** When sleeptime promoted the proposal to durable storage (M9). */
   ratifiedAt?: string;
+  /** Set by `invalidate()` when a memory is soft-deleted (Phase 5). */
+  invalidatedBy?: {
+    runId?: string;
+    reason: string;
+  };
 }
 
 // ── Code-fact drift detection (M7) ───────────────────────────────────────
@@ -104,6 +109,28 @@ export interface MemoryLink {
   relation: string;
   weight: number;
 }
+
+/**
+ * Well-known relation names for `MemoryLink.relation`. Constants live here
+ * so callers (auto-learners, sleeptime, dashboard) don't drift on
+ * spelling. New relation strings are allowed; these are just the ones the
+ * built-in pipeline uses.
+ */
+export const MEMORY_LINK_RELATIONS = {
+  /**
+   * Phase 5: when a new fact contradicts an old one, the new memory's
+   * `links` includes `{targetId: <old>, relation: SUPERSEDES, weight: 1}`.
+   * Auto-learners + sleeptime then call `invalidate(<old>, ...)` rather
+   * than overwriting.
+   */
+  SUPERSEDES: 'supersedes',
+  /** Phase 8: graph linking — references a code fact. */
+  REFERENCES: 'references',
+  /** Phase 8: graph linking — derived from another memory. */
+  DERIVED_FROM: 'derived-from',
+} as const;
+export type MemoryLinkRelation =
+  (typeof MEMORY_LINK_RELATIONS)[keyof typeof MEMORY_LINK_RELATIONS];
 
 export interface Memory<T = string> {
   /** ULID — sortable lexicographically by creation time (ADR §7.10). */
