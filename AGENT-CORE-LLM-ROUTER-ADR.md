@@ -2,7 +2,7 @@
 
 > Companion to [`AGENT-CORE-LLM-ROUTER-PLAN.md`](./AGENT-CORE-LLM-ROUTER-PLAN.md). Locks decisions R1–R10, persistence-site inventory, public API migration table, schema shapes, and per-phase commit log.
 >
-> **Status:** draft — locked at Phase 0.
+> **Status:** Shipped. All 11 phases (0–10) merged. agent-core 152/152 tests pass; cli + memory-core builds green.
 > **Depends on:** `@anvil/agent-core` (shipped), `@anvil/memory-core` (shipped — SQLite primitives reused for spend ledger).
 
 ---

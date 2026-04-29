@@ -152,6 +152,173 @@ The pricing table is a vendored snapshot of [LiteLLM's
 (Apache-2.0). Anvil's short canonical names (`sonnet`/`opus`/`haiku`) bridge
 to specific LiteLLM keys via `MODEL_ALIASES` inside `cost.ts`.
 
+## LLM Router
+
+The `LlmRouter` is the single entry point for cross-provider routing,
+fallbacks, retries, rate limits, spend tracking, and circuit breaking.
+Lives in `src/router/`; ships as part of this package.
+
+### Architecture
+
+```
+caller — invokeWithSpans(router, opts)
+        │
+        ├── span: anvil.router.invoke           ← parent span (R10)
+        │
+        ├── LlmRouter.invoke
+        │     ├── budget pre-flight (SpendLedger)
+        │     ├── for each chain step:
+        │     │     ├── circuit-breaker check
+        │     │     ├── span: anvil.router.attempt
+        │     │     ├── runWithRetry (per-error policy)
+        │     │     │     └── rateLimiter.acquire(provider, tokens)
+        │     │     │     └── adapter.invoke(...)         ← gen_ai.invoke
+        │     │     ├── ledger.record(...)
+        │     │     └── circuit-breaker recordSuccess/Failure
+        │     └── return RouteOutcome
+        │
+        └── span end (status OK or ERROR + recordException)
+```
+
+### Quick start
+
+```ts
+import {
+  LlmRouter,
+  loadRouterConfig,
+  invokeWithSpans,
+} from '@anvil/agent-core';
+
+const config = loadRouterConfig();              // YAML or compiled defaults
+const router = new LlmRouter({
+  config,
+  resolver: { resolve: (modelId) => yourLanguageModelFor(modelId) },
+});
+const outcome = await invokeWithSpans(router, {
+  tag: 'planner',
+  prompt: 'plan a refactor',
+  runId: 'run-abc',
+});
+console.log(outcome.result?.text, outcome.totalCostUsd);
+```
+
+### YAML config (`~/.anvil/llm-router.yaml`)
+
+Optional — the router runs on compiled-in defaults if no file is
+present. Search order: `ANVIL_ROUTER_CONFIG` env → `<workspace>/.anvil/
+llm-router.yaml` → `~/.anvil/llm-router.yaml` → defaults.
+
+```yaml
+routes:
+  - tag: planner
+    primary: claude-sonnet-4-6
+    fallbacks:
+      - { model: claude-haiku-4-5-20251001, on: [rate_limit, server_5xx] }
+      - { model: gpt-4o,                    on: [server_5xx, timeout] }
+  - tag: reviewer
+    primary: claude-sonnet-4-6
+    fallbacks:
+      - { model: gpt-4o, on: [rate_limit, server_5xx, timeout] }
+
+retryPolicy:
+  rate_limit: { attempts: 5, backoff: exponential, baseMs: 1000, maxMs: 30000 }
+  timeout:    { attempts: 3, backoff: linear,      baseMs: 500,  maxMs: 5000  }
+  server_5xx: { attempts: 4, backoff: exponential, baseMs: 200,  maxMs: 5000  }
+  auth:            { attempts: 0, backoff: constant, baseMs: 0 }
+  content_policy:  { attempts: 0, backoff: constant, baseMs: 0 }
+  invalid_request: { attempts: 0, backoff: constant, baseMs: 0 }
+  unknown:         { attempts: 1, backoff: constant, baseMs: 1000 }
+
+rateLimit:
+  claude:  { rpm: 50,  tpm: 80000 }
+  openai:  { rpm: 500, tpm: 30000 }
+
+budgets:
+  dailyUsd: 50.0
+  perRunUsd: 5.0
+  perTagUsd:
+    code-gen: 1.5
+  onBreach: fail            # fail | downgrade | queue
+
+circuitBreaker:
+  failureThreshold: 5
+  cooldownMs: 30000
+  halfOpenAttempts: 1
+
+maxFallbackCostUsd: 1.0
+onRateLimit: wait           # wait | fail | fallback
+```
+
+`${env:VAR}` is expanded inside string values against `process.env`.
+
+### Spend ledger
+
+Every terminal outcome (success or failure) is one row in
+`~/.anvil/router/spend.sqlite` (override via `ANVIL_HOME`). Failed calls
+get `cost_usd = 0` so retry-driven amplification is auditable.
+
+```ts
+import { SpendLedger } from '@anvil/agent-core';
+
+const ledger = new SpendLedger();              // default path
+console.log(ledger.totalUsd({ runId: 'run-abc' }));
+console.log(ledger.groupBy('tag'));
+console.log(ledger.recent(20));
+```
+
+### Error classification
+
+The router maps every adapter exception to one of seven `ErrorClass`
+values, used to look up the retry policy + decide whether a fallback
+step is eligible:
+
+| Class | When | Default retry |
+|---|---|---|
+| `rate_limit` | HTTP 429 | 5 attempts, exponential 1s → 30s |
+| `timeout` | abort/etimedout/socket-hang-up | 3 attempts, linear 500ms |
+| `server_5xx` | HTTP 5xx | 4 attempts, exponential 200ms → 5s |
+| `auth` | HTTP 401/403 | 0 (terminal) |
+| `content_policy` | safety-filter signals | 0 (terminal — never fallback to a different provider) |
+| `invalid_request` | HTTP 400 (non-content-policy) | 0 (terminal) |
+| `unknown` | anything else | 1 attempt, constant 1s |
+
+Per-provider classifier overrides plug in via `LlmRouterDeps.errorClassifiers`.
+
+### OTel attributes
+
+Parent span `anvil.router.invoke`:
+- `anvil.router.{tag, run_id, project, user, attempt_count,
+   total_cost_usd, budget_remaining_usd}`
+
+Child spans `anvil.router.attempt` (one per `RouteAttempt`):
+- `anvil.router.{provider, model, attempt, fallback_index,
+   error_class, cost_usd}`
+
+Existing `gen_ai.invoke` spans from `instrumentModelAdapter` become
+grandchildren — preserves the OTel GenAI hierarchy.
+
+### Migration from FallbackAdapter
+
+`FallbackAdapter` is `@deprecated` but kept functional. New callers:
+
+```ts
+// before
+const adapter = new FallbackAdapter([sonnet, haiku], 2, 1000);
+
+// after
+const router = new LlmRouter({
+  config: {
+    routes: [{
+      tag: 'planner',
+      primary: 'claude-sonnet-4-6',
+      fallbacks: [{ model: 'claude-haiku-4-5-20251001' }],
+    }],
+    retryPolicy: DEFAULT_RETRY_POLICY,
+  },
+  resolver: { resolve: (modelId) => /* your LanguageModel */ },
+});
+```
+
 ## Environment variables
 
 `ANVIL_*` is canonical. Legacy aliases are honoured with a one-time deprecation
@@ -167,6 +334,8 @@ warning to stderr.
 | `ANVIL_CLAUDE_BIN` | `ANVIL_AGENT_CMD`, `FF_AGENT_CMD`, `CODE_SEARCH_CLAUDE_BIN`, `CLAUDE_BIN` | path to claude CLI |
 | `ANVIL_GEMINI_BIN` | `GEMINI_BIN`, `GEMINI_CLI_BIN` | path to gemini CLI |
 | `ANVIL_ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` | direct Anthropic key |
+| `ANVIL_ROUTER_CONFIG` | — | absolute path to `llm-router.yaml` (highest priority) |
+| `ANVIL_HOME` | — | overrides `~/.anvil/` for both spend ledger + router config |
 
 Resolution order in every case: `ANVIL_*` → legacy alias(es) → default.
 
