@@ -131,7 +131,7 @@ Plan ships in 11 phases (0 through 10). Updated incrementally as phases land.
 
 | Phase | Status | Commit | Deviations |
 |---|---|---|---|
-| 0 — Audit + decisions | pending | — | — |
+| 0 — Audit + decisions | shipped | 75960d5 | — |
 | 1 — Scaffold router/ + types | pending | — | — |
 | 2 — Per-error retry engine | pending | — | — |
 | 3 — Rate limiter | pending | — | — |
