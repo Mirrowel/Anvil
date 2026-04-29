@@ -154,7 +154,7 @@ Plan ships in 10 phases (0 through 9). Updated incrementally as phases land.
 | 0 — Audit + decisions | shipped | 65d5b25 | orchestrator.ts is 1,672 LOC (plan said 2,089); ratio unchanged. Stage I/O snapshot added as §4a. |
 | 1 — Scaffold `@anvil/core-pipeline` | shipped | a7a31dc | 4 scaffold tests; sister gates green (agent-core 152/152, memory-core 119/119, cli build) |
 | 2 — EventBus wiring | shipped | 33017ee | 7 EventBus tests (priority + listener-throw isolation + fire-and-forget); cli state-machine `getBus()` accessor added; legacy `onEvent` API preserved unchanged |
-| 3 — Hook subscribers (audit, dashboard, learners, cost) | pending | — | — |
+| 3 — Hook subscribers (audit, dashboard, learners, cost) | shipped | 5475dcb | 9 new tests (5 Pipeline walker + 4 hooks); Pipeline.run walker with full lifecycle + abort; ANVIL_USE_NEW_PIPELINE flag deferred to Phase 4 (no stages registered yet) |
 | 4 — First stage as `Step` | pending | — | — |
 | 5 — Port remaining 7 stages | pending | — | — |
 | 6 — Custom-stage compat | pending | — | — |
