@@ -21,6 +21,7 @@ import { RouterError, classifyError } from './errors.js';
 import { DEFAULT_RETRY_POLICY, runWithRetry } from './retry.js';
 import { TokenBucketRateLimiter } from './rate-limiter.js';
 import { SpendLedger } from './spend-ledger.js';
+import { CircuitBreaker } from './circuit-breaker.js';
 
 export interface AdapterResolver {
   /** Resolve a model id to an executor. */
@@ -45,6 +46,11 @@ export interface LlmRouterDeps {
    * `~/.anvil/router/spend.sqlite` file.
    */
   ledger?: SpendLedger;
+  /**
+   * Per-provider circuit breaker. If omitted, the router constructs one
+   * from `config.circuitBreaker` (or defaults).
+   */
+  circuitBreaker?: CircuitBreaker;
   /** Generate ledger row ids — injectable for deterministic tests. */
   newId?: () => string;
   /** Time source for deterministic tests. */
@@ -61,6 +67,7 @@ export class LlmRouter {
   protected readonly config: RouterConfig;
   protected readonly resolver?: AdapterResolver;
   protected readonly rateLimiter: TokenBucketRateLimiter;
+  protected readonly circuitBreaker: CircuitBreaker;
   protected readonly ledger?: SpendLedger;
   protected readonly newId: () => string;
   protected readonly now: () => number;
@@ -86,6 +93,12 @@ export class LlmRouter {
           ? (ms: number) => deps.sleep!(ms)
           : undefined,
         onRateLimit: deps.config.onRateLimit,
+      });
+    this.circuitBreaker =
+      deps.circuitBreaker ??
+      new CircuitBreaker({
+        config: deps.config.circuitBreaker,
+        now: deps.now,
       });
   }
 
@@ -119,17 +132,28 @@ export class LlmRouter {
     let totalCostUsd = 0;
     let lastError: Error | undefined;
     let lastErrorClass: ErrorClass | undefined;
+    let priorAttempted = false; // true once any step has actually run
     const maxCost = this.config.maxFallbackCostUsd ?? 1.0;
 
     for (let step = 0; step < chain.length; step += 1) {
       const link = chain[step];
       const adapter = this.resolver.resolve(link.model);
 
-      // Skip steps whose `on` gate doesn't match the previous error.
-      // Step 0 (primary) is always tried.
-      if (step > 0 && !this.shouldTryFallback(link, lastErrorClass)) {
+      // Skip non-primary steps whose `on` gate doesn't match the previous
+      // error. If no step has yet attempted (e.g., circuit breaker skipped
+      // every prior step) we let the fallback run regardless of its gate —
+      // there's no prior error to filter against.
+      if (step > 0 && priorAttempted && !this.shouldTryFallback(link, lastErrorClass)) {
         continue;
       }
+
+      // Circuit-breaker — if open, skip this provider entirely (no adapter
+      // call, no rate-limit consumption, no ledger row).
+      if (!this.circuitBreaker.canAttempt(adapter.provider)) {
+        continue;
+      }
+      this.circuitBreaker.reserveAttempt(adapter.provider);
+      priorAttempted = true;
 
       const llmOpts = this.buildInvokeOpts(opts, link.model);
       const estimatedTokens = this.estimateTokens(llmOpts);
@@ -173,6 +197,7 @@ export class LlmRouter {
         if (last) last.costUsd = retryRun.result.costUsd;
         totalCostUsd += retryRun.result.costUsd;
         this.recordSpend(opts, adapter.provider, link.model, stepAttempts, retryRun.result, undefined);
+        this.circuitBreaker.recordSuccess(adapter.provider);
         const outcome: RouteOutcome = {
           result: retryRun.result,
           attempts: allAttempts,
@@ -189,8 +214,14 @@ export class LlmRouter {
       // Record this step's spend regardless (even though no cost was billed).
       this.recordSpend(opts, adapter.provider, link.model, stepAttempts, undefined, lastError);
 
-      // Terminal classes never fall back to a different model (security default).
-      if (isTerminal(lastErrorClass)) {
+      // Update circuit breaker: only retryable provider faults count
+      // toward tripping the breaker — auth/content_policy/invalid_request
+      // are caller / data issues, not provider health, so they don't open
+      // the circuit.
+      if (!isTerminal(lastErrorClass)) {
+        this.circuitBreaker.recordFailure(adapter.provider);
+      } else {
+        // Terminal classes leave breaker state untouched and short-circuit.
         break;
       }
 

@@ -36,3 +36,5 @@ export {
   defaultSpendLedgerPath,
 } from './spend-ledger.js';
 export type { SpendRow, SpendQueryOpts } from './spend-ledger.js';
+export { CircuitBreaker, DEFAULT_CIRCUIT_BREAKER } from './circuit-breaker.js';
+export type { CircuitBreakerDeps, CircuitState } from './circuit-breaker.js';
