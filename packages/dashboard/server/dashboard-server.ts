@@ -2119,9 +2119,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
         // Run async — broadcast progress
         (async () => {
           try {
-            const { buildProjectGraph } = await import(
-              '@esankhan3/anvil-cli/knowledge/project-graph-builder' as string
-            );
+            const { buildProjectGraph } = await import('@anvil/knowledge-core');
 
             // Find factory.yaml path
             const { homedir: getHome } = await import('node:os');
@@ -2171,9 +2169,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
       case 'get-project-graph-status': {
         const project = msg.project ?? '';
         try {
-          const { getProjectGraphStatus, loadProjectSummary } = await import(
-            '@esankhan3/anvil-cli/knowledge/project-graph-builder' as string
-          );
+          const { getProjectGraphStatus, loadProjectSummary } = await import('@anvil/knowledge-core');
           const status = getProjectGraphStatus(project);
           const summary = status.exists ? loadProjectSummary(project) : null;
           ws.send(JSON.stringify({
