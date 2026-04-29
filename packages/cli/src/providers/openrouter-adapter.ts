@@ -6,7 +6,7 @@
  * unified API.
  */
 
-import type { ProviderName } from './types.js';
+import type { ProviderName } from '@anvil/agent-core';
 import { OpenAIAdapter } from './openai-adapter.js';
 
 // ---------------------------------------------------------------------------

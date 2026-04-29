@@ -14,7 +14,7 @@ import type {
   ModelAdapterResult,
   ProviderCapabilities,
   ProviderName,
-} from './types.js';
+} from '@anvil/agent-core';
 import { emitContent } from '@anvil/agent-core';
 import { GeminiCliAdapter } from './gemini-cli-adapter.js';
 

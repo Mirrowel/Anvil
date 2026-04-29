@@ -10,7 +10,7 @@ import type {
   ModelAdapterConfig,
   ModelAdapterResult,
   ProviderCapabilities,
-} from './types.js';
+} from '@anvil/agent-core';
 import { emitContent, emitResult } from '@anvil/agent-core';
 
 function getBaseUrl(): string {

@@ -14,7 +14,7 @@ import type {
   ModelAdapterResult,
   ProviderCapabilities,
   ProviderName,
-} from './types.js';
+} from '@anvil/agent-core';
 import type { ResultMessage } from '@anvil/agent-core';
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { AgentRunner } from '../pipeline/stages/types.js';
 import { ProviderRegistry } from '../providers/registry.js';
-import type { ProviderName } from '../providers/types.js';
+import type { ProviderName } from '@anvil/agent-core';
 import { error, success, info, warn } from '../logger.js';
 import { estimatePipelineCost, formatCostEstimate } from '../pipeline/cost-estimator.js';
 import { getModelForStage } from '../pipeline/model-router.js';

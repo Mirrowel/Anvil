@@ -7,7 +7,7 @@
  * of all registered providers.
  */
 
-import type { ModelAdapter, ProviderName, ProviderTier } from './types.js';
+import type { ModelAdapter, ProviderName, ProviderTier } from '@anvil/agent-core';
 
 const AGENTIC_STAGES = new Set(['build', 'validate', 'ship']);
 

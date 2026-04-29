@@ -10,7 +10,7 @@ import type {
   ModelAdapterConfig,
   ModelAdapterResult,
   ProviderCapabilities,
-} from './types.js';
+} from '@anvil/agent-core';
 import { emitContent, emitThinking, emitResult } from '@anvil/agent-core';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';

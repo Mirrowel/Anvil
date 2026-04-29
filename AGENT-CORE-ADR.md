@@ -199,6 +199,9 @@ Per D4 default decision in Phase 4a: *keep what each adapter currently uses*. SD
 
 ## 9. What actually shipped (filled in at Phase 10)
 
-_To be populated incrementally as each phase completes. Format per phase: commit hash, deviations from plan, plan corrections to back-port._
+_Populated incrementally as each phase completes. Format per phase: commit hash, deviations from plan, plan corrections to back-port._
 
-- **Phase 0** — _2026-04-29_ — ADR written. No code change.
+- **Phase 0** — `6c49f8c` — ADR written + 4 sibling plan files committed. No code change.
+- **Phase 1** — `e6ffe39` — Scaffold landed. Deviation: `@anvil/agent-core` dep skipped on `packages/dashboard/package.json` per D16 (dashboard's parallel provider stack is out of scope; adding the dep without a consumer is lockfile churn). Plan §1.2 over-specified.
+- **Phase 2** — `b3cd41f` — `stream-format.ts` hoisted. Followed plan exactly. 7 adapter imports rewritten from `'./stream-format.js'` to `'@anvil/agent-core'`; cli providers barrel keeps backwards-compat re-exports.
+- **Phase 3** — _types-only scope_ — Deviation: plan §3 bundled `types.ts + registry.ts`, but `registry.ts`'s `registerDefaults()` uses `require('./X-adapter.js')` for each of the 7 adapters; moving registry to agent-core before the adapters move would silently break `ProviderRegistry.getInstance().get('claude')` (the try/catch swallows the missing-module error). Phase 3 ships `types.ts` only; `registry.ts` rolls into Phase 4 alongside the adapters. Plan §3 should be back-ported to reflect this ordering.
