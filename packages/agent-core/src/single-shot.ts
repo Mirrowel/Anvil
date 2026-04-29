@@ -31,6 +31,8 @@
  */
 
 import { spawn, execSync, ChildProcess } from 'node:child_process';
+import { withInvokeSpan } from './telemetry/instrument.js';
+import { GenAi } from './telemetry/attributes.js';
 
 // ── Env-var aliasing ───────────────────────────────────────────────────────
 
@@ -188,10 +190,19 @@ export async function runClaude(
   }
   const model = opts?.model ?? config.llmModel;
   const timeoutMs = opts?.timeoutMs ?? 600_000;
-  if (config.llmMode === 'api') {
-    return runViaApi(prompt, systemPrompt, model, timeoutMs, config);
-  }
-  return runViaCli(prompt, systemPrompt, model, timeoutMs, config.claudeBin);
+  return withInvokeSpan(
+    { provider: 'claude', model, prompt, systemPrompt },
+    () => config.llmMode === 'api'
+      ? runViaApi(prompt, systemPrompt, model, timeoutMs, config)
+      : runViaCli(prompt, systemPrompt, model, timeoutMs, config.claudeBin),
+    (r) => ({
+      [GenAi.USAGE_INPUT_TOKENS]: r.inputTokens,
+      [GenAi.USAGE_OUTPUT_TOKENS]: r.outputTokens,
+      [GenAi.USAGE_COST_USD]: r.costUsd,
+      'anvil.duration_ms': r.durationMs,
+      'anvil.transport': config.llmMode,
+    }),
+  );
 }
 
 /** Run Gemini CLI — CLI mode only (no Gemini API integration today). */
@@ -212,6 +223,25 @@ export async function runGemini(
     ? `${systemPrompt}\n\n---\n\n${prompt}`
     : prompt;
 
+  return withInvokeSpan(
+    { provider: 'gemini-cli', model, prompt, systemPrompt },
+    () => runGeminiInner(config, model, combinedPrompt, timeoutMs),
+    (r) => ({
+      [GenAi.USAGE_INPUT_TOKENS]: r.inputTokens,
+      [GenAi.USAGE_OUTPUT_TOKENS]: r.outputTokens,
+      [GenAi.USAGE_COST_USD]: r.costUsd,
+      'anvil.duration_ms': r.durationMs,
+      'anvil.transport': 'cli',
+    }),
+  );
+}
+
+function runGeminiInner(
+  config: LlmConfig,
+  model: string,
+  combinedPrompt: string,
+  timeoutMs: number,
+): Promise<ClaudeResult> {
   return new Promise((resolve, reject) => {
     const args = ['-p', combinedPrompt, '--model', model];
     const start = Date.now();

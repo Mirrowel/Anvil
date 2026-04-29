@@ -15,6 +15,7 @@ import { OpenRouterAdapter } from './openrouter-adapter.js';
 import { OllamaAdapter } from './ollama-adapter.js';
 import { GeminiCliAdapter } from './gemini-cli-adapter.js';
 import { AdkAdapter } from './adk-adapter.js';
+import { instrumentModelAdapter } from './telemetry/instrument.js';
 
 const AGENTIC_STAGES = new Set(['build', 'validate', 'ship']);
 
@@ -47,7 +48,10 @@ export class ProviderRegistry {
   /* ------------------------------------------------------------------ */
 
   register(adapter: ModelAdapter): void {
-    this.adapters.set(adapter.provider, adapter);
+    // Wrap once at registration time; instrumented adapter delegates to the
+    // raw inner adapter and adds a gen_ai.invoke span around `run()`. When
+    // telemetry is disabled (default), OTel's no-op tracer makes this free.
+    this.adapters.set(adapter.provider, instrumentModelAdapter(adapter));
   }
 
   get(provider: ProviderName): ModelAdapter | undefined {

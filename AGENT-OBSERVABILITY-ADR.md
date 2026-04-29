@@ -207,8 +207,24 @@ Filled in after each phase commit. Use this section to record deviations, surpri
 
 ### Phase 2 — Instrument LanguageModel.invoke / invokeStream
 
-- **Status:** Pending
-- **Anticipated deviation:** wraps the legacy `ModelAdapter.run` interface, not `LanguageModel.invoke`, because no adapter exposes the new interface natively yet. Documented in §3.4 (Option A).
+- **Status:** Complete
+- **Commit:** TBD
+- **Files added:** `packages/agent-core/src/telemetry/instrument.ts`, `packages/agent-core/src/__tests__/telemetry.test.ts`
+- **Files modified:** `packages/agent-core/src/registry.ts` (wrap inside `register()`), `packages/agent-core/src/single-shot.ts` (instrument `runClaude` + `runGemini` via `withInvokeSpan`)
+- **Deviations from plan §2.2:**
+  1. Wrapper targets `ModelAdapter.run` (legacy) not `LanguageModel.invoke` (new) — see §3.4 Option A. The single-point-of-integration claim still holds: every `ProviderRegistry.register()` call wraps once, every `get()` returns the wrapped adapter automatically.
+  2. Wrapper is a class (`InstrumentedModelAdapter`) rather than the plan's `{...model, async invoke(){}}` spread — class-instance methods live on the prototype and don't survive object spread. The class delegates explicitly.
+  3. Single-shot `runLLM` family (`runClaude` / `runGemini`) wired separately via a `withInvokeSpan(meta, exec, applyResult)` helper. Plan §2.1 listed two surfaces (single-shot + streaming) but didn't specify how they integrate; this helper avoids duplicating tracer boilerplate at each entry point. `runLLM` itself is not instrumented (it just delegates to `runClaude`/`runGemini` which already emit a span — avoids redundant nesting).
+  4. Reasoning + tool-call child spans **deferred to Phase 3**. The legacy `ModelAdapterResult` shape doesn't surface them; per-adapter NDJSON parsing is needed.
+- **Verified:**
+  - 5 new telemetry tests pass (success path, no-content default, recordContent opt-in, error/exception path, method delegation)
+  - Total agent-core tests: 14/14 (9 prior + 5 new)
+  - knowledge-core tests: 62/62 (no regression)
+  - cli `tsc -b` clean (26 files)
+  - code-search-mcp build clean
+  - dashboard vite build clean
+  - Smoke: registry returns `InstrumentedModelAdapter` for all 7 providers; provider names preserved
+  - IDE Jest false-positive on `type` in named imports — known noise per memory note; ignored.
 
 ### Phase 3 — Per-provider span enrichment
 
