@@ -4,6 +4,14 @@
  * Jest's default-preset Babel parser doesn't false-flag TypeScript syntax.
  */
 module.exports = {
+  preset: 'ts-jest/presets/default-esm',
+  extensionsToTreatAsEsm: ['.ts'],
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', { useESM: true, isolatedModules: true }],
+  },
   testPathIgnorePatterns: [
     '/node_modules/',
     '/packages/dashboard/server/',
@@ -14,5 +22,6 @@ module.exports = {
     '/packages/agent-core/',
     '/packages/memory-core/',
     '/packages/knowledge-core/',
+    '/packages/cli/src/commands/test.ts',
   ],
 };

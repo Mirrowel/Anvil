@@ -55,6 +55,13 @@ import {
 import type { ValidateInput, ValidateOutput } from './validate.step.js';
 import { createShipStep, SHIP_STEP_ID } from './ship.step.js';
 import type { ShipInput, ShipOutput } from './ship.step.js';
+import {
+  registerCustomStages,
+  type CustomStageConfigV2,
+  type CustomStageRegistration,
+  type CustomStageStepInput,
+  type CustomStageStepOutput,
+} from './custom-stage-shim.js';
 
 // ── Re-exports ─────────────────────────────────────────────────────────────
 
@@ -86,6 +93,8 @@ export {
   // ship
   createShipStep,
   SHIP_STEP_ID,
+  // custom stages
+  registerCustomStages,
 };
 export type {
   ClarifyInput,
@@ -104,6 +113,10 @@ export type {
   ValidateOutput,
   ShipInput,
   ShipOutput,
+  CustomStageConfigV2,
+  CustomStageRegistration,
+  CustomStageStepInput,
+  CustomStageStepOutput,
 };
 
 /**
