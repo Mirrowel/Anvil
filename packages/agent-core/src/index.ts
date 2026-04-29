@@ -33,4 +33,5 @@ export * from './telemetry/index.js';
 export * from './skills/index.js';
 export * from './mcp/index.js';
 export * from './headless/index.js';
+export * from './router/index.js';
 export { VERSION } from './version.js';
