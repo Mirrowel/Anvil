@@ -2,8 +2,9 @@
  * `LlmRouter` — single source of truth for routing, retries, fallbacks,
  * rate-limits, spend tracking, and circuit breaking.
  *
- * Phase 2: per-error retry engine wired against a single caller-supplied
- * adapter. No fallback chain yet — that lands in Phase 5.
+ * Phase 5: walks the full fallback chain. Per-error gates control which
+ * fallback steps are eligible. content_policy / auth / invalid_request
+ * never trigger cross-provider fallback (security default).
  */
 
 import type {
@@ -11,6 +12,7 @@ import type {
   InvokeOpts,
   RetryPolicy,
   RouteAttempt,
+  RouteConfig,
   RouteOutcome,
   RouterConfig,
 } from './types.js';
@@ -93,82 +95,145 @@ export class LlmRouter {
   }
 
   /**
-   * Resolve the route for a tag (or pinned model) and execute the call
-   * under the configured retry policy. Phase 2 is single-adapter scope —
-   * the primary model is invoked, and on terminal failure the call fails.
+   * Resolve the route for a tag (or pinned model) and walk the chain
+   * primary → fallback[0] → fallback[1] until either success or the
+   * chain is exhausted.
+   *
+   * Per ADR R5:
+   *   - auth / content_policy / invalid_request never trigger fallback
+   *   - rate_limit / server_5xx / timeout default to the full chain;
+   *     RouteFallback.on can restrict per-step
+   *   - All attempts are ledgered (including failed ones with cost)
    */
   async invoke(opts: InvokeOpts): Promise<RouteOutcome> {
     const startedAt = this.now();
-    const modelId = this.resolveModelId(opts);
     if (!this.resolver) {
       throw new Error('LlmRouter.invoke requires an AdapterResolver (deps.resolver)');
     }
-    const adapter = this.resolver.resolve(modelId);
 
     // Pre-flight budget enforcement (Phase 4)
     this.enforceBudgetPreflight(opts);
 
-    const llmOpts = this.buildInvokeOpts(opts, modelId);
-    const estimatedTokens = this.estimateTokens(llmOpts);
+    const chain = this.buildChain(opts);
+    const allAttempts: RouteAttempt[] = [];
+    let totalCostUsd = 0;
+    let lastError: Error | undefined;
+    let lastErrorClass: ErrorClass | undefined;
+    const maxCost = this.config.maxFallbackCostUsd ?? 1.0;
 
-    const policyFor = (cls: ErrorClass): RetryPolicy =>
-      this.config.retryPolicy[cls] ?? DEFAULT_RETRY_POLICY[cls];
+    for (let step = 0; step < chain.length; step += 1) {
+      const link = chain[step];
+      const adapter = this.resolver.resolve(link.model);
 
-    const classify = (err: unknown): ErrorClass | undefined => {
-      const provider = adapter.provider;
-      const override = this.errorClassifiers[provider];
-      const overrideResult = override?.(err);
-      if (overrideResult) return overrideResult;
-      return classifyError(err);
-    };
+      // Skip steps whose `on` gate doesn't match the previous error.
+      // Step 0 (primary) is always tried.
+      if (step > 0 && !this.shouldTryFallback(link, lastErrorClass)) {
+        continue;
+      }
 
-    const retryRun = await runWithRetry<InvokeResult>(
-      async () => {
-        await this.rateLimiter.acquire(adapter.provider, estimatedTokens);
-        return adapter.invoke(llmOpts);
-      },
-      {
-        policyFor,
-        classify,
-        sleep: this.sleep,
-        now: this.now,
-        random: this.random,
-        signal: opts.signal,
-      },
-    );
+      const llmOpts = this.buildInvokeOpts(opts, link.model);
+      const estimatedTokens = this.estimateTokens(llmOpts);
 
-    const attempts: RouteAttempt[] = retryRun.attempts.map((a) => ({
-      model: modelId,
-      provider: adapter.provider,
-      attemptIndex: a.index,
-      fallbackIndex: 0,
-      errorClass: a.errorClass,
-      durationMs: a.durationMs,
-      costUsd: undefined,
-    }));
+      const policyFor = (cls: ErrorClass): RetryPolicy =>
+        this.config.retryPolicy[cls] ?? DEFAULT_RETRY_POLICY[cls];
 
-    const totalDurationMs = Math.max(0, this.now() - startedAt);
-
-    if (retryRun.result) {
-      const last = attempts[attempts.length - 1];
-      if (last) last.costUsd = retryRun.result.costUsd;
-      this.recordSpend(opts, adapter.provider, modelId, attempts, retryRun.result, undefined);
-      const outcome: RouteOutcome = {
-        result: retryRun.result,
-        attempts,
-        totalDurationMs,
-        totalCostUsd: retryRun.result.costUsd,
+      const classify = (err: unknown): ErrorClass | undefined => {
+        const override = this.errorClassifiers[adapter.provider];
+        return override?.(err) ?? classifyError(err);
       };
-      this.populateBudgetRemaining(outcome, opts);
-      return outcome;
+
+      const retryRun = await runWithRetry<InvokeResult>(
+        async () => {
+          await this.rateLimiter.acquire(adapter.provider, estimatedTokens);
+          return adapter.invoke(llmOpts);
+        },
+        {
+          policyFor,
+          classify,
+          sleep: this.sleep,
+          now: this.now,
+          random: this.random,
+          signal: opts.signal,
+        },
+      );
+
+      const stepAttempts: RouteAttempt[] = retryRun.attempts.map((a) => ({
+        model: link.model,
+        provider: adapter.provider,
+        attemptIndex: a.index,
+        fallbackIndex: step,
+        errorClass: a.errorClass,
+        durationMs: a.durationMs,
+        costUsd: undefined,
+      }));
+      allAttempts.push(...stepAttempts);
+
+      if (retryRun.result) {
+        const last = stepAttempts[stepAttempts.length - 1];
+        if (last) last.costUsd = retryRun.result.costUsd;
+        totalCostUsd += retryRun.result.costUsd;
+        this.recordSpend(opts, adapter.provider, link.model, stepAttempts, retryRun.result, undefined);
+        const outcome: RouteOutcome = {
+          result: retryRun.result,
+          attempts: allAttempts,
+          totalDurationMs: Math.max(0, this.now() - startedAt),
+          totalCostUsd,
+        };
+        this.populateBudgetRemaining(outcome, opts);
+        return outcome;
+      }
+
+      lastError = retryRun.error ?? new Error('LlmRouter: unknown failure');
+      lastErrorClass = stepAttempts[stepAttempts.length - 1]?.errorClass ?? 'unknown';
+
+      // Record this step's spend regardless (even though no cost was billed).
+      this.recordSpend(opts, adapter.provider, link.model, stepAttempts, undefined, lastError);
+
+      // Terminal classes never fall back to a different model (security default).
+      if (isTerminal(lastErrorClass)) {
+        break;
+      }
+
+      // Per-call cost ceiling — abort the chain if we've already exceeded it.
+      if (totalCostUsd > maxCost) {
+        break;
+      }
     }
 
-    const err = retryRun.error ?? new Error('LlmRouter: unknown failure');
-    this.recordSpend(opts, adapter.provider, modelId, attempts, undefined, err);
-    throw new RouterError(`route '${opts.tag}' failed: ${err.message}`, {
-      attempts,
-      cause: err,
+    const finalErr = lastError ?? new Error('LlmRouter: chain produced no error and no result');
+    throw new RouterError(`route '${opts.tag}' failed: ${finalErr.message}`, {
+      attempts: allAttempts,
+      cause: finalErr,
     });
+  }
+
+  /** Build the ordered chain of (model, on-gate) steps for a given tag. */
+  protected buildChain(opts: InvokeOpts): Array<{ model: string; on?: ErrorClass[] }> {
+    if (opts.model) {
+      // Pinned model — no fallbacks (escape hatch).
+      return [{ model: opts.model }];
+    }
+    const route: RouteConfig | undefined = this.config.routes.find((r) => r.tag === opts.tag);
+    if (!route) {
+      throw new Error(`LlmRouter: no route for tag '${opts.tag}' (and no opts.model pin)`);
+    }
+    const chain: Array<{ model: string; on?: ErrorClass[] }> = [{ model: route.primary }];
+    for (const fb of route.fallbacks ?? []) {
+      chain.push({ model: fb.model, on: fb.on });
+    }
+    return chain;
+  }
+
+  /** Decide whether to try this fallback step given the prior error class. */
+  protected shouldTryFallback(
+    fallback: { on?: ErrorClass[] },
+    priorClass: ErrorClass | undefined,
+  ): boolean {
+    if (!priorClass) return false;
+    if (isTerminal(priorClass)) return false;
+    // No `on` filter means "any retryable error".
+    if (!fallback.on || fallback.on.length === 0) return true;
+    return fallback.on.includes(priorClass);
   }
 
   // ── Budget + ledger helpers ────────────────────────────────────────────
@@ -246,15 +311,6 @@ export class LlmRouter {
     });
   }
 
-  protected resolveModelId(opts: InvokeOpts): string {
-    if (opts.model) return opts.model;
-    const route = this.config.routes.find((r) => r.tag === opts.tag);
-    if (!route) {
-      throw new Error(`LlmRouter: no route for tag '${opts.tag}' (and no opts.model pin)`);
-    }
-    return route.primary;
-  }
-
   /**
    * Rough token estimate for pre-flight rate-limit checks. Uses the
    * standard ~4-chars-per-token heuristic over message content. We bias
@@ -301,4 +357,8 @@ function defaultNewId(): string {
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 8);
   return `s-${ts}-${rand}`;
+}
+
+function isTerminal(cls: ErrorClass | undefined): boolean {
+  return cls === 'auth' || cls === 'content_policy' || cls === 'invalid_request';
 }
