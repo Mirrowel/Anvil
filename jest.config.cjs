@@ -10,5 +10,9 @@ module.exports = {
     '/packages/dashboard/src/',
     '/packages/cli/dist/',
     '/packages/cli/src/__fixtures__/',
+    '/packages/core-pipeline/',
+    '/packages/agent-core/',
+    '/packages/memory-core/',
+    '/packages/knowledge-core/',
   ],
 };
