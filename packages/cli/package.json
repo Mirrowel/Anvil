@@ -43,6 +43,7 @@
     "test": "echo 'cli has no per-workspace node:test files (knowledge tests moved to @anvil/knowledge-core; hooks integration test runs via root jest)'"
   },
   "dependencies": {
+    "@anvil/agent-core": "*",
     "@anvil/knowledge-core": "*",
     "commander": "^13.1.0",
     "lucide-react": "1.8.0",

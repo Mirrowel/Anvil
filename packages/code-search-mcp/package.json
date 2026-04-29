@@ -18,6 +18,7 @@
     "dev": "tsc -b --watch"
   },
   "dependencies": {
+    "@anvil/agent-core": "*",
     "@anvil/knowledge-core": "*",
     "@modelcontextprotocol/sdk": "^1.29.0"
   },

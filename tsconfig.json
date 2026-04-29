@@ -16,6 +16,7 @@
     }
   },
   "references": [
+    { "path": "packages/agent-core" },
     { "path": "packages/knowledge-core" },
     { "path": "packages/cli" },
     { "path": "packages/dashboard" }
