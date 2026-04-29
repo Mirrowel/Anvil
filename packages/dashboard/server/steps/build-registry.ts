@@ -19,12 +19,16 @@
  * `StepContext` (which stays generic per core-pipeline's contract).
  */
 
-import { InMemoryStepRegistry, type StepRegistry } from '@anvil/core-pipeline';
+import { InMemoryStepRegistry, type Step, type StepRegistry } from '@anvil/core-pipeline';
 
 import type { FeatureStore } from '../feature-store.js';
 import type { FeatureManifestStore } from '../feature-manifest.js';
 import type { ProjectLoader } from '../project-loader.js';
 import type { MemoryStore } from '../memory-store.js';
+import {
+  FEATURE_MANIFEST_STAGES,
+  createFeatureManifestStep,
+} from './feature-manifest.step.js';
 
 /**
  * Run-scoped deps the dashboard's Steps will close over. Everything is
@@ -60,16 +64,35 @@ export interface DashboardStepRegistryDeps {
 }
 
 /**
- * Build an empty `StepRegistry` for the dashboard.
+ * Build the dashboard's `StepRegistry` for one pipeline run.
  *
- * Phases 4b–4f extend this factory to register real Steps; for now it's a
- * placeholder that round-trips through the core-pipeline runtime cleanly so
- * tests can exercise the wiring before any real Step is added.
+ * What lands today (Phase 4a–4b):
+ *   - empty registry by default
+ *   - per-stage feature-manifest extraction Steps when both
+ *     `featureSlug` + `manifestStore` are supplied; one Step per
+ *     stage in `FEATURE_MANIFEST_STAGES`, each id-prefixed with
+ *     `feature-manifest:`. Caller can later `insertAfter(stageId, …)`
+ *     to splice persona Steps in front of each extractor.
+ *
+ * Phases 4c–4f extend this factory with plan-risk, task-bundler,
+ * clarify, and the final orchestrator façade.
  */
 export function buildDashboardStepRegistry(
-  // Underscore to silence "unused parameter" while still pinning the public
-  // signature Phase 4b–4f will rely on.
-  _deps: DashboardStepRegistryDeps,
+  deps: DashboardStepRegistryDeps,
 ): StepRegistry {
-  return new InMemoryStepRegistry();
+  const registry = new InMemoryStepRegistry();
+
+  if (deps.featureSlug && deps.manifestStore) {
+    for (const stageName of FEATURE_MANIFEST_STAGES) {
+      const step = createFeatureManifestStep({
+        stageName,
+        project: deps.project,
+        featureSlug: deps.featureSlug,
+        manifestStore: deps.manifestStore,
+      });
+      registry.register(step as Step<unknown, unknown>);
+    }
+  }
+
+  return registry;
 }

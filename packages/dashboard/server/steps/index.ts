@@ -17,3 +17,8 @@
 
 export { buildDashboardStepRegistry } from './build-registry.js';
 export type { DashboardStepRegistryDeps } from './build-registry.js';
+export {
+  createFeatureManifestStep,
+  FEATURE_MANIFEST_STAGES,
+} from './feature-manifest.step.js';
+export type { FeatureManifestStepOptions } from './feature-manifest.step.js';
