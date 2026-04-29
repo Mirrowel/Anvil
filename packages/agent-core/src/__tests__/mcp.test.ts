@@ -26,7 +26,7 @@ import {
   findMcpConfigPath,
 } from '../mcp/config-loader.js';
 import { buildAgentToolset } from '../mcp/tool-merger.js';
-import type { McpAgentClient } from '../mcp/client.js';
+import { McpAgentClient } from '../mcp/client.js';
 import type { ToolSchema } from '../types.js';
 
 function tempDir(): string {
@@ -355,6 +355,107 @@ describe('buildAgentToolset', () => {
     assert.equal(result.tools.length, 1);
     assert.equal(result.tools[0].name, 'good/ping');
     assert.ok(captured.includes('"bad" listTools failed'));
+  });
+});
+
+// ── McpAgentClient list+call routing (mocked SDK Client) ────────────────
+
+describe('McpAgentClient routing', () => {
+  function makeFakeSdkClient() {
+    const calls: Array<{ method: string; params: unknown }> = [];
+    return {
+      calls,
+      listToolsResult: {
+        tools: [
+          { name: 'read_file', description: 'read', inputSchema: { type: 'object' } },
+          { name: 'write_file', description: 'write', inputSchema: { type: 'object' } },
+        ],
+      },
+      callToolResult: { content: [{ type: 'text', text: 'ok' }] } as unknown,
+      async listTools() {
+        calls.push({ method: 'listTools', params: undefined });
+        return this.listToolsResult;
+      },
+      async callTool(params: { name: string; arguments: Record<string, unknown> }) {
+        calls.push({ method: 'callTool', params });
+        return this.callToolResult;
+      },
+      async close() {
+        calls.push({ method: 'close', params: undefined });
+      },
+    };
+  }
+
+  function injectFakeClient(c: McpAgentClient, fake: ReturnType<typeof makeFakeSdkClient>): void {
+    // Bypass `private` for the test seam — the constructor instantiated a
+    // real SDK Client which we want to replace with the fake.
+    (c as unknown as { client: unknown; connected: boolean }).client = fake;
+    (c as unknown as { connected: boolean }).connected = true;
+  }
+
+  it('namespaces tools as `<server>/<tool>` in listTools()', async () => {
+    const client = new McpAgentClient({ name: 'fs', transport: 'stdio', command: 'noop' });
+    const fake = makeFakeSdkClient();
+    injectFakeClient(client, fake);
+
+    const tools = await client.listTools();
+    assert.deepEqual(
+      tools.map((t) => t.name),
+      ['fs/read_file', 'fs/write_file'],
+    );
+    // descriptions + inputSchema preserved, only name namespaced
+    assert.equal(tools[0].description, 'read');
+    assert.deepEqual(tools[0].inputSchema, { type: 'object' });
+  });
+
+  it('callTool strips the `<server>/` prefix before forwarding to SDK', async () => {
+    const client = new McpAgentClient({ name: 'gh', transport: 'stdio', command: 'noop' });
+    const fake = makeFakeSdkClient();
+    injectFakeClient(client, fake);
+
+    await client.callTool('gh/list_issues', { repo: 'owner/repo' });
+    assert.equal(fake.calls.length, 1);
+    assert.equal((fake.calls[0].params as { name: string }).name, 'list_issues');
+    assert.deepEqual(
+      (fake.calls[0].params as { arguments: Record<string, unknown> }).arguments,
+      { repo: 'owner/repo' },
+    );
+  });
+
+  it('callTool accepts bare tool names too (no prefix to strip)', async () => {
+    const client = new McpAgentClient({ name: 'svc', transport: 'stdio', command: 'noop' });
+    const fake = makeFakeSdkClient();
+    injectFakeClient(client, fake);
+
+    await client.callTool('ping', {});
+    assert.equal((fake.calls[0].params as { name: string }).name, 'ping');
+  });
+
+  it('close() forwards to SDK and flips connected back to false', async () => {
+    const client = new McpAgentClient({ name: 'x', transport: 'stdio', command: 'noop' });
+    const fake = makeFakeSdkClient();
+    injectFakeClient(client, fake);
+
+    assert.equal(client.isConnected(), true);
+    await client.close();
+    assert.equal(client.isConnected(), false);
+    assert.deepEqual(
+      fake.calls.map((c) => c.method),
+      ['close'],
+    );
+    // Subsequent close is a no-op (does not call SDK again)
+    await client.close();
+    assert.equal(fake.calls.length, 1);
+  });
+
+  it('connect() throws clearly when stdio config has no command', async () => {
+    const client = new McpAgentClient({ name: 'bad', transport: 'stdio' });
+    await assert.rejects(() => client.connect(), /no command/);
+  });
+
+  it('connect() throws clearly when http config has no url', async () => {
+    const client = new McpAgentClient({ name: 'bad', transport: 'streamable-http' });
+    await assert.rejects(() => client.connect(), /no url/);
   });
 });
 

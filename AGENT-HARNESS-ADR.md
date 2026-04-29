@@ -332,9 +332,39 @@ If none of the above exists, `loadSkills()` returns `[]` and the skills block is
 | 1 — Skill loader scaffold | ✅ shipped 2026-04-29 | 61b9e44 | Added unit tests (parser/loader/activator, 11 tests) inline rather than deferring to Phase 6, matching the cadence used by the observability initiative; Phase 6 still owns integration tests. Added `yaml@^2.8.3` as a direct dep of `agent-core` (already hoisted via cli) instead of relying on workspace hoisting. |
 | 2 — Skill → system prompt integration | ✅ shipped 2026-04-29 | 113cc01 | Plan §2.3 said wire into `agent-manager.ts`; in reality `agent-manager.ts` is subprocess-lifecycle (no system-prompt build path). Shipped the helper surface (`render` + `resolveSkillsDir` + `applyToolPolicy` + `composeSkillContext`) for Phase 4's `runAgent` to consume; existing `runClaude`/`runGemini` paths in single-shot.ts remain unchanged because their callers don't ask for skills today. |
 | 3 — MCP client at agent layer | ✅ shipped 2026-04-29 | 5e06e51 | Added `@modelcontextprotocol/sdk@^1.29.0` direct dep to agent-core (already on lockfile via `@esankhan3/code-search-mcp` server side). Live `McpAgentClient` connect/listTools/callTool against a real fixture server is deferred to Phase 5/6 integration tests; Phase 3 covers config-loader + tool-merger seams + transport inference + `${env:VAR}` substitution + collision/failure isolation. The `seen` set in `buildAgentToolset` is an extension over plan §3.6 — it makes the dispatch map ignore namespace collisions and warn instead of silently overwriting. |
-| 4 — Headless `runAgent` entry | ✅ shipped 2026-04-29 | _this commit_ | Plan §4.3 envisions calling `LanguageModel.invoke()` from `ProviderRegistry`; in reality the registry holds `ModelAdapter`s and no agent-core adapter implements `LanguageModel` natively yet (per observability ADR §3.4). Reconciled by requiring callers to inject `LanguageModel` via the new `RunAgentOptions.model` parameter — a third optional argument extending plan §4.2's `(task, workspace)` signature. Tests use a `ScriptedLanguageModel` mock per plan §6.1. Built-in tool dispatch is also caller-injected (`builtInTools`, `builtInDispatch`) since agent-core has no built-in tools today; per-tool intersection-with-allowed-tools constraint application at the toolset level is a Phase 5 follow-up (Phase 2 helpers already enforce it at the policy layer). Wall-clock timeout (`timeoutMs`, default 600s) added on top of the iteration cap per §4.8 risk callout. Smoke run confirms 5-rank `mcp.json` discovery walks all the way to `$HOME/.claude/mcp.json` and degrades gracefully when an MCP server fails. |
-| 5 — Tests + fixtures | pending | — | — |
-| 6 — Telemetry attributes for skills + MCP | pending | — | — |
-| 7 — Security review + docs | pending | — | — |
+| 4 — Headless `runAgent` entry | ✅ shipped 2026-04-29 | 633ed11 | Plan §4.3 envisions calling `LanguageModel.invoke()` from `ProviderRegistry`; in reality the registry holds `ModelAdapter`s and no agent-core adapter implements `LanguageModel` natively yet (per observability ADR §3.4). Reconciled by requiring callers to inject `LanguageModel` via the new `RunAgentOptions.model` parameter — a third optional argument extending plan §4.2's `(task, workspace)` signature. Tests use a `ScriptedLanguageModel` mock per plan §6.1. Built-in tool dispatch is also caller-injected (`builtInTools`, `builtInDispatch`) since agent-core has no built-in tools today; per-tool intersection-with-allowed-tools constraint application at the toolset level is a follow-up (Phase 2 helpers already enforce it at the policy layer). Wall-clock timeout (`timeoutMs`, default 600s) added on top of the iteration cap per §4.8 risk callout. Smoke run confirms 5-rank `mcp.json` discovery walks all the way to `$HOME/.claude/mcp.json` and degrades gracefully when an MCP server fails. |
+| 5 — cli `--task` wire-up | ❌ skipped 2026-04-29 | — | Plan §5.1 marks this optional ("cli already has its own pipeline orchestration; runAgent is for *external* consumers"). Skipping was explicitly endorsed by the user. To make this useful would also require shipping a `ModelAdapter → LanguageModel` bridge first, which is its own follow-up. |
+| 6 — Close-out: tests + Inspect AI recipe + ADR finalization | ✅ shipped 2026-04-29 | _this commit_ | Phase 6 closed. Added 6 `McpAgentClient` routing tests (namespacing, prefix-stripping, close idempotency, missing-command/url errors) using a fake SDK Client patched onto the private field. README extended with a "Agent harness" section documenting skills, MCP, and headless `runAgent` usage, plus an Inspect AI smoke recipe. Plan banner updated to "Shipped". Final agent-core: 81/81 tests; cli + code-search-mcp + dashboard builds clean; knowledge-core 62/62 baseline preserved. |
 
-Updated incrementally as phases ship.
+## Out of scope / known follow-ups
+
+The following are explicit non-goals of this initiative and would land in
+future plans:
+
+1. **`ModelAdapter → LanguageModel` bridge.** Today `runAgent` requires
+   callers to inject a `LanguageModel`; no agent-core adapter implements it
+   natively. Shipping a bridge would let `runAgent` resolve from
+   `ProviderRegistry` like plan §4.3 envisioned, and would unblock cli's
+   optional `--task` wire-up (skipped Phase 5).
+2. **Per-tool allowed-tools intersection at the toolset level.** Phase 2's
+   `applyToolPolicy` enforces the policy semantically; runAgent currently
+   passes the merged toolset (built-in + MCP) to `invoke` without filtering
+   it through the policy. Adding a `filterToolset(tools, allowedTools)` step
+   in `runAgent` would make the constraint terminal.
+3. **Built-in tool registry.** `agent-core` has no built-in tools today;
+   `runAgent` accepts caller-injected `builtInTools`/`builtInDispatch`. A
+   future phase could hoist cli's pipeline tool implementations into
+   `agent-core/src/tools/` so headless callers don't need to inject them.
+4. **Native MCP-server fixture integration tests.** `McpAgentClient`
+   transport selection (stdio vs streamable-http) is not exercised against a
+   real fixture server — the routing tests use an injected fake SDK Client.
+   A future fixture suite could spin up `@modelcontextprotocol/server-filesystem`
+   over stdio + a tiny HTTP fixture for the streamable transport.
+5. **Telemetry attributes for skills + MCP.** Plan B's `gen_ai.invoke` spans
+   could carry `anvil.skills.activated` (count + names), `anvil.mcp.servers`
+   (count), `anvil.mcp.tool_calls` (per-tool routing). Self-contained future
+   phase.
+6. **Security review for skill-content RCE.** Per ADR §H12 v1 disallows
+   `require()` from skills, but the markdown body is inlined into the
+   system prompt and could carry prompt-injection. A skill-signature manifest
+   is a v2 concern.
