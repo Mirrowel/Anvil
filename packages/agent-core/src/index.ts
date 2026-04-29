@@ -30,4 +30,5 @@ export * from './single-shot.js';
 export * from './agent/index.js';
 export * from './cost.js';
 export * from './telemetry/index.js';
+export * from './skills/index.js';
 export { VERSION } from './version.js';
