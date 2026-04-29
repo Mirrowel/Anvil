@@ -15,6 +15,12 @@
 
 import { JsonlAppendLog } from './jsonl-store.js';
 import { SqliteHotIndex, type SearchOpts } from './sqlite-store.js';
+import {
+  HardRejectError,
+  scrub,
+  type ScrubOptions,
+  type ScrubResult,
+} from '../scrubber/index.js';
 import type { Memory, MemoryNamespace } from '../types.js';
 
 /**
@@ -46,6 +52,12 @@ export interface OpenHybridOptions {
   sqlitePath: string;
   /** Skip the auto-rebuild on open (useful for tests). */
   skipAutoRebuild?: boolean;
+  /**
+   * Phase 7 scrubber overrides — applied to every `add()` payload before
+   * it reaches JSONL or SQLite. Defaults to env-derived behavior
+   * (`ANVIL_MEMORY_SCRUB=1` regex; `=0` off; `=llm` regex+classifier).
+   */
+  scrubber?: ScrubOptions;
 }
 
 export interface RebuildResult {
@@ -56,10 +68,16 @@ export interface RebuildResult {
 export class HybridMemoryStore {
   readonly jsonl: JsonlAppendLog;
   readonly sqlite: SqliteHotIndex;
+  readonly scrubberOpts: ScrubOptions | undefined;
 
-  constructor(jsonl: JsonlAppendLog, sqlite: SqliteHotIndex) {
+  constructor(
+    jsonl: JsonlAppendLog,
+    sqlite: SqliteHotIndex,
+    scrubberOpts?: ScrubOptions,
+  ) {
     this.jsonl = jsonl;
     this.sqlite = sqlite;
+    this.scrubberOpts = scrubberOpts;
   }
 
   /**
@@ -69,7 +87,7 @@ export class HybridMemoryStore {
   static open(opts: OpenHybridOptions): HybridMemoryStore {
     const jsonl = new JsonlAppendLog(opts.jsonlPath);
     const sqlite = new SqliteHotIndex(opts.sqlitePath);
-    const store = new HybridMemoryStore(jsonl, sqlite);
+    const store = new HybridMemoryStore(jsonl, sqlite, opts.scrubber);
     if (!opts.skipAutoRebuild && jsonl.exists() && sqlite.count() === 0) {
       const records = jsonl.readAll();
       if (records.length > 0) {
@@ -82,10 +100,52 @@ export class HybridMemoryStore {
     return store;
   }
 
-  /** Append to JSONL canonical, then upsert into SQLite hot index. */
-  add(m: Memory): void {
-    this.jsonl.append(m);
-    this.sqlite.upsert(m);
+  /**
+   * Append to JSONL canonical, then upsert into SQLite hot index.
+   *
+   * Phase 7 scrubber: every payload is scrubbed before write. PII
+   * patterns are redacted in place; credential-class patterns hard-
+   * reject the write via `HardRejectError` (callers must catch).
+   * Returns the scrub report so auto-learners can log redactions.
+   */
+  add(m: Memory): ScrubResult | null {
+    const result = this.scrubMemory(m);
+    if (result?.hardReject) {
+      throw new HardRejectError(
+        `memory ${m.id} rejected: matched credential rules ${result.redactions
+          .filter((r) => r.category === 'credential')
+          .map((r) => r.rule)
+          .join(', ')}`,
+        result.redactions,
+      );
+    }
+    const cleaned = result ? this.applyScrubResult(m, result) : m;
+    this.jsonl.append(cleaned);
+    this.sqlite.upsert(cleaned);
+    return result;
+  }
+
+  private scrubMemory(m: Memory): ScrubResult | null {
+    const text = typeof m.content === 'string' ? m.content : safeStringify(m.content);
+    if (!text) return null;
+    return scrub(text, this.scrubberOpts);
+  }
+
+  private applyScrubResult(m: Memory, result: ScrubResult): Memory {
+    if (result.redactions.length === 0) return m;
+    if (typeof m.content === 'string') {
+      return { ...m, content: result.cleaned } as Memory;
+    }
+    // Structured payload: parse the cleaned string back if it round-trips
+    // as JSON; otherwise leave the payload untouched (the scrubber would
+    // need a per-shape strategy to safely rewrite nested structures, which
+    // is deferred to Phase 10's structured-content auto-learners).
+    try {
+      const parsed = JSON.parse(result.cleaned);
+      return { ...m, content: parsed } as Memory;
+    } catch {
+      return m;
+    }
   }
 
   findById(id: string): Memory | null {
@@ -230,5 +290,13 @@ export class HybridMemoryStore {
 
   close(): void {
     this.sqlite.close();
+  }
+}
+
+function safeStringify(v: unknown): string {
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return '';
   }
 }
