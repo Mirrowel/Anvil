@@ -150,6 +150,26 @@ class InstrumentedModelAdapter implements ModelAdapter {
           if (result.sessionId) {
             span.setAttribute(GenAi.RESPONSE_ID, result.sessionId);
           }
+          // Phase 3 — cache + reasoning + tool-call enrichment from
+          // per-adapter response parsing. Adapters that don't surface these
+          // simply leave the fields undefined; we don't fabricate zeros for
+          // providers where the data isn't reported.
+          if (typeof result.cacheReadTokens === 'number') {
+            span.setAttribute(GenAi.USAGE_CACHE_READ_TOKENS, result.cacheReadTokens);
+            const denom = result.inputTokens + result.cacheReadTokens;
+            if (denom > 0) {
+              span.setAttribute(GenAi.USAGE_CACHE_HIT_RATIO, result.cacheReadTokens / denom);
+            }
+          }
+          if (typeof result.cacheWriteTokens === 'number') {
+            span.setAttribute(GenAi.USAGE_CACHE_WRITE_TOKENS, result.cacheWriteTokens);
+          }
+          if (typeof result.reasoningTokens === 'number' && result.reasoningTokens > 0) {
+            span.setAttribute(GenAi.REASONING_TOKENS, result.reasoningTokens);
+          }
+          if (typeof result.toolCallCount === 'number') {
+            span.setAttribute('gen_ai.response.tool_call_count', result.toolCallCount);
+          }
           if (telemetry.recordContent) {
             span.setAttribute(
               GenAi.COMPLETION,

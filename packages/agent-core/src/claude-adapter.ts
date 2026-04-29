@@ -140,6 +140,7 @@ export class ClaudeAdapter implements ModelAdapter {
     // ---- Pipe stdout & capture result in parallel -------------------------
     let resultMsg: ResultMessage | null = null;
     let fullOutput = '';
+    let toolCallCount = 0;
 
     // We read stdout line-by-line to capture the result message while also
     // piping every line to the output writable unchanged.
@@ -155,6 +156,11 @@ export class ClaudeAdapter implements ModelAdapter {
         if (parsed.type === 'result') {
           resultMsg = parsed as ResultMessage;
           fullOutput = parsed.result ?? '';
+        } else if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+          // Count tool_use blocks for telemetry; pure-pipe semantics preserved.
+          for (const block of parsed.message.content) {
+            if (block?.type === 'tool_use') toolCallCount += 1;
+          }
         }
       } catch {
         // Not JSON — pass through silently
@@ -179,6 +185,8 @@ export class ClaudeAdapter implements ModelAdapter {
     const rm = resultMsg as Record<string, any> | null;
     const inputTokens = rm?.usage?.input_tokens ?? 0;
     const outputTokens = rm?.usage?.output_tokens ?? 0;
+    const cacheReadTokens = rm?.usage?.cache_read_input_tokens ?? 0;
+    const cacheWriteTokens = rm?.usage?.cache_creation_input_tokens ?? 0;
     const costUsd =
       rm?.total_cost_usd ??
       (inputTokens * pricing[0] + outputTokens * pricing[1]) / 1_000_000;
@@ -192,6 +200,9 @@ export class ClaudeAdapter implements ModelAdapter {
       sessionId: rm?.session_id,
       provider: 'claude' as const,
       model: config.model,
+      cacheReadTokens,
+      cacheWriteTokens,
+      toolCallCount,
     };
   }
 

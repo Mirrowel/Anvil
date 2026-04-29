@@ -105,6 +105,7 @@ export class GeminiAdapter implements ModelAdapter {
     let inputTokens = 0;
     let outputTokens = 0;
     let thinkingTokens = 0;
+    let cacheReadTokens = 0;
 
     const response = await fetch(url, {
       method: 'POST',
@@ -181,6 +182,9 @@ export class GeminiAdapter implements ModelAdapter {
               thinkingTokens = usage.thoughtsTokenCount;
             }
           }
+          if (typeof usage.cachedContentTokenCount === 'number') {
+            cacheReadTokens = usage.cachedContentTokenCount;
+          }
         }
       }
     }
@@ -206,6 +210,8 @@ export class GeminiAdapter implements ModelAdapter {
       durationMs,
       provider: 'gemini',
       model,
+      cacheReadTokens,
+      reasoningTokens: thinkingTokens,
     };
   }
 }

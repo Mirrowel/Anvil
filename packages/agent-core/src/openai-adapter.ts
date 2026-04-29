@@ -115,7 +115,13 @@ export class OpenAIAdapter implements ModelAdapter {
       }
 
       // Parse the SSE stream
-      const { fullText, inputTokens, outputTokens } = await this.consumeSSE(response, output);
+      const {
+        fullText,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        reasoningTokens,
+      } = await this.consumeSSE(response, output);
 
       const durationMs = Date.now() - startMs;
       const pricing = this.getModelPricing(config.model);
@@ -139,6 +145,8 @@ export class OpenAIAdapter implements ModelAdapter {
         durationMs,
         provider: this.provider,
         model: config.model,
+        cacheReadTokens,
+        reasoningTokens,
       };
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
@@ -171,10 +179,18 @@ export class OpenAIAdapter implements ModelAdapter {
   protected async consumeSSE(
     response: Response,
     output: NodeJS.WritableStream,
-  ): Promise<{ fullText: string; inputTokens: number; outputTokens: number }> {
+  ): Promise<{
+    fullText: string;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    reasoningTokens: number;
+  }> {
     let fullText = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let reasoningTokens = 0;
 
     const reader = response.body?.getReader();
     if (!reader) throw new Error('Response body is not readable');
@@ -216,6 +232,9 @@ export class OpenAIAdapter implements ModelAdapter {
           if (chunk.usage) {
             inputTokens = chunk.usage.prompt_tokens ?? 0;
             outputTokens = chunk.usage.completion_tokens ?? 0;
+            cacheReadTokens = chunk.usage.prompt_tokens_details?.cached_tokens ?? 0;
+            reasoningTokens =
+              chunk.usage.completion_tokens_details?.reasoning_tokens ?? 0;
           }
         } catch {
           // Skip malformed JSON lines
@@ -223,6 +242,6 @@ export class OpenAIAdapter implements ModelAdapter {
       }
     }
 
-    return { fullText, inputTokens, outputTokens };
+    return { fullText, inputTokens, outputTokens, cacheReadTokens, reasoningTokens };
   }
 }

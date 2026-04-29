@@ -164,6 +164,19 @@ export interface ModelAdapterResult {
   sessionId?: string;
   provider: ProviderName;
   model: string;
+
+  // ── Optional telemetry-enrichment fields (added in observability Phase 3).
+  //    Adapters that surface these populate them; consumers that don't need
+  //    them ignore — every existing caller continues to work unchanged.
+
+  /** Tokens served from a prompt cache (Anthropic cache_read, OpenAI cached_tokens, Gemini cachedContentTokenCount). */
+  cacheReadTokens?: number;
+  /** Tokens written to the prompt cache (Anthropic cache_creation; OpenAI/Gemini do not bill cache writes separately). */
+  cacheWriteTokens?: number;
+  /** Tokens spent on extended thinking / reasoning blocks (Anthropic ThinkingBlock, OpenAI o-series reasoning, Gemini thoughtsTokenCount). */
+  reasoningTokens?: number;
+  /** Count of tool_use / function-call invocations in this turn. */
+  toolCallCount?: number;
 }
 
 export interface ModelAdapter {

@@ -228,7 +228,24 @@ Filled in after each phase commit. Use this section to record deviations, surpri
 
 ### Phase 3 — Per-provider span enrichment
 
-- **Status:** Pending
+- **Status:** Complete
+- **Commit:** TBD
+- **Files modified:**
+  - `packages/agent-core/src/types.ts` — extended `ModelAdapterResult` with optional `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, `toolCallCount`
+  - `packages/agent-core/src/claude-adapter.ts` — extracts `cache_read_input_tokens` + `cache_creation_input_tokens` from result.usage; counts `tool_use` blocks during stream-json line parsing
+  - `packages/agent-core/src/openai-adapter.ts` — extracts `prompt_tokens_details.cached_tokens` and `completion_tokens_details.reasoning_tokens` from final usage chunk
+  - `packages/agent-core/src/gemini-adapter.ts` — extracts `cachedContentTokenCount` and surfaces existing `thoughtsTokenCount` as `reasoningTokens`
+  - `packages/agent-core/src/telemetry/instrument.ts` — wrapper now reads enriched fields and emits `gen_ai.usage.{cache_read,cache_write,cache_hit_ratio}_tokens`, `gen_ai.reasoning.tokens`, `gen_ai.response.tool_call_count`
+- **Files added:** `packages/agent-core/src/__tests__/adapter-enrichment.test.ts` (3 fixture-based tests)
+- **Deviations from plan §3.5:**
+  1. Per-call **child spans** for tool calls + reasoning — **deferred**. Plan acceptance §3.5 requested "Reasoning events emit as child spans (verifiable via console exporter)." Implementing this requires either (a) extending the legacy `ModelAdapterResult` with a `reasoningBlocks: Array<{tokens, text?}>` field that adapters populate per-block, or (b) a native `LanguageModel.invokeStream()` impl. Both are larger surface changes than Phase 3 warrants. Phase 3 ships **per-turn aggregate** attributes (`gen_ai.reasoning.tokens` total, `gen_ai.response.tool_call_count` total) which is the most Langfuse / Phoenix / Honeycomb dashboards consume anyway. Per-block child spans land in a future phase together with native `invokeStream()`.
+  2. **Cache hit ratio** added in Phase 3 (Plan §4.2 originally) — fits naturally next to the cache-token attribute, no reason to defer.
+  3. Wrapper does **not fabricate zeros** when adapter omits a field. Plan §3.2 example showed `?? 0` defaults; this would imply "cache miss" when the adapter genuinely doesn't know. Verified by the third test case that absence stays absent in the span.
+- **Verified:**
+  - 17/17 agent-core tests (12 prior + 3 new Phase 3 + 2 telemetry overlap; total of 17 in 6 suites)
+  - 62/62 knowledge-core tests
+  - cli + dashboard builds clean
+  - Three fixture tests cover OpenAI cached_tokens + reasoning_tokens, Gemini cachedContentTokenCount + thoughtsTokenCount, and the absence-stays-absent invariant
 
 ### Phase 4 — Cost annotation + cache cost separation
 
