@@ -33,6 +33,7 @@
 import { spawn, execSync, ChildProcess } from 'node:child_process';
 import { withInvokeSpan } from './telemetry/instrument.js';
 import { GenAi } from './telemetry/attributes.js';
+import { calculateCostBreakdown } from './cost.js';
 
 // ── Env-var aliasing ───────────────────────────────────────────────────────
 
@@ -195,13 +196,21 @@ export async function runClaude(
     () => config.llmMode === 'api'
       ? runViaApi(prompt, systemPrompt, model, timeoutMs, config)
       : runViaCli(prompt, systemPrompt, model, timeoutMs, config.claudeBin),
-    (r) => ({
-      [GenAi.USAGE_INPUT_TOKENS]: r.inputTokens,
-      [GenAi.USAGE_OUTPUT_TOKENS]: r.outputTokens,
-      [GenAi.USAGE_COST_USD]: r.costUsd,
-      'anvil.duration_ms': r.durationMs,
-      'anvil.transport': config.llmMode,
-    }),
+    (r) => {
+      const bd = calculateCostBreakdown(model, {
+        inputTokens: r.inputTokens,
+        outputTokens: r.outputTokens,
+      });
+      return {
+        [GenAi.USAGE_INPUT_TOKENS]: r.inputTokens,
+        [GenAi.USAGE_OUTPUT_TOKENS]: r.outputTokens,
+        [GenAi.USAGE_COST_USD]: bd.totalUsd > 0 ? bd.totalUsd : r.costUsd,
+        [GenAi.USAGE_COST_INPUT_USD]: bd.inputUsd,
+        [GenAi.USAGE_COST_OUTPUT_USD]: bd.outputUsd,
+        'anvil.duration_ms': r.durationMs,
+        'anvil.transport': config.llmMode,
+      };
+    },
   );
 }
 
@@ -226,13 +235,21 @@ export async function runGemini(
   return withInvokeSpan(
     { provider: 'gemini-cli', model, prompt, systemPrompt },
     () => runGeminiInner(config, model, combinedPrompt, timeoutMs),
-    (r) => ({
-      [GenAi.USAGE_INPUT_TOKENS]: r.inputTokens,
-      [GenAi.USAGE_OUTPUT_TOKENS]: r.outputTokens,
-      [GenAi.USAGE_COST_USD]: r.costUsd,
-      'anvil.duration_ms': r.durationMs,
-      'anvil.transport': 'cli',
-    }),
+    (r) => {
+      const bd = calculateCostBreakdown(model, {
+        inputTokens: r.inputTokens,
+        outputTokens: r.outputTokens,
+      });
+      return {
+        [GenAi.USAGE_INPUT_TOKENS]: r.inputTokens,
+        [GenAi.USAGE_OUTPUT_TOKENS]: r.outputTokens,
+        [GenAi.USAGE_COST_USD]: bd.totalUsd > 0 ? bd.totalUsd : r.costUsd,
+        [GenAi.USAGE_COST_INPUT_USD]: bd.inputUsd,
+        [GenAi.USAGE_COST_OUTPUT_USD]: bd.outputUsd,
+        'anvil.duration_ms': r.durationMs,
+        'anvil.transport': 'cli',
+      };
+    },
   );
 }
 

@@ -142,22 +142,50 @@ export interface UsageInput {
   cacheWriteTokens?: number;
 }
 
+export interface CostBreakdown {
+  totalUsd: number;
+  inputUsd: number;
+  outputUsd: number;
+  cacheReadUsd: number;
+  cacheWriteUsd: number;
+}
+
 /**
- * Compute USD cost for a usage block at the given model's pricing.
- * Returns 0 if the model is unknown.
+ * Compute a per-component cost breakdown.
+ *
+ * Returns all-zero values when the model isn't in the cost table — caller
+ * decides whether to fall back to an adapter-supplied cost (the existing
+ * legacy path). Cache components are zero when either the usage doesn't
+ * include cache tokens or the pricing entry doesn't list a cache rate.
  */
-export function calculateCost(model: string, usage: UsageInput): number {
+export function calculateCostBreakdown(model: string, usage: UsageInput): CostBreakdown {
   const p = getDetailedPricing(model);
-  if (!p) return 0;
-  const inUsd = (usage.inputTokens / 1_000_000) * p.inputPer1M;
-  const outUsd = (usage.outputTokens / 1_000_000) * p.outputPer1M;
+  if (!p) {
+    return { totalUsd: 0, inputUsd: 0, outputUsd: 0, cacheReadUsd: 0, cacheWriteUsd: 0 };
+  }
+  const inputUsd = (usage.inputTokens / 1_000_000) * p.inputPer1M;
+  const outputUsd = (usage.outputTokens / 1_000_000) * p.outputPer1M;
   const cacheReadUsd = usage.cacheReadTokens && p.cacheReadPer1M
     ? (usage.cacheReadTokens / 1_000_000) * p.cacheReadPer1M
     : 0;
   const cacheWriteUsd = usage.cacheWriteTokens && p.cacheWritePer1M
     ? (usage.cacheWriteTokens / 1_000_000) * p.cacheWritePer1M
     : 0;
-  return inUsd + outUsd + cacheReadUsd + cacheWriteUsd;
+  return {
+    totalUsd: inputUsd + outputUsd + cacheReadUsd + cacheWriteUsd,
+    inputUsd,
+    outputUsd,
+    cacheReadUsd,
+    cacheWriteUsd,
+  };
+}
+
+/**
+ * Compute USD cost for a usage block at the given model's pricing.
+ * Returns 0 if the model is unknown.
+ */
+export function calculateCost(model: string, usage: UsageInput): number {
+  return calculateCostBreakdown(model, usage).totalUsd;
 }
 
 /** Test seam — clear the in-memory cache. */

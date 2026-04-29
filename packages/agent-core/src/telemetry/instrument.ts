@@ -26,6 +26,7 @@ import type {
 import { getTracer } from './tracer.js';
 import { loadTelemetryConfig } from './config.js';
 import { GenAi } from './attributes.js';
+import { calculateCostBreakdown } from '../cost.js';
 
 /**
  * Wrap a single-shot LLM call (e.g. runClaude / runGemini in single-shot.ts)
@@ -140,10 +141,26 @@ class InstrumentedModelAdapter implements ModelAdapter {
 
         try {
           const result = await this.inner.run(config, output);
+          // Compute the per-component breakdown from the central cost table.
+          // When the table doesn't know the model, breakdown.totalUsd is 0 —
+          // fall back to the adapter's costUsd so we never undercount in
+          // exported telemetry. (Decision O6: agent-core is the single source
+          // of truth, but only when it actually has data.)
+          const bd = calculateCostBreakdown(result.model, {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            cacheReadTokens: result.cacheReadTokens,
+            cacheWriteTokens: result.cacheWriteTokens,
+          });
+          const totalUsd = bd.totalUsd > 0 ? bd.totalUsd : result.costUsd;
           span.setAttributes({
             [GenAi.USAGE_INPUT_TOKENS]: result.inputTokens,
             [GenAi.USAGE_OUTPUT_TOKENS]: result.outputTokens,
-            [GenAi.USAGE_COST_USD]: result.costUsd,
+            [GenAi.USAGE_COST_USD]: totalUsd,
+            [GenAi.USAGE_COST_INPUT_USD]: bd.inputUsd,
+            [GenAi.USAGE_COST_OUTPUT_USD]: bd.outputUsd,
+            [GenAi.USAGE_COST_CACHE_READ_USD]: bd.cacheReadUsd,
+            [GenAi.USAGE_COST_CACHE_WRITE_USD]: bd.cacheWriteUsd,
             [GenAi.RESPONSE_MODEL]: result.model,
             'anvil.duration_ms': result.durationMs,
           });

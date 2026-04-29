@@ -249,7 +249,23 @@ Filled in after each phase commit. Use this section to record deviations, surpri
 
 ### Phase 4 — Cost annotation + cache cost separation
 
-- **Status:** Pending
+- **Status:** Complete
+- **Commit:** TBD
+- **Files modified:**
+  - `packages/agent-core/src/cost.ts` — added `CostBreakdown` interface + `calculateCostBreakdown(model, usage)` returning all 5 fields; refactored `calculateCost` to delegate
+  - `packages/agent-core/src/telemetry/instrument.ts` — wrapper now computes the breakdown and emits `gen_ai.usage.cost_{input,output,cache_read,cache_write}_usd`; total `cost_usd` becomes the breakdown total when known, falls back to adapter's `costUsd` for unknown models
+  - `packages/agent-core/src/single-shot.ts` — `runClaude` and `runGemini` `withInvokeSpan` callbacks now compute breakdown for the input/output components
+  - `packages/agent-core/src/__tests__/telemetry.test.ts` — Phase 2 cost assertion relaxed to ε tolerance (Phase 4 recompute introduces FP rounding: 0.003 + 0.0075 = 0.010499999999999999)
+- **Files added:** `packages/agent-core/src/__tests__/cost-breakdown.test.ts` (4 tests covering breakdown math + per-component span attrs + unknown-model fallback)
+- **Deviations from plan §4.1:**
+  1. **Cache hit ratio** was emitted in Phase 3 (not 4) since it lives next to cache tokens; Phase 4 §4.2 acceptance gate is satisfied retroactively.
+  2. **Unknown-model fallback** — when the central cost table doesn't know the model, the wrapper returns the adapter's pre-existing `costUsd` for the total but leaves components at zero. This reconciles decision O6 ("agent-core is single source of truth") with the practical reality that LiteLLM's snapshot lags new model releases.
+  3. **Adapter pre-computed `costUsd` is overridden** for known models. Some adapters (Claude with `total_cost_usd` from CLI) already include cache adjustments; for sonnet-4-6 the central table now wins. Verified: Phase 2 success-path test had to relax to ε tolerance because the breakdown sum drifts by 1e-18 vs the adapter's exact decimal. Plan §4.5 anticipated this.
+- **Verified:**
+  - 21/21 agent-core tests (3 prior cost tests didn't exist; 4 new Phase 4 tests added; 1 prior test fixed)
+  - 62/62 knowledge-core tests
+  - cli `tsc -b` clean
+  - Sum of components within 1e-9 of total (FP precision well within plan's `toFixed(6)` tolerance)
 
 ### Phase 5 — Exporter recipes (docs + smoke tests)
 

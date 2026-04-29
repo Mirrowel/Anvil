@@ -131,7 +131,12 @@ describe('telemetry — instrumentModelAdapter', () => {
     assert.equal(s.attributes[GenAi.REQUEST_MODEL], 'claude-sonnet-4-6');
     assert.equal(s.attributes[GenAi.USAGE_INPUT_TOKENS], 1000);
     assert.equal(s.attributes[GenAi.USAGE_OUTPUT_TOKENS], 500);
-    assert.equal(s.attributes[GenAi.USAGE_COST_USD], 0.0105);
+    // Phase 4 wrapper recomputes cost from the central table for known models.
+    // FP rounding means 0.003 + 0.0075 ≈ 0.010499999999999999 — assert within ε.
+    assert.ok(
+      Math.abs((s.attributes[GenAi.USAGE_COST_USD] as number) - 0.0105) < 1e-9,
+      `expected cost ≈ 0.0105, got ${s.attributes[GenAi.USAGE_COST_USD]}`,
+    );
     assert.equal(s.attributes[GenAi.RESPONSE_ID], 'sess-abc');
     assert.equal(s.attributes['anvil.stage'], 'build');
     assert.equal(s.attributes['anvil.persona'], 'engineer');
