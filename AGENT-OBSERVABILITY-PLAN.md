@@ -1,6 +1,6 @@
 # Plan: Observability layer for `@anvil/agent-core` (OpenTelemetry-first)
 
-> **Status: Proposed.** Self-contained executable plan — does not require prior conversation context. **Depends on [`AGENT-CORE-EXTRACT-PLAN.md`](./AGENT-CORE-EXTRACT-PLAN.md) being shipped** (the `LanguageModel` interface lives in `@anvil/agent-core`). Sibling: [`AGENT-HARNESS-PLAN.md`](./AGENT-HARNESS-PLAN.md) (executes after this).
+> **Status: Shipped (2026-04-29).** Phases 0–6 complete. See [`AGENT-OBSERVABILITY-ADR.md`](./AGENT-OBSERVABILITY-ADR.md) §9 for the per-phase commit log + plan deviations. Sibling: [`AGENT-HARNESS-PLAN.md`](./AGENT-HARNESS-PLAN.md) (executes after this).
 
 ---
 

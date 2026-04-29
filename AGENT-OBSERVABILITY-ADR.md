@@ -291,7 +291,23 @@ Filled in after each phase commit. Use this section to record deviations, surpri
 
 ### Phase 6 — Tests + dashboard server integration
 
-- **Status:** Pending
+- **Status:** Complete
+- **Commit:** TBD
+- **Files added:** `packages/agent-core/src/__tests__/telemetry-integration.test.ts` — 4 integration tests
+- **Tests added:**
+  1. **runClaude (cli mode) end-to-end** — stubbed claude binary writes a real stream-json result line; the test verifies the wrapper emits a `gen_ai.invoke` span with full attribute set (`gen_ai.system`, `gen_ai.request.model`, usage tokens, cost components, `anvil.transport=cli`, status OK)
+  2. **noop default** — no env vars set → `loadTelemetryConfig()` returns `{enabled: false, exporterMode: 'noop'}`
+  3. **kill-switch precedence** — `ANVIL_OTEL_DISABLED=1` defeats `OTEL_EXPORTER_OTLP_ENDPOINT`
+  4. **OTLP enable** — `OTEL_EXPORTER_OTLP_ENDPOINT` alone flips to otlp mode
+- **Decisions:**
+  1. **Dashboard wiring (plan §6.2): follow plan recommendation — keep dashboard's current cost path.** OTel is for *external* observability. Dashboard's per-run cost tracking is internal/UI state and lives in `packages/dashboard/server/cost-ledger.ts` (or equivalent). Wiring dashboard to drain `InMemorySpanExporter` instead is a future option but not necessary; cleaner separation of concerns.
+  2. **Doc surface:** all four "what gets traced / what does NOT / how to add an exporter / how to disable" sections live in `packages/agent-core/README.md` (Phase 5 §5.1). No separate `docs/observability.md` created — keeps the canonical location with the package.
+- **Verified:**
+  - 25/25 agent-core tests (4 new Phase 6 integration tests on top of 21 from Phase 4)
+  - 62/62 knowledge-core tests
+  - cli `tsc -b` clean (26 files)
+  - code-search-mcp build clean
+  - **Dashboard tests: 430/436 pass — exact baseline plan §6.5 expected, no regression.** The 6 pre-existing failures are unrelated (ProjectLoader.getModelForStage; 3× applyConventionFilter; evidence-gate; not in the agent-core code path)
 
 ---
 
