@@ -45,6 +45,7 @@
   "dependencies": {
     "@anvil/agent-core": "*",
     "@anvil/knowledge-core": "*",
+    "@anvil/memory-core": "*",
     "commander": "^13.1.0",
     "lucide-react": "1.8.0",
     "picocolors": "^1.1.1",

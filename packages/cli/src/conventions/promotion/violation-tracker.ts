@@ -1,7 +1,7 @@
 // Violation tracker — Section F.1
 
 import { join } from 'node:path';
-import { readJSONL, appendJSONL } from '../../memory/jsonl.js';
+import { readJSONL, appendJSONL } from '@anvil/memory-core/legacy/index.js';
 import { getFFDirs } from '../../home.js';
 
 export interface ViolationRecord {

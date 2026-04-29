@@ -1,29 +1,56 @@
-// Memory module barrel — Section A.8
+/**
+ * cli memory barrel — re-exports from `@anvil/memory-core` (Phase 2 hoist)
+ * with cli-specific orchestration that stays here:
+ *   - resolveMemoryPath (project-aware via `getFFDirs()`)
+ *   - createMemoryStore factory (wires resolveMemoryPath into the store)
+ *   - injectMemories (project-aware orchestration over query helpers)
+ *   - trackMemoryUsage (uses `getFFDirs().memory`)
+ *
+ * Existing consumers can keep importing from `'../memory'` unchanged —
+ * symbol names match the pre-Phase-2 surface 1:1.
+ */
 
-export type { MemoryKind, MemoryEntry, MemoryQueryOpts, MemoryStoreConfig } from './types.js';
-export { DEFAULT_TTL_DAYS, MAX_SIZE_BYTES } from './types.js';
-export { readJSONL, appendJSONL, writeJSONL } from './jsonl.js';
+export type {
+  MemoryKind,
+  MemoryEntry,
+  MemoryQueryOpts,
+  MemoryStoreConfig,
+  CreateMemoryOpts,
+} from '@anvil/memory-core/legacy/index.js';
+export {
+  DEFAULT_TTL_DAYS,
+  MAX_SIZE_BYTES,
+  readJSONL,
+  appendJSONL,
+  writeJSONL,
+  MemoryStore,
+  createMemoryEntry,
+  pruneExpired,
+  pruneBySize,
+  queryByTags,
+  queryByContent,
+  selectTopK,
+} from '@anvil/memory-core/legacy/index.js';
+
+// cli-specific
 export { resolveMemoryPath } from './paths.js';
-export { createMemoryEntry } from './entry-factory.js';
-export type { CreateMemoryOpts } from './entry-factory.js';
-export { MemoryStore } from './memory-store.js';
-export { pruneExpired } from './expiration.js';
-export { pruneBySize } from './size-prune.js';
-
-// Section B exports
-export { queryByTags } from './query-by-tags.js';
-export { queryByContent } from './query-by-content.js';
-export { selectTopK } from './top-k.js';
 export { injectMemories } from './injector.js';
 export { trackMemoryUsage } from './usage-tracker.js';
 
-import { join } from 'node:path';
-import { MemoryStore } from './memory-store.js';
+import {
+  MemoryStore,
+  pruneExpired,
+  pruneBySize,
+  DEFAULT_TTL_DAYS,
+  MAX_SIZE_BYTES,
+} from '@anvil/memory-core/legacy/index.js';
+import type {
+  MemoryStoreConfig,
+  MemoryEntry,
+  MemoryKind,
+  MemoryQueryOpts,
+} from '@anvil/memory-core/legacy/index.js';
 import { resolveMemoryPath } from './paths.js';
-import { pruneExpired } from './expiration.js';
-import { pruneBySize } from './size-prune.js';
-import { DEFAULT_TTL_DAYS, MAX_SIZE_BYTES } from './types.js';
-import type { MemoryStoreConfig, MemoryEntry, MemoryKind, MemoryQueryOpts } from './types.js';
 
 /**
  * A MemoryStore wrapper that auto-prunes on list/query.
@@ -44,6 +71,9 @@ class ManagedMemoryStore extends MemoryStore {
 
 /**
  * Factory: create a managed MemoryStore with auto-pruning.
+ *
+ * Path-aware wrapper around memory-core's `MemoryStore` — resolves the
+ * project's `~/.anvil/memory/<project>/` directory before constructing.
  */
 export function createMemoryStore(project?: string): MemoryStore {
   const memPath = resolveMemoryPath(project);

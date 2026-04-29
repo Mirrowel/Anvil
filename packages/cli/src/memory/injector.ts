@@ -1,10 +1,12 @@
 // Memory injector — Section B.4
 
 import { createMemoryStore } from './index.js';
-import { queryByTags } from './query-by-tags.js';
-import { queryByContent } from './query-by-content.js';
-import { selectTopK } from './top-k.js';
-import type { MemoryEntry } from './types.js';
+import {
+  queryByTags,
+  queryByContent,
+  selectTopK,
+  type MemoryEntry,
+} from '@anvil/memory-core/legacy/index.js';
 
 export interface InjectionContext {
   tags?: string[];

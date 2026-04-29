@@ -1,10 +1,15 @@
 /**
  * @anvil/memory-core — public barrel.
  *
- * Phase 1: canonical types only. Subsequent phases populate:
- *   - Phase 2: hoisted JSONL store + queries + learners from cli/memory
+ * Phase 1: v2 canonical types (this file's `./types.js` re-export).
+ * Phase 2: legacy primitives hoisted from `cli/src/memory/` — accessible
+ *          via the subpath import `@anvil/memory-core/legacy/index.js` to
+ *          avoid name collisions with the v2 schema (`MemoryKind` is
+ *          different in legacy vs v2).
+ *
+ * Subsequent phases populate:
  *   - Phase 3: SQLite hot index + FTS5
- *   - Phase 4: namespace API + factory
+ *   - Phase 4: namespace API + factory + v2 store
  *   - Phase 5: bi-temporal model
  *   - Phase 6: code-fact drift detection
  *   - Phase 7: PII/secret scrubber
