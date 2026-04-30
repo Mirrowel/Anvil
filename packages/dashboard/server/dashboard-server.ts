@@ -4888,6 +4888,12 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
           const clamped = Math.max(0, Math.min(requested, info.stageIndex));
           runner.requestRerunFromStage(clamped, final.resumeDecision.note ?? null);
         }
+        // Phase F — `iterate-with-note`: re-run only the just-paused
+        // stage with the note framed as reviewer feedback. No manifest
+        // clear, no rewind to prior stages, no failureContext framing.
+        if (final?.resumeDecision?.action === 'iterate-with-note') {
+          runner.iterateCurrentStageWithNote(info.stageIndex, final.resumeDecision.note ?? null);
+        }
       });
     }
 

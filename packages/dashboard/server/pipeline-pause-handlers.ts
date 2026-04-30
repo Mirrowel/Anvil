@@ -88,6 +88,7 @@ function isValidAction(value: unknown): value is ResumeDecision['action'] {
   return value === 'approve'
     || value === 'approve-with-note'
     || value === 'modify-artifact'
+    || value === 'iterate-with-note'
     || value === 'rerun-from'
     || value === 'cancel';
 }

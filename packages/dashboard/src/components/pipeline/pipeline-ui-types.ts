@@ -54,9 +54,12 @@ export interface PausedRunData {
  *
  *   approve            — proceed as-is.
  *   approve-with-note  — proceed but inject `note` into the NEXT stage's
- *                        user prompt as a "User note from review:" block.
+ *                        user prompt.
  *   modify-artifact    — server replaces the paused stage's artifact text
  *                        with `editedArtifact` before the next stage runs.
+ *   iterate-with-note  — re-run the JUST-paused stage with `note` injected
+ *                        as feedback (engineer/analyst/etc. refines their
+ *                        own output). Working-tree state preserved.
  *   rerun-from         — discard work from `rerunFromStage` onwards and
  *                        replay; `note` is injected as failure context.
  *   cancel             — kill the run.
@@ -65,12 +68,13 @@ export type ResumeAction =
   | 'approve'
   | 'approve-with-note'
   | 'modify-artifact'
+  | 'iterate-with-note'
   | 'rerun-from'
   | 'cancel';
 
 export interface ResumeDecision {
   action: ResumeAction;
-  /** Free-text feedback. Required for approve-with-note + rerun-from. */
+  /** Free-text feedback. Required for approve-with-note, iterate-with-note, rerun-from. */
   note?: string;
   /** Replacement markdown for the just-paused stage's artifact (modify-artifact only). */
   editedArtifact?: string;

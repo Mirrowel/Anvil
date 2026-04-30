@@ -20,23 +20,31 @@ export type PauseStatus =
  * `dashboard/src/components/pipeline/pipeline-ui-types.ts`.
  *
  *   approve            — proceed as-is.
- *   approve-with-note  — proceed but inject `note` into the next stage's prompt.
+ *   approve-with-note  — proceed but inject `note` into the NEXT stage's prompt.
  *   modify-artifact    — replace the paused stage's artifact with
  *                        `editedArtifact` before the next stage runs.
+ *   iterate-with-note  — re-run the JUST-paused stage with `note` injected
+ *                        as feedback. Working tree is preserved; only the
+ *                        stage's status/artifact/cost reset. Use this when
+ *                        the work is mostly right but needs refinement
+ *                        (e.g., engineer should "also do X").
  *   rerun-from         — discard work from `rerunFromStage` onwards and
- *                        replay; `note` is injected as failure context.
+ *                        replay; `note` is injected as retry framing
+ *                        (failureContext). Use this when the scope of the
+ *                        problem is multiple stages back.
  *   cancel             — kill the run.
  */
 export type ResumeAction =
   | 'approve'
   | 'approve-with-note'
   | 'modify-artifact'
+  | 'iterate-with-note'
   | 'rerun-from'
   | 'cancel';
 
 export interface ResumeDecision {
   action: ResumeAction;
-  /** Free-text feedback. Required for approve-with-note and rerun-from. */
+  /** Free-text feedback. Required for approve-with-note, iterate-with-note, rerun-from. */
   note?: string;
   /** Replacement markdown body for the just-paused stage's artifact. */
   editedArtifact?: string;

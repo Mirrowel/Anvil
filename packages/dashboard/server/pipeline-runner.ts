@@ -555,31 +555,72 @@ export class PipelineRunner extends EventEmitter {
     return v;
   }
 
-  // ── Rerun-from (Phase C — reviewer rolls back to a prior stage) ──────
+  // ── Rerun-from + Iterate-with-note (Phases C & F) ─────────────────────
+  //
+  // Both actions reset stage state and bounce the loop counter back; the
+  // difference is *what* gets reset and how the note is framed:
+  //
+  //   rerun-from:
+  //     - Resets stages [target..current] (could rewind multiple stages)
+  //     - Clears manifest fields written by those stages
+  //     - Note → failureContext ("RETRY. The previous run failed: …")
+  //
+  //   iterate-with-note:
+  //     - Resets ONLY the current stage
+  //     - Manifest fields untouched
+  //     - Note → reviewNote ("User note from review (apply throughout)")
+  //
+  // Both share the same pending slot; `pendingRerunMode` decides which
+  // semantics the loop applies on consume.
 
   private pendingRerunFromStage: number | null = null;
   private rerunFromNote: string | null = null;
+  private pendingRerunMode: 'rerun-from' | 'iterate' | null = null;
 
   /**
    * Reviewer asked to roll the pipeline back to `targetIndex` and replay
-   * with `note` as failure context. Validated by caller (dashboard's
-   * after-stage hook) — runner trusts the bounds. Cleared once consumed
-   * by the loop.
+   * with `note` as failure context.
    */
   requestRerunFromStage(targetIndex: number, note: string | null): void {
     if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= STAGES.length) {
       return;
     }
     this.pendingRerunFromStage = targetIndex;
+    this.pendingRerunMode = 'rerun-from';
     const trimmed = note?.trim() ?? '';
     this.rerunFromNote = trimmed.length > 0 ? trimmed : null;
   }
 
-  private consumeRerunRequest(): { targetIndex: number; note: string | null } | null {
-    if (this.pendingRerunFromStage === null) return null;
-    const v = { targetIndex: this.pendingRerunFromStage, note: this.rerunFromNote };
+  /**
+   * Reviewer wants to refine the just-paused stage's output with feedback
+   * — keep working-tree state, keep manifest, frame the note as
+   * reviewer-feedback (not retry). The loop will reset just THIS stage
+   * and re-spawn with `reviewNote` set.
+   */
+  iterateCurrentStageWithNote(currentStageIndex: number, note: string | null): void {
+    if (!Number.isInteger(currentStageIndex) || currentStageIndex < 0 || currentStageIndex >= STAGES.length) {
+      return;
+    }
+    this.pendingRerunFromStage = currentStageIndex;
+    this.pendingRerunMode = 'iterate';
+    const trimmed = note?.trim() ?? '';
+    this.rerunFromNote = trimmed.length > 0 ? trimmed : null;
+  }
+
+  private consumeRerunRequest(): {
+    targetIndex: number;
+    note: string | null;
+    mode: 'rerun-from' | 'iterate';
+  } | null {
+    if (this.pendingRerunFromStage === null || this.pendingRerunMode === null) return null;
+    const v = {
+      targetIndex: this.pendingRerunFromStage,
+      note: this.rerunFromNote,
+      mode: this.pendingRerunMode,
+    };
     this.pendingRerunFromStage = null;
     this.rerunFromNote = null;
+    this.pendingRerunMode = null;
     return v;
   }
 
@@ -1509,25 +1550,37 @@ export class PipelineRunner extends EventEmitter {
             }
           }
 
-          // Phase C — rerun-from: if the reviewer asked to roll back to a
-          // prior stage, reset the loop counter, wipe intermediate state +
-          // manifest fields, set the rerun note as failure context, and
-          // skip the artifact-write / manifest-extraction phase below.
+          // Phases C + F — rerun-from / iterate-with-note: bounce the
+          // loop counter back to a prior stage. `mode` discriminates:
+          //   - 'rerun-from': wipe stages [target..i] + clear manifest;
+          //     frame the note as failureContext ("RETRY, previous run
+          //     failed").
+          //   - 'iterate':    wipe only stage `i` (== target); leave
+          //     manifest alone; frame the note via reviewNote ("User note
+          //     from review, apply throughout").
           const rerun = this.consumeRerunRequest();
           if (rerun !== null) {
             const target = rerun.targetIndex;
-            this.resetStagesForRerun(target, i);
-            this.clearManifestFieldsForStages(target, i);
-            if (rerun.note) {
-              this.config.failureContext =
-                `Rerun requested by reviewer at stage "${STAGES[target].name}":\n${rerun.note}`;
+            if (rerun.mode === 'iterate') {
+              // Single-stage refinement — preserve everything else.
+              this.resetStagesForRerun(target, target);
+              if (rerun.note) this.setReviewNote(rerun.note);
+              console.log(`[pipeline] Iterate requested → re-running stage ${target} (${STAGES[target].name}) with reviewer feedback`);
+            } else {
+              // Multi-stage rewind — wipe through and reframe as retry.
+              this.resetStagesForRerun(target, i);
+              this.clearManifestFieldsForStages(target, i);
+              if (rerun.note) {
+                this.config.failureContext =
+                  `Rerun requested by reviewer at stage "${STAGES[target].name}":\n${rerun.note}`;
+              }
+              console.log(`[pipeline] Rerun-from requested → resetting to stage ${target} (${STAGES[target].name})`);
             }
             prevArtifact = target > 0
               ? (this.state.stages[target - 1]?.artifact ?? '')
               : '';
             this.broadcastState();
             this.checkpoint();
-            console.log(`[pipeline] Rerun-from requested → resetting to stage ${target} (${STAGES[target].name})`);
             // The loop's i++ at end of iteration will land on `target`.
             i = target - 1;
             continue;

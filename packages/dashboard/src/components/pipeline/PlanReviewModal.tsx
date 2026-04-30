@@ -40,7 +40,7 @@ export interface PlanReviewModalProps {
   onClose: () => void;
 }
 
-type InlinePanel = 'approveNote' | 'modify' | 'replan' | 'confirmCancel' | null;
+type InlinePanel = 'approveNote' | 'modify' | 'iterate' | 'replan' | 'confirmCancel' | null;
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
@@ -154,6 +154,13 @@ export function PlanReviewModal({
     if (!trimmed) return;
     onResolve({ action: 'rerun-from', note: trimmed, rerunFromStage: rerunTarget });
   }, [note, rerunTarget, onResolve]);
+
+  const [iterateNote, setIterateNote] = useState('');
+  const handleSubmitIterate = useCallback(() => {
+    const trimmed = iterateNote.trim();
+    if (!trimmed) return;
+    onResolve({ action: 'iterate-with-note', note: trimmed });
+  }, [iterateNote, onResolve]);
 
   const handleApproveWithNote = useCallback(() => {
     const trimmed = approveNote.trim();
@@ -629,12 +636,69 @@ export function PlanReviewModal({
               )}
 
               <button
+                onClick={() => setInline((v) => v === 'iterate' ? null : 'iterate')}
+                aria-expanded={inline === 'iterate'}
+                style={actionBtnStyle('secondary')}
+              >
+                <Pencil size={13} strokeWidth={1.75} aria-hidden="true" />
+                Iterate with note (refine this stage)
+              </button>
+
+              {inline === 'iterate' && (
+                <div style={inlinePanelStyle()}>
+                  <div style={{
+                    fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 6,
+                  }}>
+                    Re-run the {pause.stage} stage with your feedback. Working-tree state is preserved — the agent reads what's already there and applies your note.
+                  </div>
+                  <textarea
+                    value={iterateNote}
+                    onChange={(e) => setIterateNote(e.target.value)}
+                    rows={5}
+                    placeholder="e.g. Also add error handling for the case where adoption fails after a partial commit."
+                    aria-label="Iteration feedback"
+                    style={{
+                      width: '100%',
+                      background: 'var(--bg-base)',
+                      border: '1px solid var(--separator)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: 8,
+                      color: 'var(--text-primary)',
+                      fontFamily: 'var(--font-sans)',
+                      fontSize: 13,
+                      outline: 'none',
+                      resize: 'vertical',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <button
+                      onClick={handleSubmitIterate}
+                      disabled={!iterateNote.trim()}
+                      style={{
+                        ...actionBtnStyle('primary', 32),
+                        opacity: iterateNote.trim() ? 1 : 0.55,
+                        cursor: iterateNote.trim() ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      Apply &amp; rerun stage
+                    </button>
+                    <button
+                      onClick={() => setInline(null)}
+                      style={actionBtnStyle('ghost', 32)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <button
                 onClick={() => setInline((v) => v === 'replan' ? null : 'replan')}
                 aria-expanded={inline === 'replan'}
                 style={actionBtnStyle('secondary')}
               >
                 <Send size={13} strokeWidth={1.75} aria-hidden="true" />
-                Rerun with note
+                Rerun from earlier stage
               </button>
 
               {inline === 'replan' && (
