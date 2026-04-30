@@ -57,6 +57,27 @@ export type {
   RunClarifyForProjectResult,
   ClarifyStageStepOptions,
 } from './clarify-stage.step.js';
+export {
+  runFixLoop,
+  createFixLoopStep,
+  hasValidationFailures,
+  extractRepoSection,
+} from './fix-loop.step.js';
+export type {
+  RunFixLoopOptions,
+  RunFixLoopResult,
+  FixLoopStepOptions,
+} from './fix-loop.step.js';
+export {
+  runTestGenForProject,
+  createTestGenStageStep,
+  pickRepoForBehavior,
+} from './test-gen-stage.step.js';
+export type {
+  RunTestGenForProjectOptions,
+  TestGenStageStepOptions,
+  TestGenArtifactEvent,
+} from './test-gen-stage.step.js';
 export { attachCostBudgetHook } from './cost-budget.hook.js';
 export type {
   CostBudgetHookOptions,

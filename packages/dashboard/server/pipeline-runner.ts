@@ -37,7 +37,6 @@ import {
 } from './feature-manifest.js';
 import {
   spawnAndWait,
-  waitForAgent as waitForAgentHelper,
 } from './steps/agent-spawner.js';
 import {
   runPerRepoStageForRepo,
@@ -49,6 +48,13 @@ import {
 import {
   runClarifyForProject,
 } from './steps/clarify-stage.step.js';
+import {
+  runFixLoop,
+  hasValidationFailures as hasValidationFailuresHelper,
+} from './steps/fix-loop.step.js';
+import {
+  runTestGenForProject,
+} from './steps/test-gen-stage.step.js';
 import {
   extractAcceptanceCriteria,
   extractAffectedRepos,
@@ -1992,18 +1998,6 @@ export class PipelineRunner extends EventEmitter {
     });
   }
 
-  // ── Agent completion helper ────────────────────────────────────────
-
-  private waitForAgent(agentId: string): Promise<{ artifact: string; cost: number }> {
-    return waitForAgentHelper({
-      agentId,
-      agentManager: this.agentManager,
-      isCancelled: () => this.cancelled,
-      onTruncation: (agentName, outputTokens) =>
-        this.handleOutputTruncation(agentName, outputTokens),
-    });
-  }
-
   /**
    * Phase 3 — Output-truncation telemetry hook. Called when an agent's
    * stop_reason indicates the max-tokens ceiling was reached. Surfaces a
@@ -2029,28 +2023,7 @@ export class PipelineRunner extends EventEmitter {
 
   /** Check if validation artifact indicates failures */
   private hasValidationFailures(artifact: string): boolean {
-    if (!artifact) return false;
-
-    // Explicit markers always win.
-    if (/VERDICT:\s*FAIL/i.test(artifact)) return true;
-    if (/\bUNRESOLVED\b/i.test(artifact)) return true;
-
-    // Otherwise, check each line. A failure line looks like "tests failed",
-    // "build failed", "typecheck failed", "lint errored" — tightly scoped,
-    // NOT cross-line. Lines with PASS markers are explicitly excluded.
-    for (const rawLine of artifact.split('\n')) {
-      const line = rawLine.trim();
-      if (!line) continue;
-      // Tables / bullets with PASS are healthy.
-      if (/\bPASS\b/.test(line) && !/\bFAIL\b/.test(line)) continue;
-      // Explicit failure phrases near build/lint/test/typecheck subjects.
-      if (/\b(?:build|lint|linting|typecheck|type[- ]?check|tests?)\s+(?:failed|failing|errored|broken|has\s+errors?|exits?\s+non-?zero)\b/i.test(line)) return true;
-      // Common failure glyphs in CI output.
-      if (/(?:^|\s)(?:✗|✖|❌|FAILED:|FAIL:)/.test(line)) return true;
-      // Jest/Vitest-style "N failed" or "N failing" count summaries.
-      if (/\b[1-9]\d*\s+(?:failed|failing)\b/i.test(line)) return true;
-    }
-    return false;
+    return hasValidationFailuresHelper(artifact);
   }
 
   /**
@@ -2059,135 +2032,25 @@ export class PipelineRunner extends EventEmitter {
    * TestCase artifacts. No LLM calls in Phase 1; validate runs whatever lands.
    */
   private async runTestGenStage(stageIndex: number): Promise<string> {
-    if (!this.config.planSeed) return 'Test stage skipped (no plan seed).';
-
-    const { fingerprintConventions } = await import('./convention-fingerprinter.js');
-    const { extractBehaviorsFromPlan } = await import('./behavior-extractor.js');
-    const { groundBehaviors } = await import('./test-grounder.js');
-    const { emitTestCase } = await import('./test-code-emitter.js');
-    const { TestSpecStore } = await import('./test-spec-store.js');
-    const { TestCaseStore } = await import('./test-case-store.js');
-
-    const plan = this.config.planSeed.plan;
-    const repoNames = this.state.repoNames.length ? this.state.repoNames : Object.keys(this.repoPaths);
+    const repoNames = this.state.repoNames.length
+      ? this.state.repoNames
+      : Object.keys(this.repoPaths);
     const repoLocalPaths: Record<string, string> = {};
     for (const r of repoNames) repoLocalPaths[r] = this.repoPaths[r] ?? join(this.workspaceDir, r);
 
-    // Fingerprint conventions on the first repo that has code; that becomes the
-    // reference for the whole spec. If a repo has its own fingerprint later,
-    // individual test cases can be re-emitted per repo.
-    let conventions = await fingerprintConventions(
-      Object.values(repoLocalPaths).find((p) => existsSync(p)) ?? this.workspaceDir,
-    );
-    this.state.stages[stageIndex].artifact = `Detected runner: ${conventions.runner}\n`;
-
-    // Extract Behaviors from the plan (deterministic).
-    const behaviors = extractBehaviorsFromPlan(plan, { maxPerRepo: 20 });
-    if (behaviors.length === 0) {
-      return `Test stage skipped (no behaviors extracted from plan ${plan.slug}).`;
-    }
-
-    // Ground against disk in all repos.
-    const grounded = await groundBehaviors(behaviors, repoLocalPaths);
-    const resolvedBehaviors = grounded.map((g) => g.behavior);
-
-    // Persist TestSpec (v1).
-    const specStore = new TestSpecStore();
-    const spec = specStore.createSpec(this.config.project, plan.title || plan.slug, plan.model ?? this.config.model, {
-      title: `Tests for ${plan.title || plan.slug}`,
-      source: {
-        plan: { slug: plan.slug, version: plan.version },
-        files: plan.repos.flatMap((r) => r.files ?? []),
+    return runTestGenForProject({
+      planSeed: this.config.planSeed ?? null,
+      project: this.config.project,
+      model: this.config.model,
+      workspaceDir: this.workspaceDir,
+      repoLocalPaths,
+      onConventionsDetected: (artifact) => {
+        this.state.stages[stageIndex].artifact = artifact;
       },
-      behaviors: resolvedBehaviors,
-      conventions,
+      onArtifactWritten: (event) => {
+        this.emit('artifact-written', event);
+      },
     });
-
-    // Emit deterministic TestCase scaffolds.
-    const cases = resolvedBehaviors.map((b) =>
-      emitTestCase(b, conventions, {
-        specSlug: spec.slug,
-        specVersion: spec.version,
-        projectSlug: this.config.project,
-      }),
-    );
-    const caseStore = new TestCaseStore();
-    caseStore.writeCases(this.config.project, spec.slug, spec.version, cases);
-
-    // Write each test file into the appropriate repo. The emitter picks a file
-    // path relative to the target file's directory; we rebase onto each repo's
-    // local clone by best-matching the target file against repo file trees.
-    let writtenCount = 0;
-    const notes: string[] = [];
-    for (const c of cases) {
-      const behavior = resolvedBehaviors.find((b) => b.id === c.behaviorId);
-      if (!behavior) continue;
-      const targetRepo = this.pickRepoForBehavior(behavior, repoLocalPaths);
-      if (!targetRepo) {
-        notes.push(`- ${behavior.intent}: no repo match for target ${behavior.target.file}`);
-        continue;
-      }
-      const fullPath = join(repoLocalPaths[targetRepo], c.filePath);
-      try {
-        if (!existsSync(fullPath) || readFileSync(fullPath, 'utf-8').includes('// anvil-generated')) {
-          mkdirSync(dirname(fullPath), { recursive: true });
-          const header = `// anvil-generated — spec:${spec.slug}@v${spec.version} behavior:${c.behaviorId}\n`;
-          const tmp = fullPath + '.tmp';
-          writeFileSync(tmp, header + c.code, 'utf-8');
-          renameSync(tmp, fullPath);
-          writtenCount++;
-        } else {
-          notes.push(`- ${c.filePath}: existing hand-written test, not overwritten`);
-        }
-      } catch (err) {
-        notes.push(`- ${c.filePath}: write failed (${err instanceof Error ? err.message : String(err)})`);
-      }
-    }
-
-    const summary = [
-      `Runner: ${conventions.runner} · file layout: ${conventions.fileLayout}`,
-      `Behaviors extracted: ${resolvedBehaviors.length} (${resolvedBehaviors.filter((b) => b.ground.confidence >= 1).length} fully grounded)`,
-      `Test cases written: ${writtenCount}/${cases.length}`,
-      `Spec: ${spec.slug}@v${spec.version}`,
-      notes.length ? `\nNotes:\n${notes.join('\n')}` : '',
-    ].join('\n');
-
-    // Broadcast via pipeline state artifact — dashboard consumers can subscribe.
-    this.emit('artifact-written', {
-      stage: 'test',
-      file: `tests/${spec.slug}/spec-v${spec.version}.json`,
-      summary: `${writtenCount} test case${writtenCount !== 1 ? 's' : ''} generated`,
-      content: summary,
-    });
-
-    return summary;
-  }
-
-  /** Pick the repo whose local path contains the behavior's target file. */
-  private pickRepoForBehavior(
-    behavior: { target: { file: string } },
-    repoLocalPaths: Record<string, string>,
-  ): string | null {
-    const targetBase = behavior.target.file.split('/').pop() ?? '';
-    for (const [repoName, path] of Object.entries(repoLocalPaths)) {
-      if (!path || !existsSync(path)) continue;
-      try {
-        const full = join(path, behavior.target.file);
-        if (existsSync(full)) return repoName;
-      } catch { /* ignore */ }
-    }
-    // Fallback: first repo with any file matching the basename.
-    if (!targetBase) return Object.keys(repoLocalPaths)[0] ?? null;
-    for (const [repoName, path] of Object.entries(repoLocalPaths)) {
-      if (!path || !existsSync(path)) continue;
-      try {
-        const found = execSync(`find "${path}" -name "${targetBase}" -not -path "*/node_modules/*" | head -1`, {
-          encoding: 'utf-8', timeout: 5_000,
-        }).trim();
-        if (found) return repoName;
-      } catch { /* continue */ }
-    }
-    return Object.keys(repoLocalPaths)[0] ?? null;
   }
 
   /** Run engineer agents to fix validation issues, then return */
@@ -2201,89 +2064,34 @@ export class PipelineRunner extends EventEmitter {
     attempt: number,
   ): Promise<{ artifact: string; cost: number }> {
     const buildStage = STAGES.find((s) => s.name === 'build')!;
-    const repos = this.state.repoNames;
-    let totalCost = 0;
-
-    if (repos.length === 0) {
-      // Single-agent fix — resume the prior session on attempt ≥ 2 (P9).
-      const issuesBlock = validateArtifact.slice(0, 6000);
-      const priorId = this.fixLoopAgentSingle;
-      if (priorId && attempt > 1 && this.agentManager.getAgent(priorId)) {
-        const followUp = `Validation still failing after your last fix (attempt ${attempt}). Issues:\n\n${issuesBlock}\n\nFix the remaining errors and re-run tests.`;
-        this.agentManager.sendInput(priorId, followUp);
-        return this.waitForAgent(priorId);
-      }
-      const prompt = `The validation stage found issues that need to be fixed (attempt ${attempt}):\n\n${issuesBlock}\n\nFix ALL build errors, lint errors, and test failures. Run the build and tests again to verify. Do NOT make git commits.`;
-      const agent = this.agentManager.spawn({
-        name: `fixer-${this.config.project}-${attempt}`,
-        persona: 'engineer',
-        project: this.config.project,
-        stage: `fix-${attempt}`,
-        prompt,
-        model: this.resolveModelForStage('validate'),
-        cwd: this.workspaceDir,
-        projectPrompt: this.buildProjectPrompt(buildStage),
-        permissionMode: 'bypassPermissions',
-        disallowedTools: ['Agent'],
-        maxOutputTokens: maxOutputTokensForStage('build'),
-      });
-      this.fixLoopAgentSingle = agent.id;
-      return this.waitForAgent(agent.id);
+    const repoPaths: Record<string, string> = {};
+    for (const repoName of this.state.repoNames) {
+      repoPaths[repoName] = this.repoPaths[repoName] || join(this.workspaceDir, repoName);
     }
-
-    // Per-repo fix
-    const promises = repos.map(async (repoName) => {
-      const repoPath = this.repoPaths[repoName] || join(this.workspaceDir, repoName);
-
-      // Extract repo-specific issues from validate artifact
-      const repoSection = this.extractRepoSection(validateArtifact, repoName);
-      if (!repoSection || !this.hasValidationFailures(repoSection)) {
-        return { artifact: '', cost: 0 };  // this repo is fine
-      }
-
-      const issuesBlock = repoSection.slice(0, 4000);
-      const priorId = this.fixLoopAgentByRepo.get(repoName);
-      if (priorId && attempt > 1 && this.agentManager.getAgent(priorId)) {
-        const followUp = `Validation still failing in "${repoName}" after your last fix (attempt ${attempt}). Issues:\n\n${issuesBlock}\n\nFix the remaining errors and re-run tests.`;
-        this.agentManager.sendInput(priorId, followUp);
-        return this.waitForAgent(priorId);
-      }
-
-      const prompt = `The validation stage found issues in "${repoName}" that need to be fixed (attempt ${attempt}):\n\n${issuesBlock}\n\nFix ALL build errors, lint errors, and test failures in this repo. Run the build and tests again to verify. Do NOT make git commits.`;
-      const agent = this.agentManager.spawn({
-        name: `fixer-${repoName}-${attempt}`,
-        persona: 'engineer',
-        project: this.config.project,
-        stage: `fix-${attempt}:${repoName}`,
-        prompt,
-        model: this.resolveModelForStage('validate'),
-        cwd: repoPath,
-        projectPrompt: this.buildRepoProjectPrompt(buildStage, repoName),
-        permissionMode: 'bypassPermissions',
-        disallowedTools: ['Agent'],
-        maxOutputTokens: maxOutputTokensForStage('build'),
-      });
-      this.fixLoopAgentByRepo.set(repoName, agent.id);
-      return this.waitForAgent(agent.id);
+    const result = await runFixLoop({
+      agentManager: this.agentManager,
+      project: this.config.project,
+      model: this.resolveModelForStage('validate'),
+      maxOutputTokens: maxOutputTokensForStage('build'),
+      workspaceDir: this.workspaceDir,
+      repoNames: this.state.repoNames,
+      repoPaths,
+      validateArtifact,
+      attempt,
+      priorByRepo: this.fixLoopAgentByRepo,
+      priorSingleId: this.fixLoopAgentSingle,
+      buildProjectPromptForBuildStage: () => this.buildProjectPrompt(buildStage),
+      buildRepoProjectPromptForBuildStage: (repoName: string) =>
+        this.buildRepoProjectPrompt(buildStage, repoName),
+      isCancelled: () => this.cancelled,
+      onTruncation: (agentName, outputTokens) => {
+        this.handleOutputTruncation(agentName, outputTokens);
+      },
     });
-
-    const results = await Promise.all(promises);
-    const combinedArtifact = results.map((r) => r.artifact).filter(Boolean).join('\n\n');
-    totalCost = results.reduce((sum, r) => sum + r.cost, 0);
-
-    return { artifact: combinedArtifact, cost: totalCost };
-  }
-
-  /** Extract the section of a validate artifact related to a specific repo */
-  private extractRepoSection(artifact: string, repoName: string): string {
-    // Try to find a section headed with the repo name
-    const regex = new RegExp(`## ${repoName}[\\s\\S]*?(?=## \\w|$)`, 'i');
-    const match = artifact.match(regex);
-    if (match) return match[0];
-
-    // Fallback: check if repo name appears anywhere with error context
-    if (artifact.includes(repoName)) return artifact;
-    return '';
+    if (result.newSingleId !== null) {
+      this.fixLoopAgentSingle = result.newSingleId;
+    }
+    return { artifact: result.artifact, cost: result.cost };
   }
 
   // ── Artifact loading (for resume) ──────────────────────────────────
