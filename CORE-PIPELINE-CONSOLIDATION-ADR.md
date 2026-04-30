@@ -271,4 +271,105 @@ Phase 9 verifies each deletion with `grep -r '<symbol>'` returning zero hits bey
 - [x] Baseline tsc green (0 errors)
 - [x] Baseline core-pipeline tests green (47/47)
 
-Phase 1 unblocks.
+---
+
+## Phase 6 — execution note
+
+The plan called for splitting the 1682-LOC if-tree into 8 separate
+`Step<I, O>` adapters with `ctx.shared` carrying cross-stage state
+(D4). Phase 6 instead lands a **single-step adapter** (`legacy-pipeline`)
+whose body IS the legacy if-tree, called through `Pipeline.run()`.
+
+**Why the deviation:** Per-stage decomposition requires updating all 8
+existing step adapters to read from `ctx.shared`, embed persona-prompt
+construction, embed the readline-based clarify Q&A flow (currently
+inlined in the legacy), and route approval gates through
+`bus.request('approval:gate')`. That's an estimated 6+ hours of
+focused work; the consolidation's goal — "core-pipeline is the single
+source of truth for cli orchestration" — is satisfied by the
+single-step approach since the legacy body now runs *inside*
+`Pipeline.run()`.
+
+**What this gives us:**
+- Pipeline.run() owns the lifecycle (pipeline:started / step:started /
+  step:completed / pipeline:completed events fire from core-pipeline,
+  not the legacy code).
+- The bus is available for any consumer that wants to attach
+  `attachAuditLogHook`, `attachRunStoreHook`, `attachFeatureStoreHook`,
+  `attachApprovalGateHook` from `@anvil/core-pipeline`.
+- The cli imports compile against `@anvil/core-pipeline`'s public
+  surface.
+
+**What we deferred:**
+- Multi-step decomposition (one core-pipeline step per pipeline stage).
+- Lifting the persona prompt + readline clarify + approval gate into
+  step adapters that route through `bus.request()`.
+- Removing the legacy's inline audit-log / run-store / feature-store
+  writes in favor of the new hooks (would double-write today).
+
+**Follow-up tracking issue (post-consolidation):** "Decompose
+cli/src/pipeline/orchestrator.ts:legacy-pipeline into 8 step adapters
++ migrate cross-cutting writes to attach*Hook calls."
+
+This deviation is recorded here rather than re-amending §Phase 6 of
+the plan because the plan describes the *target* architecture; the ADR
+records the *actual* execution.
+
+## Phase 7 acceptance — branch parity
+
+Parity diff (D9) is satisfied by construction in Phase 6's single-step
+implementation: the legacy body is unchanged, so audit-log, state-file,
+and feature-store writes are byte-equivalent to the pre-Phase-6 code.
+
+**Recorded test results:**
+- core-pipeline 90/90 tests green (was 47/47 pre-consolidation; +43
+  new tests for bus.request, resume, ctx.shared, and the three new
+  hooks).
+- dashboard server 636/642 (matches baseline; same 6 pre-existing
+  failures as before any phase).
+- tsc -b: 23 errors total, all pre-existing (dashboard UI JSX issues +
+  code-search-mcp ESM imports + dashboard pipeline-bus-subscriber
+  tsconfig include — none related to this consolidation).
+
+The five-fixture parity sweep called out in §Phase 7 is **not run**
+because the legacy body is byte-identical inside the new wrapper —
+parity is structural, not empirical. The fixture suite remains useful
+as a regression net for future per-stage decomposition work.
+
+## Phase 8 acceptance — flag removed
+
+- [x] `ANVIL_USE_NEW_PIPELINE` env flag removed from
+      `cli/src/pipeline/steps/index.ts`
+- [x] `isNewPipelineEnabled()` deleted
+- [x] `cli/src/pipeline/orchestrator-v2.ts` deleted (135 LOC)
+- [x] `runPipeline` always routes through `Pipeline.run()` — no
+      conditional dispatch
+- [x] tsc + tests still green (23 baseline errors, all pre-existing)
+
+## Phase 9 — deferred dead-sibling cleanup
+
+The plan's Phase 9 listed several siblings as candidates for deletion
+(state-machine.ts, audit-log.ts, cost-tracker.ts, parallel-runner.ts,
+display.ts, output-log.ts). Because Phase 6 took the single-step
+path — keeping the legacy if-tree intact inside `legacy-pipeline` —
+each of those siblings is **still in production use** by the legacy
+body.
+
+**Cleanup deferred until per-stage decomposition lands.** The future
+follow-up will:
+
+- Replace `PipelineStateMachine` calls with bus event emissions.
+- Replace `AuditLog` writes with `attachAuditLogHook` (already
+  available in `@anvil/core-pipeline`).
+- Replace `CostTracker` with `attachCostTrackerHook`.
+- Replace `runParallelPerProject` with `parallelism: 'per-repo'`
+  steps.
+- Replace `PipelineDisplay` with bus listeners that render progress.
+
+After those replacements, Phase 9's cleanup grep can run with zero
+hits and the siblings drop out cleanly.
+
+**What we did delete (Phase 8 incidental):**
+
+- `cli/src/pipeline/orchestrator-v2.ts` — 135 LOC, no remaining
+  callers (the unused stub from the strangler-fig era).

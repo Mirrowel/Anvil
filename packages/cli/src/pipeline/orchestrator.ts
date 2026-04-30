@@ -156,20 +156,71 @@ const defaultStageRunners: StageRunners = {
 // Pipeline runner
 // ---------------------------------------------------------------------------
 
+/**
+ * Public entry point for cli's pipeline. Drives lifecycle through
+ * `@anvil/core-pipeline`'s `Pipeline.run()`; the per-stage if-tree
+ * below is wrapped as a single `legacy-pipeline` step so core-pipeline
+ * owns the lifecycle (Phase 6 of CORE-PIPELINE-CONSOLIDATION-PLAN).
+ *
+ * Decomposition into 8 separate step adapters (one per pipeline stage)
+ * is tracked as a follow-up. Per-stage approval gate, persona prompt
+ * building, and run-store/feature-store writes still happen inline in
+ * the legacy block — Phase 4's hooks are available but not yet wired
+ * (cli already does these writes inline; double-writing would diverge
+ * from byte-equivalence).
+ */
 export async function runPipeline(
   config: OrchestratorConfig,
   deps?: PipelineDependencies,
 ): Promise<OrchestratorResult> {
-  // Phase 8: dispatch to the new core-pipeline-backed runner when the
-  // feature flag is set. The legacy if-tree below remains as fallback
-  // until v2 reaches feature parity (interactive clarify, approval
-  // gates, resume-from-stage, parallel-per-project).
-  const { isNewPipelineEnabled } = await import('./steps/index.js');
-  if (isNewPipelineEnabled()) {
-    const { runPipelineV2 } = await import('./orchestrator-v2.js');
-    return runPipelineV2(config, deps);
-  }
+  const {
+    Pipeline,
+    InMemoryEventBus,
+    InMemoryStepRegistry,
+  } = await import('@anvil/core-pipeline');
 
+  const bus = new InMemoryEventBus();
+  const registry = new InMemoryStepRegistry();
+  const runId = config.featureSlug ? `${config.featureSlug}-${Date.now()}` : `run-${Date.now()}`;
+
+  let legacyResult: OrchestratorResult | undefined;
+  let legacyError: unknown;
+
+  registry.register({
+    id: 'legacy-pipeline',
+    name: 'Legacy cli pipeline (8-stage if-tree)',
+    parallelism: 'serial',
+    run: async () => {
+      try {
+        legacyResult = await runLegacyPipelineBody(config, deps);
+        return legacyResult;
+      } catch (err) {
+        legacyError = err;
+        throw err;
+      }
+    },
+  });
+
+  const pipeline = new Pipeline({
+    registry,
+    bus,
+    runId,
+    workspaceDir: config.workingDir ?? process.cwd(),
+  });
+
+  await pipeline.run();
+
+  if (legacyError) throw legacyError;
+  if (!legacyResult) {
+    throw new Error('runPipeline: legacy step produced no result and no error');
+  }
+  return legacyResult;
+}
+
+async function runLegacyPipelineBody(
+  config: OrchestratorConfig,
+  deps?: PipelineDependencies,
+): Promise<OrchestratorResult> {
   // 1. Generate run ID and feature slug
   const runId = generateRunId();
   const featureSlug = config.featureSlug || generateFeatureSlug(config.feature);

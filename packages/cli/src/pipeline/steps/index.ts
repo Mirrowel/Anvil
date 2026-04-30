@@ -1,14 +1,14 @@
 /**
  * cli pipeline `Step` registry — Phase 4 + 5 entry point.
  *
- * Builds the default ordered list of `Step<I, O>`s the new pipeline
- * walker runs through. Phase 4 introduced the contract via `clarify`;
- * Phase 5 added the remaining 7 stages.
- *
- * The orchestrator's legacy if-tree continues to ship the actual hot
- * path until Phase 8 deletes it. The compatibility shim
- * (`isNewPipelineEnabled`) gates the new code path on
- * `ANVIL_USE_NEW_PIPELINE=1` until then.
+ * Holds the typed `Step<I, O>` registry the cli builds for
+ * `Pipeline.run()`. The 8 step adapters wrap cli's existing stage
+ * runners. Today they are not in the production hot path — the
+ * consolidation's Phase 6 ships a single-step
+ * `legacy-pipeline` adapter inside `orchestrator.ts` that runs the
+ * if-tree under `Pipeline.run()`. These adapters remain available as
+ * the seed for the future per-stage decomposition (tracked as a
+ * follow-up in CORE-PIPELINE-CONSOLIDATION-ADR.md §Phase 6).
  */
 
 import { InMemoryStepRegistry, type StepRegistry } from '@anvil/core-pipeline';
@@ -141,16 +141,6 @@ export function buildDefaultPipelineRegistry(): StepRegistry {
   return registry;
 }
 
-/**
- * Strangler-fig feature flag.
- *
- * Returns true when `ANVIL_USE_NEW_PIPELINE` is set to a truthy value
- * (1, true, yes, on — case-insensitive). Defaults to false until the
- * orchestrator's if-tree is fully replaced (Phase 8).
- */
-export function isNewPipelineEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env.ANVIL_USE_NEW_PIPELINE;
-  if (raw === undefined) return false;
-  const v = raw.trim().toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
-}
+// `isNewPipelineEnabled` was deleted in Phase 8 of
+// CORE-PIPELINE-CONSOLIDATION-PLAN. There is no longer a strangler-fig
+// flag — `runPipeline` always drives through `@anvil/core-pipeline`.
