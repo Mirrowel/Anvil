@@ -48,6 +48,7 @@
     "@anvil/agent-core": "*",
     "@anvil/core-pipeline": "*",
     "@anvil/knowledge-core": "*",
+    "@anvil/memory-core": "*",
     "lucide-react": "1.8.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
