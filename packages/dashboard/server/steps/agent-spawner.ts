@@ -42,6 +42,10 @@ export interface SpawnAndWaitResult {
   agentId: string;
   artifact: string;
   cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
 }
 
 const DEFAULT_POLL_MS = 500;
@@ -72,7 +76,15 @@ export async function spawnAndWait(
     pollIntervalMs: opts.pollIntervalMs,
     sleep: opts.sleep,
   });
-  return { agentId: agent.id, artifact: completed.artifact, cost: completed.cost };
+  return {
+    agentId: agent.id,
+    artifact: completed.artifact,
+    cost: completed.cost,
+    inputTokens: completed.inputTokens,
+    outputTokens: completed.outputTokens,
+    cacheReadTokens: completed.cacheReadTokens,
+    cacheWriteTokens: completed.cacheWriteTokens,
+  };
 }
 
 export interface WaitForAgentOptions {
@@ -89,9 +101,18 @@ export interface WaitForAgentOptions {
  * `pipeline-runner.ts` legacy paths that spawn their agents directly
  * (per-repo fanout, per-task build) and just need the wait machinery.
  */
+export interface WaitForAgentResult {
+  artifact: string;
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
 export async function waitForAgent(
   opts: WaitForAgentOptions,
-): Promise<{ artifact: string; cost: number }> {
+): Promise<WaitForAgentResult> {
   const sleep = opts.sleep ?? defaultSleep;
   const pollMs = opts.pollIntervalMs ?? DEFAULT_POLL_MS;
 
@@ -107,7 +128,14 @@ export async function waitForAgent(
       if (current.cost.stopReason === 'max_tokens') {
         opts.onTruncation?.(current.name, current.cost.outputTokens);
       }
-      return { artifact: current.output, cost: current.cost.totalUsd };
+      return {
+        artifact: current.output,
+        cost: current.cost.totalUsd,
+        inputTokens: current.cost.inputTokens,
+        outputTokens: current.cost.outputTokens,
+        cacheReadTokens: current.cost.cacheReadTokens,
+        cacheWriteTokens: current.cost.cacheWriteTokens,
+      };
     }
     if (current.status === 'error' || current.status === 'killed') {
       throw new Error(current.error ?? 'Agent failed');

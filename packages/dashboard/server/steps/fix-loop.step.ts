@@ -111,6 +111,14 @@ export interface RunFixLoopResult {
    * resume via sendInput. Unchanged on per-repo path.
    */
   newSingleId: string | null;
+  /** Aggregate input tokens across all spawns / resumes in this attempt. */
+  inputTokens: number;
+  /** Aggregate output tokens across all spawns / resumes in this attempt. */
+  outputTokens: number;
+  /** Aggregate cache READ tokens. */
+  cacheReadTokens: number;
+  /** Aggregate cache WRITE tokens. */
+  cacheWriteTokens: number;
 }
 
 /**
@@ -135,7 +143,14 @@ export async function runFixLoop(
     const repoPath = opts.repoPaths[repoName] ?? '';
     const repoSection = extractRepoSection(opts.validateArtifact, repoName);
     if (!repoSection || !hasValidationFailures(repoSection)) {
-      return { artifact: '', cost: 0 };
+      return {
+        artifact: '',
+        cost: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      };
     }
     const issuesBlock = repoSection.slice(0, 4000);
 
@@ -175,13 +190,28 @@ export async function runFixLoop(
       pollIntervalMs: opts.pollIntervalMs,
       sleep: opts.sleep,
     });
-    return { artifact: result.artifact, cost: result.cost };
+    return {
+      artifact: result.artifact,
+      cost: result.cost,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      cacheReadTokens: result.cacheReadTokens,
+      cacheWriteTokens: result.cacheWriteTokens,
+    };
   });
 
   const results = await Promise.all(promises);
   const combinedArtifact = results.map((r) => r.artifact).filter(Boolean).join('\n\n');
   const totalCost = results.reduce((sum, r) => sum + r.cost, 0);
-  return { artifact: combinedArtifact, cost: totalCost, newSingleId: opts.priorSingleId };
+  return {
+    artifact: combinedArtifact,
+    cost: totalCost,
+    newSingleId: opts.priorSingleId,
+    inputTokens: results.reduce((s, r) => s + r.inputTokens, 0),
+    outputTokens: results.reduce((s, r) => s + r.outputTokens, 0),
+    cacheReadTokens: results.reduce((s, r) => s + r.cacheReadTokens, 0),
+    cacheWriteTokens: results.reduce((s, r) => s + r.cacheWriteTokens, 0),
+  };
 }
 
 async function runFixLoopSingle(
@@ -208,6 +238,10 @@ async function runFixLoopSingle(
       artifact: result.artifact,
       cost: result.cost,
       newSingleId: opts.priorSingleId,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      cacheReadTokens: result.cacheReadTokens,
+      cacheWriteTokens: result.cacheWriteTokens,
     };
   }
 
@@ -234,7 +268,15 @@ async function runFixLoopSingle(
     pollIntervalMs: opts.pollIntervalMs,
     sleep: opts.sleep,
   });
-  return { artifact: result.artifact, cost: result.cost, newSingleId };
+  return {
+    artifact: result.artifact,
+    cost: result.cost,
+    newSingleId,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    cacheReadTokens: result.cacheReadTokens,
+    cacheWriteTokens: result.cacheWriteTokens,
+  };
 }
 
 export interface FixLoopStepOptions

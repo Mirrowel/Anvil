@@ -113,6 +113,14 @@ export interface RunClarifyForProjectResult {
   synthesizeRan: boolean;
   /** True when the loop terminated via cancellation or empty answer. */
   cancelled: boolean;
+  /** Aggregate input tokens across explore + synthesize phases. */
+  inputTokens: number;
+  /** Aggregate output tokens across explore + synthesize phases. */
+  outputTokens: number;
+  /** Aggregate cache READ tokens (Anthropic prompt cache hits). */
+  cacheReadTokens: number;
+  /** Aggregate cache WRITE tokens (first-call cache provisioning). */
+  cacheWriteTokens: number;
 }
 
 const CLARIFY_DISALLOWED_TOOLS: readonly string[] = [
@@ -203,6 +211,10 @@ export async function runClarifyForProject(
       qaPairs,
       synthesizeRan: false,
       cancelled,
+      inputTokens: explore.inputTokens,
+      outputTokens: explore.outputTokens,
+      cacheReadTokens: explore.cacheReadTokens,
+      cacheWriteTokens: explore.cacheWriteTokens,
     };
   }
 
@@ -230,6 +242,10 @@ export async function runClarifyForProject(
     qaPairs,
     synthesizeRan: true,
     cancelled: false,
+    inputTokens: explore.inputTokens + synthesize.inputTokens,
+    outputTokens: explore.outputTokens + synthesize.outputTokens,
+    cacheReadTokens: explore.cacheReadTokens + synthesize.cacheReadTokens,
+    cacheWriteTokens: explore.cacheWriteTokens + synthesize.cacheWriteTokens,
   };
 }
 

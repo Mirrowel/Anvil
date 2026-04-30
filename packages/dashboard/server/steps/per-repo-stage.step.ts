@@ -82,6 +82,10 @@ export interface RunPerRepoStageResult {
   agentId: string;
   artifact: string;
   cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
 }
 
 /**

@@ -87,6 +87,14 @@ export interface RunBuildForRepoResult {
   taskCount: number;
   /** True when TASKS.md wasn't parseable and the single-repo path ran. */
   fallback: boolean;
+  /** Aggregate input tokens across all per-task spawns. */
+  inputTokens: number;
+  /** Aggregate output tokens across all per-task spawns. */
+  outputTokens: number;
+  /** Aggregate prompt-cache READ tokens across all per-task spawns. */
+  cacheReadTokens: number;
+  /** Aggregate prompt-cache WRITE tokens across all per-task spawns. */
+  cacheWriteTokens: number;
 }
 
 interface TaskOutput {
@@ -144,6 +152,10 @@ export async function runBuildForOneRepo(
 
   const taskOutputs: TaskOutput[] = [];
   let totalCost = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheReadTokens = 0;
+  let totalCacheWriteTokens = 0;
 
   for (const group of groups) {
     if (opts.isCancelled()) {
@@ -175,6 +187,10 @@ export async function runBuildForOneRepo(
           sleep: opts.sleep,
         });
         totalCost += result.cost;
+        totalInputTokens += result.inputTokens;
+        totalOutputTokens += result.outputTokens;
+        totalCacheReadTokens += result.cacheReadTokens;
+        totalCacheWriteTokens += result.cacheWriteTokens;
         taskOutputs.push({ id: task.id, title: task.title, artifact: result.artifact });
         opts.onProjectEvent?.(
           'info',
@@ -195,7 +211,16 @@ export async function runBuildForOneRepo(
   }
 
   const combined = combineTaskArtifacts(tasks, taskOutputs);
-  return { artifact: combined, cost: totalCost, taskCount: tasks.length, fallback: false };
+  return {
+    artifact: combined,
+    cost: totalCost,
+    taskCount: tasks.length,
+    fallback: false,
+    inputTokens: totalInputTokens,
+    outputTokens: totalOutputTokens,
+    cacheReadTokens: totalCacheReadTokens,
+    cacheWriteTokens: totalCacheWriteTokens,
+  };
 }
 
 async function runBuildFallback(
@@ -227,6 +252,10 @@ async function runBuildFallback(
     cost: result.cost,
     taskCount: 0,
     fallback: true,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    cacheReadTokens: result.cacheReadTokens,
+    cacheWriteTokens: result.cacheWriteTokens,
   };
 }
 

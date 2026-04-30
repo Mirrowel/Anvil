@@ -228,6 +228,19 @@ export interface RepoAgentState {
 
 // ── Pipeline state ────────────────────────────────────────────────────
 
+/**
+ * Per-stage token + cache breakdown. Surfaced so the dashboard can render
+ * the cache-hit rate (Phase 1 of TOKEN-OPTIMIZATION-PLAN). All counts are
+ * aggregates across every spawn the stage produced (single agent for
+ * project-wide stages, all repos × tasks for per-repo stages).
+ */
+export interface StageTokenStats {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
 export interface PipelineStageState {
   name: string;
   label: string;
@@ -240,6 +253,8 @@ export interface PipelineStageState {
   error: string | null;
   perRepo: boolean;
   repos: RepoAgentState[];
+  /** Token breakdown for this stage; absent for skipped/pending stages. */
+  tokens?: StageTokenStats;
 }
 
 export interface PipelineRunState {
@@ -255,6 +270,8 @@ export interface PipelineRunState {
   model: string;
   repoNames: string[];
   waitingForInput: boolean;
+  /** Run-level token aggregate. cacheHitRatio = cacheReadTokens / (inputTokens + cacheReadTokens). */
+  tokens?: StageTokenStats & { cacheHitRatio: number };
 }
 
 export interface PipelineRunnerEvents {
@@ -265,6 +282,23 @@ export interface PipelineRunnerEvents {
   'pipeline-complete': (state: PipelineRunState) => void;
   'pipeline-fail': (state: PipelineRunState) => void;
   'waiting-for-input': (stageIndex: number, agentId: string) => void;
+}
+
+// ── Token-stats helpers ───────────────────────────────────────────────
+
+function zeroTokenStats(): StageTokenStats {
+  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+}
+
+function sumTokenStats(parts: ReadonlyArray<StageTokenStats>): StageTokenStats {
+  const total = zeroTokenStats();
+  for (const p of parts) {
+    total.inputTokens += p.inputTokens;
+    total.outputTokens += p.outputTokens;
+    total.cacheReadTokens += p.cacheReadTokens;
+    total.cacheWriteTokens += p.cacheWriteTokens;
+  }
+  return total;
 }
 
 // ── Config ────────────────────────────────────────────────────────────
@@ -808,6 +842,7 @@ export class PipelineRunner extends EventEmitter {
       model: config.model,
       repoNames: [],
       waitingForInput: false,
+      tokens: { ...zeroTokenStats(), cacheHitRatio: 0 },
     };
   }
 
@@ -1228,7 +1263,7 @@ export class PipelineRunner extends EventEmitter {
         this.emit('stage-start', i, '');
 
         try {
-          let result: { artifact: string; cost: number };
+          let result: { artifact: string; cost: number; tokens: StageTokenStats };
 
           if (stage.name === 'clarify') {
             result = await this.runClarifyStage(i);
@@ -1244,7 +1279,10 @@ export class PipelineRunner extends EventEmitter {
           this.state.stages[i].completedAt = new Date().toISOString();
           this.state.stages[i].artifact = result.artifact;
           this.state.stages[i].cost = result.cost;
+          this.state.stages[i].tokens = result.tokens;
           this.state.totalCost += result.cost;
+          this.aggregateRunTokens(result.tokens);
+          this.logCacheTelemetry(stage.name, result.tokens);
           prevArtifact = result.artifact;
           this.broadcastState();
           this.checkpoint(); // Save: stage completed
@@ -1343,6 +1381,8 @@ export class PipelineRunner extends EventEmitter {
               // Run engineer agent to fix the reported issues
               const fixResult = await this.runFixLoop(i, validateArtifact, fixAttempts);
               this.state.totalCost += fixResult.cost;
+              this.aggregateRunTokens(fixResult.tokens);
+              this.logCacheTelemetry(`${stage.name}:fix-${fixAttempts}`, fixResult.tokens);
 
               if (this.cancelled) break;
 
@@ -1352,6 +1392,8 @@ export class PipelineRunner extends EventEmitter {
               this.state.stages[i].artifact = validateArtifact;
               this.state.stages[i].cost += revalidateResult.cost;
               this.state.totalCost += revalidateResult.cost;
+              this.aggregateRunTokens(revalidateResult.tokens);
+              this.logCacheTelemetry(`${stage.name}:revalidate-${fixAttempts}`, revalidateResult.tokens);
               this.broadcastState();
 
               // Write updated validate artifact
@@ -1496,7 +1538,7 @@ export class PipelineRunner extends EventEmitter {
 
   // ── Interactive Clarify (one question at a time) ─────────────────
 
-  private async runClarifyStage(index: number): Promise<{ artifact: string; cost: number }> {
+  private async runClarifyStage(index: number): Promise<{ artifact: string; cost: number; tokens: StageTokenStats }> {
     const result = await runClarifyForProject({
       agentManager: this.agentManager,
       project: this.config.project,
@@ -1553,7 +1595,16 @@ export class PipelineRunner extends EventEmitter {
       }),
     });
 
-    return { artifact: result.artifact, cost: result.cost };
+    return {
+      artifact: result.artifact,
+      cost: result.cost,
+      tokens: {
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        cacheReadTokens: result.cacheReadTokens,
+        cacheWriteTokens: result.cacheWriteTokens,
+      },
+    };
   }
 
   // ── Per-repo stage execution ───────────────────────────────────────
@@ -1562,7 +1613,7 @@ export class PipelineRunner extends EventEmitter {
     index: number,
     stage: StageDefinition,
     prevArtifact: string,
-  ): Promise<{ artifact: string; cost: number }> {
+  ): Promise<{ artifact: string; cost: number; tokens: StageTokenStats }> {
     const repos = this.state.repoNames;
 
     if (repos.length === 0) {
@@ -1571,7 +1622,12 @@ export class PipelineRunner extends EventEmitter {
     }
 
     // Spawn agents for all repos in parallel
-    const promises: Promise<{ repoName: string; artifact: string; cost: number }>[] = [];
+    const promises: Promise<{
+      repoName: string;
+      artifact: string;
+      cost: number;
+      tokens: StageTokenStats;
+    }>[] = [];
 
     for (let r = 0; r < repos.length; r++) {
       const repoName = repos[r];
@@ -1593,7 +1649,12 @@ export class PipelineRunner extends EventEmitter {
       if (stage.name === 'build' && stage.persona === 'engineer') {
         promises.push(
           this.runBuildForRepo(index, repoIdx, stage, repoName, repoPath, projectPrompt)
-            .then((res) => ({ repoName, artifact: res.artifact, cost: res.cost }))
+            .then((res) => ({
+              repoName,
+              artifact: res.artifact,
+              cost: res.cost,
+              tokens: res.tokens,
+            }))
             .catch((err) => {
               const errorMsg = err instanceof Error ? err.message : String(err);
               const repoState = this.state.stages[index].repos[repoIdx];
@@ -1602,7 +1663,12 @@ export class PipelineRunner extends EventEmitter {
                 repoState.error = errorMsg;
               }
               this.broadcastState();
-              return { repoName, artifact: '', cost: 0 };
+              return {
+                repoName,
+                artifact: '',
+                cost: 0,
+                tokens: zeroTokenStats(),
+              };
             }),
         );
         continue;
@@ -1647,7 +1713,17 @@ export class PipelineRunner extends EventEmitter {
             // Write per-repo artifact
             this.writeRepoArtifact(stage, repoName, result.artifact);
 
-            return { repoName, artifact: result.artifact, cost: result.cost };
+            return {
+              repoName,
+              artifact: result.artifact,
+              cost: result.cost,
+              tokens: {
+                inputTokens: result.inputTokens,
+                outputTokens: result.outputTokens,
+                cacheReadTokens: result.cacheReadTokens,
+                cacheWriteTokens: result.cacheWriteTokens,
+              },
+            };
           })
           .catch((err) => {
             const errorMsg = err instanceof Error ? err.message : String(err);
@@ -1657,7 +1733,12 @@ export class PipelineRunner extends EventEmitter {
               repoState.error = errorMsg;
             }
             this.broadcastState();
-            return { repoName, artifact: '', cost: 0 };
+            return {
+              repoName,
+              artifact: '',
+              cost: 0,
+              tokens: zeroTokenStats(),
+            };
           }),
       );
     }
@@ -1665,6 +1746,7 @@ export class PipelineRunner extends EventEmitter {
     // Wait for all repos to complete
     const results = await Promise.all(promises);
     const totalCost = results.reduce((sum, r) => sum + r.cost, 0);
+    const tokens = sumTokenStats(results.map((r) => r.tokens));
     const successResults = results.filter((r) => r.artifact);
 
     // Combine artifacts (legacy "## <repo>\n\n<artifact>" separator format).
@@ -1675,7 +1757,7 @@ export class PipelineRunner extends EventEmitter {
       throw new Error(`All repo agents failed for ${stage.name}`);
     }
 
-    return { artifact: combined, cost: totalCost };
+    return { artifact: combined, cost: totalCost, tokens };
   }
 
   // ── Build stage: per-task spawning ─────────────────────────────────
@@ -1695,7 +1777,7 @@ export class PipelineRunner extends EventEmitter {
     repoName: string,
     repoPath: string,
     projectPrompt: string,
-  ): Promise<{ artifact: string; cost: number }> {
+  ): Promise<{ artifact: string; cost: number; tokens: StageTokenStats }> {
     const repoArtifacts = this.loadRepoArtifacts(repoName);
 
     const result = await runBuildForOneRepo({
@@ -1736,7 +1818,16 @@ export class PipelineRunner extends EventEmitter {
     this.checkpoint();
     this.writeRepoArtifact(stage, repoName, result.artifact);
 
-    return { artifact: result.artifact, cost: result.cost };
+    return {
+      artifact: result.artifact,
+      cost: result.cost,
+      tokens: {
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        cacheReadTokens: result.cacheReadTokens,
+        cacheWriteTokens: result.cacheWriteTokens,
+      },
+    };
   }
 
   /**
@@ -1759,7 +1850,7 @@ export class PipelineRunner extends EventEmitter {
     index: number,
     stage: StageDefinition,
     prevArtifact: string,
-  ): Promise<{ artifact: string; cost: number }> {
+  ): Promise<{ artifact: string; cost: number; tokens: StageTokenStats }> {
     const prompt = this.buildStagePrompt(stage, prevArtifact);
     const projectPrompt = this.buildProjectPrompt(stage);
 
@@ -1768,7 +1859,7 @@ export class PipelineRunner extends EventEmitter {
       ? ['Write', 'Edit', 'NotebookEdit', 'Agent']
       : ['Agent'];
 
-    const { artifact, cost } = await spawnAndWait({
+    const result = await spawnAndWait({
       agentManager: this.agentManager,
       spec: {
         name: `${stage.persona}-${this.config.project}`,
@@ -1793,7 +1884,16 @@ export class PipelineRunner extends EventEmitter {
         this.handleOutputTruncation(agentName, outputTokens);
       },
     });
-    return { artifact, cost };
+    return {
+      artifact: result.artifact,
+      cost: result.cost,
+      tokens: {
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        cacheReadTokens: result.cacheReadTokens,
+        cacheWriteTokens: result.cacheWriteTokens,
+      },
+    };
   }
 
   // ── Auth helper ──────────────────────────────────────────────────────
@@ -1884,6 +1984,58 @@ export class PipelineRunner extends EventEmitter {
     }
   }
 
+  // ── Token / cache telemetry (Phase 1 of TOKEN-OPTIMIZATION-PLAN) ──────
+
+  /**
+   * Roll a single stage's token totals into the run-level aggregate. The
+   * cache-hit ratio is computed against the BILLABLE side (input tokens
+   * sent fresh + cache reads) — output and cache writes are excluded since
+   * they don't represent prompt-cache opportunities.
+   */
+  private aggregateRunTokens(t: StageTokenStats): void {
+    const prev = this.state.tokens ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cacheHitRatio: 0,
+    };
+    const inputTokens = prev.inputTokens + t.inputTokens;
+    const outputTokens = prev.outputTokens + t.outputTokens;
+    const cacheReadTokens = prev.cacheReadTokens + t.cacheReadTokens;
+    const cacheWriteTokens = prev.cacheWriteTokens + t.cacheWriteTokens;
+    const denom = inputTokens + cacheReadTokens;
+    this.state.tokens = {
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      cacheHitRatio: denom > 0 ? cacheReadTokens / denom : 0,
+    };
+  }
+
+  /**
+   * Log the cache-hit ratio for one stage. The denominator is the billable
+   * input side (input + cache reads); cache writes pay one full price the
+   * first call and amortise for `cacheTtlSeconds` after, so we surface
+   * them but don't include them in the ratio.
+   */
+  private logCacheTelemetry(stageName: string, t: StageTokenStats): void {
+    const denom = t.inputTokens + t.cacheReadTokens;
+    const ratio = denom > 0 ? t.cacheReadTokens / denom : 0;
+    const pct = (ratio * 100).toFixed(1);
+    console.log(
+      `[cache] stage=${stageName} hit=${t.cacheReadTokens}/${denom} (${pct}%)`
+      + ` write=${t.cacheWriteTokens} input=${t.inputTokens} output=${t.outputTokens}`,
+    );
+    try {
+      this.emit('project-event', {
+        source: 'cache',
+        message: `Stage "${stageName}" cache hit ${pct}% (${t.cacheReadTokens.toLocaleString()} of ${denom.toLocaleString()} input-side tokens served from cache)`,
+      });
+    } catch { /* defensive */ }
+  }
+
   // ── Validate-fix helpers ────────────────────────────────────────────
 
   /** Check if validation artifact indicates failures */
@@ -1927,7 +2079,7 @@ export class PipelineRunner extends EventEmitter {
     _validateStageIndex: number,
     validateArtifact: string,
     attempt: number,
-  ): Promise<{ artifact: string; cost: number }> {
+  ): Promise<{ artifact: string; cost: number; tokens: StageTokenStats }> {
     const buildStage = STAGES.find((s) => s.name === 'build')!;
     const repoPaths: Record<string, string> = {};
     for (const repoName of this.state.repoNames) {
@@ -1956,7 +2108,16 @@ export class PipelineRunner extends EventEmitter {
     if (result.newSingleId !== null) {
       this.fixLoopAgentSingle = result.newSingleId;
     }
-    return { artifact: result.artifact, cost: result.cost };
+    return {
+      artifact: result.artifact,
+      cost: result.cost,
+      tokens: {
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        cacheReadTokens: result.cacheReadTokens,
+        cacheWriteTokens: result.cacheWriteTokens,
+      },
+    };
   }
 
   // ── Artifact loading (for resume) ──────────────────────────────────
