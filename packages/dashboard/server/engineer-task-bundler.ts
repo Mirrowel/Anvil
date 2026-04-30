@@ -1,7 +1,8 @@
 // Pre-bundle TASKS.md scope files into an XML-ish <files> block for the engineer agent.
 
 import { readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, extname } from 'node:path';
+import { structurallyTruncate, looksLikeCode } from './structural-truncator.js';
 
 export interface ParsedTask {
   id: string;
@@ -286,12 +287,32 @@ export function bundleFiles(opts: BundleOptions): BundleResult {
     let body = raw;
     let isTruncated = false;
     if (rawByteLen > maxFileBytes) {
-      const buf = Buffer.from(raw, 'utf8').subarray(0, maxFileBytes);
-      // Trim any incomplete trailing UTF-8 sequence by decoding to a string.
-      body = buf.toString('utf8');
-      const remaining = rawByteLen - byteLength(body);
-      body = `${body}\n... [truncated, ${remaining} more bytes]`;
-      isTruncated = true;
+      const ext = extname(rel);
+      // Phase 4 of TOKEN-OPTIMIZATION-PLAN: prefer a code-aware truncation
+      // so engineers see imports + every exported signature + as many full
+      // bodies as the budget permits. Falls back to byte-slicing only when
+      // the language can't be detected or no boundaries are extractable.
+      if (looksLikeCode(raw, ext || rel)) {
+        const budgetTokens = Math.max(64, Math.floor(maxFileBytes / 4));
+        const structured = structurallyTruncate(raw, {
+          budgetTokens,
+          languageHint: ext || rel,
+        });
+        if (byteLength(structured) < rawByteLen) {
+          body = structured;
+          isTruncated = true;
+        }
+      }
+      if (!isTruncated) {
+        // Prose / unknown-language fallback: keep the original byte-slice
+        // behaviour so we never overshoot the file-byte ceiling on text.
+        const buf = Buffer.from(raw, 'utf8').subarray(0, maxFileBytes);
+        // Trim any incomplete trailing UTF-8 sequence by decoding to a string.
+        body = buf.toString('utf8');
+        const remaining = rawByteLen - byteLength(body);
+        body = `${body}\n... [truncated, ${remaining} more bytes]`;
+        isTruncated = true;
+      }
     }
 
     const header = `<file path="${rel}">\n`;
