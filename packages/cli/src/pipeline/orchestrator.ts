@@ -14,8 +14,7 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { execSync, execFileSync } from 'node:child_process';
-import { createInterface } from 'node:readline';
+import { execSync } from 'node:child_process';
 import { PIPELINE_STAGES } from './types.js';
 import type { AffectedProject } from './types.js';
 import { PipelineStateMachine } from './state-machine.js';
@@ -51,21 +50,9 @@ import {
 import type { RunRecord, CostEntry } from '../run/index.js';
 
 import { getFFDirs, getFFHome } from '../home.js';
-import { loadPersonaPrompt } from '../personas/loader.js';
-import type { PersonaName } from '../personas/types.js';
 import { MemoryStore } from './memory-store-cli.js';
 import { info, success, error as logError, warn } from '../logger.js';
-import { loadKnowledgeGraph } from '../context/knowledge-graph.js';
-import { injectMemories } from '../memory/injector.js';
 import { createMemoryStore as createNewMemoryStore } from '../memory/index.js';
-import { readLearnings } from '../commands/team.js';
-import { parseBytes } from '../project/parser.js';
-import type { Project } from '../project/types.js';
-import {
-  getContextLayerForStage,
-  getTokenBudgetForLayer,
-  assembleLayeredContext,
-} from '../knowledge/context-assembler.js';
 import {
   writeDashboardState,
   flushDashboardState,
@@ -80,20 +67,13 @@ import {
 } from './state-file.js';
 import type { DashboardState, DashboardStageState } from './state-file.js';
 
-// ---------------------------------------------------------------------------
-// Persona / stage mapping
-// ---------------------------------------------------------------------------
-
-const STAGE_PERSONA_MAP: Record<number, PersonaName> = {
-  0: 'clarifier',
-  1: 'analyst',
-  2: 'analyst',
-  3: 'architect',
-  4: 'lead',
-  5: 'engineer',
-  6: 'tester',
-  7: 'engineer',
-};
+// Phase 5 helpers — Phase 6 will inline these in the new orchestrator.
+import { buildPersonaProjectPrompt, parseQuestions, askUser } from './persona-prompt.js';
+import { createPipelineFeatureBranches } from './feature-branches.js';
+import { runPostBuildGuards, hasValidationFailures } from './post-build-guards.js';
+import { loadPipelineDeployCmd } from './feature-store.js';
+import { getApprovalDecision } from './approval-gate.js';
+import { sendPipelineNotification, formatDuration } from './notifications.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -148,561 +128,19 @@ export interface PipelineDependencies {
   stageRunners?: StageRunners;
 }
 
-// ---------------------------------------------------------------------------
-// Template variable injection
-// ---------------------------------------------------------------------------
+// Persona prompt + UI helpers + post-build guards + feature-branch
+// creation + approval gate + notifications were all extracted in Phase 5
+// to standalone modules:
+//   - ./persona-prompt.ts      (buildPersonaProjectPrompt, parseQuestions, askUser)
+//   - ./feature-branches.ts    (createPipelineFeatureBranches)
+//   - ./post-build-guards.ts   (runPostBuildGuards, hasValidationFailures)
+//   - ./feature-store.ts       (loadPipelineDeployCmd)
+//   - ./approval-gate.ts       (getApprovalDecision)
+//   - ./notifications.ts       (sendPipelineNotification, formatDuration)
+//
+// The legacy if-tree below imports them (until Phase 8 deletes the
+// if-tree wholesale).
 
-function injectTemplateVars(prompt: string, vars: Record<string, string>): string {
-  let result = prompt;
-  for (const [key, value] of Object.entries(vars)) {
-    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
-  }
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Interactive clarify helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Parse numbered questions from clarifier output.
- * Matches patterns like:
- *   1. **[Topic]**: Question text?
- *   2. Question text?
- *   1) Question text?
- */
-function parseQuestions(output: string): string[] {
-  const lines = output.split('\n');
-  const questions: string[] = [];
-  let current = '';
-
-  for (const line of lines) {
-    const isNewQ = /^\s*\d+[\.\)]\s+/.test(line);
-    if (isNewQ) {
-      if (current.trim()) questions.push(current.trim());
-      current = line.replace(/^\s*\d+[\.\)]\s+/, '');
-    } else if (current) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.toLowerCase().startsWith('please answer')) {
-        current += '\n' + line;
-      }
-    }
-  }
-  if (current.trim()) questions.push(current.trim());
-
-  return questions.filter((q) => q.length > 10);
-}
-
-/**
- * Prompt the user for a single line of input via readline.
- */
-function askUser(prompt: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Post-build guards
-// ---------------------------------------------------------------------------
-
-function fileExistsIn(dir: string, filename: string): boolean {
-  try {
-    return existsSync(join(dir, filename));
-  } catch {
-    return false;
-  }
-}
-
-function runSilent(cmd: string, cwd: string): { ok: boolean; error?: string } {
-  try {
-    execSync(cmd, { cwd, stdio: 'pipe', timeout: 60_000 });
-    return { ok: true };
-  } catch (err: any) {
-    const stderr = err?.stderr?.toString()?.slice(0, 200) || '';
-    return { ok: false, error: stderr || err?.message?.slice(0, 200) || 'unknown error' };
-  }
-}
-
-/**
- * Minimal factory.yaml repo commands reader for CLI context.
- * Returns { format?, lint? } for a given repo, or null if not found.
- */
-function loadRepoCommandsFromConfig(project: string, repoName: string): { format?: string; lint?: string } | null {
-  const anvilHome = process.env.ANVIL_HOME || process.env.FF_HOME || join(homedir(), '.anvil');
-  const paths = [
-    join(anvilHome, 'projects', project, 'factory.yaml'),
-    join(anvilHome, 'projects', project, 'project.yaml'),
-  ];
-
-  for (const configPath of paths) {
-    if (!existsSync(configPath)) continue;
-    try {
-      const raw = readFileSync(configPath, 'utf-8');
-      // Find the repo block and extract commands
-      const repoPattern = new RegExp(
-        `^\\s{2}-\\s+name:\\s+${repoName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`,
-        'm',
-      );
-      const repoMatch = repoPattern.exec(raw);
-      if (!repoMatch) continue;
-
-      const afterRepo = raw.slice(repoMatch.index! + repoMatch[0].length);
-      // Find commands block within this repo (before next repo or top-level key)
-      const commandsMatch = afterRepo.match(/^\s{4,6}commands:\s*$/m);
-      if (!commandsMatch) continue;
-
-      const afterCommands = afterRepo.slice(commandsMatch.index! + commandsMatch[0].length);
-      const commands: { format?: string; lint?: string } = {};
-
-      // Extract format and lint commands (indented under commands:)
-      for (const line of afterCommands.split('\n')) {
-        if (/^\s{0,3}\S/.test(line) || /^\s{2}-\s+name:/.test(line)) break; // next section or repo
-        if (/^\s{4,6}[a-z]/.test(line) && !/^\s{6,}/.test(line.replace(/^\s{4,6}\w/, ''))) {
-          const kv = line.match(/^\s{6,8}(format|lint):\s+(.+)$/);
-          if (kv) {
-            const val = kv[2].replace(/^["']|["']$/g, '').trim();
-            if (kv[1] === 'format') commands.format = val;
-            if (kv[1] === 'lint') commands.lint = val;
-          }
-        }
-      }
-
-      if (commands.format || commands.lint) return commands;
-    } catch {
-      // Best-effort config read
-    }
-  }
-  return null;
-}
-
-/**
- * Read pipeline.ship.deploy from factory.yaml for the given project.
- * Returns the deploy command string, or null if not configured.
- */
-function loadPipelineDeployCmd(project: string): string | null {
-  const anvilHome = process.env.ANVIL_HOME || process.env.FF_HOME || join(homedir(), '.anvil');
-  const paths = [
-    join(anvilHome, 'projects', project, 'factory.yaml'),
-    join(anvilHome, 'projects', project, 'project.yaml'),
-  ];
-
-  for (const configPath of paths) {
-    if (!existsSync(configPath)) continue;
-    try {
-      const raw = readFileSync(configPath, 'utf-8');
-      // Look for pipeline: > ship: > deploy: value
-      const deployMatch = raw.match(/^\s{4}deploy:\s+(.+)$/m);
-      if (deployMatch) {
-        // Verify it's under pipeline: > ship: context
-        const pipelineIdx = raw.search(/^pipeline:\s*$/m);
-        const shipIdx = raw.search(/^\s{2}ship:\s*$/m);
-        if (pipelineIdx !== -1 && shipIdx !== -1 && shipIdx > pipelineIdx && deployMatch.index! > shipIdx) {
-          return deployMatch[1].replace(/^["']|["']$/g, '').trim();
-        }
-      }
-    } catch {
-      // Best-effort
-    }
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Slack pipeline notifications (non-blocking, never fails the pipeline)
-// ---------------------------------------------------------------------------
-
-async function sendPipelineNotification(
-  project: string,
-  event: 'pipeline-start' | 'pipeline-complete' | 'pipeline-fail',
-  data: { project: string; feature: string; cost?: number; prUrls?: string[]; error?: string; duration?: string; runId?: string },
-): Promise<void> {
-  const webhookUrl = process.env.ANVIL_SLACK_WEBHOOK;
-  if (!webhookUrl) return; // No webhook configured — skip silently
-
-  try {
-    const { sendSlackNotification } = await import('../notifications/slack.js');
-    await sendSlackNotification(webhookUrl, event, data);
-  } catch {
-    // Never fail the pipeline because of a notification
-  }
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-  return `${seconds}s`;
-}
-
-/**
- * Run formatters and linters with auto-fix in each repo after build.
- * Reads commands from factory.yaml config first, falls back to language detection.
- * Runs silently — never fails the pipeline.
- */
-function runPostBuildGuards(repoPaths: Record<string, string>, workspaceDir: string, repoNames: string[], project?: string): void {
-  info('Running post-build guards (format + lint auto-fix)...');
-
-  const repos = repoNames.length > 0
-    ? repoNames.map((r) => ({ name: r, path: repoPaths[r] || join(workspaceDir, r) }))
-    : [{ name: 'root', path: workspaceDir }];
-
-  let passCount = 0;
-  let failCount = 0;
-
-  const runGuard = (cmd: string, repoName: string, repoPath: string) => {
-    const result = runSilent(cmd, repoPath);
-    if (result.ok) {
-      passCount++;
-    } else {
-      failCount++;
-      warn(`Post-build guard failed in ${repoName}: ${cmd} — ${result.error}`);
-    }
-  };
-
-  for (const repo of repos) {
-    try {
-      // Load commands from project config (factory.yaml)
-      const repoCommands = project ? loadRepoCommandsFromConfig(project, repo.name) : null;
-      if (repoCommands?.format) {
-        runGuard(repoCommands.format, repo.name, repo.path);
-      }
-      if (repoCommands?.lint) {
-        runGuard(repoCommands.lint, repo.name, repo.path);
-      }
-
-      // Fallback to language-based detection if no config
-      if (!repoCommands?.format && !repoCommands?.lint) {
-        const hasGo = fileExistsIn(repo.path, 'go.mod');
-        const hasTs = fileExistsIn(repo.path, 'tsconfig.json');
-        const hasPackageJson = fileExistsIn(repo.path, 'package.json');
-        const hasPython = fileExistsIn(repo.path, 'pyproject.toml') || fileExistsIn(repo.path, 'setup.py');
-
-        if (hasGo) {
-          runGuard('gofmt -w .', repo.name, repo.path);
-          runGuard('golangci-lint run --fix ./... 2>/dev/null', repo.name, repo.path);
-        }
-
-        if (hasTs || hasPackageJson) {
-          runGuard('npx prettier --write "**/*.{ts,tsx,js,jsx}" --ignore-unknown 2>/dev/null', repo.name, repo.path);
-          runGuard('npx eslint --fix "**/*.{ts,tsx,js,jsx}" 2>/dev/null', repo.name, repo.path);
-        }
-
-        if (hasPython) {
-          runGuard('black . 2>/dev/null', repo.name, repo.path);
-          runGuard('ruff check --fix . 2>/dev/null', repo.name, repo.path);
-        }
-      }
-    } catch (err) {
-      warn(`Post-build guard error in ${repo.name}: ${err}`);
-    }
-  }
-
-  info(`Post-build guards: ${passCount} passed, ${failCount} failed${failCount > 0 ? ' (non-fatal)' : ''}`);
-}
-
-// ---------------------------------------------------------------------------
-// Feature branch creation
-// ---------------------------------------------------------------------------
-
-function createFeatureBranches(
-  featureSlug: string,
-  repoPaths: Record<string, string>,
-  workspaceDir: string,
-  repoNames: string[],
-): void {
-  const branchName = `anvil/${featureSlug}`;
-  info(`Creating feature branch "${branchName}" in all repos...`);
-
-  const targets = repoNames.length > 0
-    ? repoNames.map((r) => ({ name: r, path: repoPaths[r] || join(workspaceDir, r) }))
-    : [{ name: 'workspace', path: workspaceDir }];
-
-  for (const repo of targets) {
-    try {
-      try {
-        execFileSync('git', ['rev-parse', '--verify', branchName], { cwd: repo.path, stdio: 'pipe' });
-        execFileSync('git', ['checkout', branchName], { cwd: repo.path, stdio: 'pipe' });
-        info(`Checked out existing branch "${branchName}" in ${repo.name}`);
-      } catch {
-        execFileSync('git', ['checkout', '-b', branchName], { cwd: repo.path, stdio: 'pipe' });
-        info(`Created branch "${branchName}" in ${repo.name}`);
-      }
-    } catch (err) {
-      warn(`Failed to create branch in ${repo.name}: ${err}`);
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Validate-fix loop helper
-// ---------------------------------------------------------------------------
-
-function hasValidationFailures(artifact: string): boolean {
-  if (!artifact) return false;
-  return /VERDICT:\s*FAIL/i.test(artifact) ||
-         /UNRESOLVED/i.test(artifact) ||
-         /(?:build|lint|test).*(?:fail|error)/i.test(artifact);
-}
-
-// ---------------------------------------------------------------------------
-// Persona prompt builder
-// ---------------------------------------------------------------------------
-
-async function buildPersonaProjectPrompt(
-  stageIndex: number,
-  project: string,
-  feature: string,
-  featureSlug: string,
-  projectYamlPath: string | undefined,
-  workspaceDir: string,
-  repoNames: string[],
-  memoryStore: MemoryStore,
-): Promise<string> {
-  const persona = STAGE_PERSONA_MAP[stageIndex];
-  if (!persona) return '';
-
-  let personaPrompt: string;
-  try {
-    personaPrompt = await loadPersonaPrompt(persona);
-  } catch {
-    // Fallback if persona prompt file not found
-    return `You are the ${persona} agent in an Anvil pipeline for the "${project}" project.`;
-  }
-
-  if (!personaPrompt) {
-    return `You are the ${persona} agent in an Anvil pipeline for the "${project}" project.`;
-  }
-
-  // Load and parse project YAML — extract structured fields for layered context
-  let projectYaml = '(not available)';
-  let parsedProject: Project | null = null;
-  if (projectYamlPath && existsSync(projectYamlPath)) {
-    try {
-      const rawYaml = readFileSync(projectYamlPath, 'utf-8');
-      projectYaml = rawYaml.slice(0, 8000);
-      parsedProject = parseBytes(rawYaml);
-      info(`[project-context] Loaded project.yaml for "${project}" (${projectYaml.length} chars) → injecting into ${persona} prompt`);
-    } catch { /* ignore — projectYaml stays as raw string fallback */ }
-  }
-
-  // Load memory — combine CLI memory store with new injector project
-  const projectMemory = memoryStore.formatForPrompt(project, 'memory');
-  const userProfile = memoryStore.formatForPrompt(project, 'user');
-  let memoryBlock = [projectMemory, userProfile].filter(Boolean).join('\n\n') || '(no prior memories)';
-
-  // Wire injectMemories() — query by stage tags and feature content
-  try {
-    const stageName = PIPELINE_STAGES[stageIndex]?.name ?? `stage-${stageIndex}`;
-    const { text: injectedMemoryText } = injectMemories(stageName, project, {
-      tags: [stageName, persona],
-      searchContent: feature,
-      k: 5,
-    });
-    if (injectedMemoryText) {
-      memoryBlock = memoryBlock === '(no prior memories)'
-        ? injectedMemoryText
-        : memoryBlock + '\n\n' + injectedMemoryText;
-      info(`[memory] Injected memories for stage "${stageName}"`);
-    }
-  } catch {
-    // Memory injection is optional — continue without it
-  }
-
-  // Wire team learnings as conventions
-  let conventionText = '(use existing project conventions found in the codebase)';
-  try {
-    const learnings = readLearnings().filter(l => !l.project || l.project === project);
-    const conventions = learnings
-      .filter(l => l.type === 'convention')
-      .slice(0, 10)
-      .map(l => `- ${l.text}`);
-    if (conventions.length > 0) {
-      conventionText = conventions.join('\n');
-      info(`[team] Loaded ${conventions.length} team conventions`);
-    }
-  } catch {
-    // Team learnings are optional — continue without them
-  }
-
-  // Layered context loading (MemPalace L0→L3 pattern)
-  const layer = getContextLayerForStage(stageIndex);
-  const tokenBudget = getTokenBudgetForLayer(layer);
-
-  // Try semantic retrieval first (new project), fall back to legacy KB
-  let knowledgeGraph: string | null = null;
-  try {
-    const { getRetriever } = await import('@anvil/knowledge-core');
-    const retriever = await getRetriever(project);
-    const result = await retriever.retrieve(feature, {
-      maxTokens: tokenBudget,
-      repoFilter: layer === 'full' ? undefined : repoNames.slice(0, 3), // narrow for non-full layers
-    });
-    if (result.chunks.length > 0) {
-      // Extract rich fields from parsed project for L0+L1 identity
-      const repoLanguages = parsedProject?.repos
-        ?.map(r => r.language).filter(Boolean) as string[] | undefined;
-      const systemInvariants = parsedProject?.invariants
-        ?.map(inv => inv.statement) ?? [];
-      const teamConventions = conventionText !== '(use existing project conventions found in the codebase)'
-        ? conventionText.split('\n').map(l => l.replace(/^- /, ''))
-        : [];
-
-      knowledgeGraph = assembleLayeredContext(
-        {
-          project,
-          feature,
-          layer,
-          repoNames,
-          languages: [...new Set(repoLanguages ?? [])],
-          domain: parsedProject?.description,
-          invariants: systemInvariants,
-          conventions: teamConventions,
-        },
-        result,
-      );
-      info(`[knowledge-base] Layered retrieval (${layer}): ${result.chunks.length} chunks, ${result.totalTokens} tokens`);
-    }
-  } catch {
-    // Semantic index not available — fall back to legacy
-  }
-
-  if (!knowledgeGraph) {
-    // Legacy fallback — but respect the layer budget
-    const legacyKb = await loadKnowledgeGraph(project, feature);
-    if (legacyKb) {
-      // Truncate legacy KB to match layer budget (chars ≈ tokens * 4)
-      const maxChars = tokenBudget * 4;
-      if (legacyKb.length > maxChars) {
-        knowledgeGraph = legacyKb.slice(0, maxChars) + '\n\n[... truncated to fit context layer budget]\n';
-        info(`[knowledge-base] Legacy KB truncated from ${legacyKb.length} to ${maxChars} chars for layer "${layer}"`);
-      } else {
-        knowledgeGraph = legacyKb;
-      }
-      info(`[knowledge-base] Loaded KB for "${project}" (${knowledgeGraph.length} chars) → injecting into ${persona} prompt`);
-    } else {
-      warn(`[knowledge-base] No KB available for "${project}" — agent will explore codebase manually`);
-    }
-  }
-
-  const repoList = repoNames.length > 0 ? repoNames.join(', ') : '(single-repo or monorepo)';
-
-  // Enforce per-section size budgets before injection
-  const MAX_KNOWLEDGE_GRAPH_CHARS = 60_000; // ~15K tokens
-  const MAX_MEMORIES_CHARS = 4_000; // ~1K tokens
-
-  let trimmedKnowledgeGraph = knowledgeGraph || '(no knowledge base available — run "ff kb refresh" or use the dashboard to build it)';
-  if (trimmedKnowledgeGraph.length > MAX_KNOWLEDGE_GRAPH_CHARS) {
-    warn(`[prompt-budget] Knowledge graph is ${trimmedKnowledgeGraph.length} chars — trimming to ${MAX_KNOWLEDGE_GRAPH_CHARS}`);
-    trimmedKnowledgeGraph = trimmedKnowledgeGraph.slice(0, MAX_KNOWLEDGE_GRAPH_CHARS) + '\n\n[... knowledge graph truncated to fit context window ...]';
-  }
-
-  let trimmedMemories = memoryBlock;
-  if (trimmedMemories.length > MAX_MEMORIES_CHARS) {
-    warn(`[prompt-budget] Memories section is ${trimmedMemories.length} chars — trimming to ${MAX_MEMORIES_CHARS}`);
-    trimmedMemories = trimmedMemories.slice(0, MAX_MEMORIES_CHARS) + '\n\n[... memories truncated ...]';
-  }
-
-  const injected = injectTemplateVars(personaPrompt, {
-    project_yaml: projectYaml,
-    task: `Feature: "${feature}"\nProject: ${project}\nRepositories: ${repoList}`,
-    conventions: conventionText,
-    memories: trimmedMemories,
-    knowledge_graph: trimmedKnowledgeGraph,
-    repo_context: `Project: ${project}\nRepositories: ${repoList}\nWorkspace: ${workspaceDir}`,
-    existing_code: knowledgeGraph
-      ? '(see Knowledge Graph section for codebase structure — explore specific files as needed)'
-      : '(explore the codebase to discover relevant code)',
-  });
-
-  // Append pipeline-specific overrides
-  const overrides: string[] = [];
-  if (knowledgeGraph) {
-    overrides.push(`CRITICAL — KNOWLEDGE BASE USAGE:
-A pre-computed Knowledge Base has been injected into the "Codebase Knowledge Graph" section above. It contains:
-1. **Project-level synthesis** (if available): Cross-repo dependencies, shared concepts, and architecture overview for the entire "${project}" project.
-2. **Per-repo analysis**: AST-extracted modules, functions, imports, call graphs, and community clusters for each repository.
-
-**You MUST follow this traversal strategy:**
-- START by reading the Project Knowledge Base section (if present) to understand how repos relate to each other.
-- THEN read the per-repo sections relevant to your task for detailed module/function information.
-- ONLY read specific source files when you need exact implementation details (API signatures, data model fields) not covered by the KB.
-- When you use KB information, explicitly state it: e.g., "From the Knowledge Base, I can see that module X in repo Y handles Z..."
-- Do NOT broadly explore files when the KB already provides the architectural map.`);
-    if (persona === 'analyst') {
-      overrides.push('IMPORTANT — ANALYST DIRECTIVE: The Knowledge Base provides sufficient architectural context for writing requirements. Do NOT spawn sub-agents to explore the codebase. Do NOT run find/ls/tree commands. Focus on producing requirements from the clarification document, project YAML, and the Knowledge Base. Reference specific KB findings in your requirements (e.g., "Based on KB analysis of module X..."). Only read a specific file if you need to verify a concrete implementation detail.');
-    }
-  }
-  // Non-coding personas must NOT write files — output text only, pipeline persists artifacts
-  if (persona !== 'engineer') {
-    overrides.push('CRITICAL — NO FILE WRITES: Do NOT use the Write tool, do NOT create files, do NOT run mkdir. Output your documents as plain text in your response. The pipeline will persist your output automatically. The workspace repos must contain ONLY source code changes, never markdown artifacts.');
-  }
-  if (persona === 'clarifier') {
-    overrides.push('IMPORTANT: Format each clarifying question as a separate numbered item (1. 2. 3. etc). Each question will be shown to the user one at a time in an interactive Q&A flow. Keep each question self-contained. Do NOT combine multiple questions into one item.');
-  }
-  if (persona === 'engineer') {
-    overrides.push('IMPORTANT: Do NOT make git commits. Commits happen in the ship stage on a feature branch.');
-    overrides.push('IMPORTANT: Do NOT run linters (golangci-lint, eslint, ruff). Linting is handled once by post-build guards. You may run `go build`/`go vet`/`tsc --noEmit` to verify compilation, but skip lint commands to avoid redundant slow passes.');
-  }
-  if (persona === 'tester') {
-    overrides.push('IMPORTANT: Do NOT make git commits. Commits happen in the ship stage on a feature branch.');
-    overrides.push('CRITICAL: You MUST fix ALL build errors, lint errors, and test failures before completing. Iterate until the codebase is clean. End your output with "VERDICT: PASS" or "VERDICT: FAIL" so the pipeline knows whether to proceed to shipping.');
-  }
-
-  let prompt = injected + (overrides.length > 0 ? '\n\n' + overrides.join('\n') : '');
-
-  // Sanity guard on assembled prompt size. This is a pre-model cap — it keeps
-  // a runaway prompt from reaching the provider, not a per-model context limit.
-  // Per-model context enforcement happens in `context-overflow` / `context-budget`.
-  // Override with `ANVIL_MAX_PROMPT_CHARS` if you want looser / tighter guard rails.
-  const MAX_PROMPT_CHARS = parseInt(process.env.ANVIL_MAX_PROMPT_CHARS ?? '', 10) || 600_000; // ~150K tokens
-  if (prompt.length > MAX_PROMPT_CHARS) {
-    warn(`[prompt-budget] Project prompt is ${prompt.length} chars (${Math.ceil(prompt.length / 4)} tokens) — trimming to pre-model sanity cap (${MAX_PROMPT_CHARS} chars)`);
-    prompt = prompt.slice(0, MAX_PROMPT_CHARS) + '\n\n[... prompt truncated to pre-model sanity cap ...]';
-  }
-
-  info(`[prompt-budget] Project prompt: ${Math.ceil(prompt.length / 4)} tokens`);
-  return prompt;
-}
-
-/** Wait for approval if approvalRequired is set. Polls state file every 500ms. */
-async function waitForApproval(stageIndex: number): Promise<'approved' | 'rejected'> {
-  setPendingApproval(stageIndex);
-  info(`Waiting for approval on stage ${stageIndex}...`);
-
-  const TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      clearInterval(interval);
-      warn(`Approval for stage ${stageIndex} timed out after 30 minutes`);
-      resolve('rejected');
-    }, TIMEOUT_MS);
-
-    const interval = setInterval(() => {
-      const state = readDashboardState();
-      if (!state.activePipeline) {
-        clearInterval(interval);
-        clearTimeout(timeout);
-        resolve('rejected');
-        return;
-      }
-      if (!state.activePipeline.pendingApproval) {
-        clearInterval(interval);
-        clearTimeout(timeout);
-        if (state.activePipeline.status === 'failed' || state.activePipeline.status === 'cancelled') {
-          resolve('rejected');
-        } else {
-          resolve('approved');
-        }
-      }
-    }, 500);
-  });
-}
 
 // Default stage runners — use the real implementations
 const defaultStageRunners: StageRunners = {
@@ -1027,7 +465,7 @@ export async function runPipeline(
       updateStageCost(0, costTracker.getStageCost(0)?.estimatedCost ?? 0);
       updatePipelineCost(costTracker.getTotalCost());
       if (config.approvalRequired) {
-        const decision = await waitForApproval(0);
+        const decision = await getApprovalDecision({ stepId: "stage-" + 0, stageIndex: 0 });
         if (decision === 'rejected') throw new Error('Stage 0 rejected by user');
       }
       stateMachine.advance();
@@ -1068,7 +506,7 @@ export async function runPipeline(
       updateStageCost(1, costTracker.getStageCost(1)?.estimatedCost ?? 0);
       updatePipelineCost(costTracker.getTotalCost());
       if (config.approvalRequired) {
-        const decision = await waitForApproval(1);
+        const decision = await getApprovalDecision({ stepId: "stage-" + 1, stageIndex: 1 });
         if (decision === 'rejected') throw new Error('Stage 1 rejected by user');
       }
       stateMachine.advance();
@@ -1129,7 +567,7 @@ export async function runPipeline(
       updateStageCost(2, costTracker.getStageCost(2)?.estimatedCost ?? 0);
       updatePipelineCost(costTracker.getTotalCost());
       if (config.approvalRequired) {
-        const decision = await waitForApproval(2);
+        const decision = await getApprovalDecision({ stepId: "stage-" + 2, stageIndex: 2 });
         if (decision === 'rejected') throw new Error('Stage 2 rejected by user');
       }
       stateMachine.advance();
@@ -1171,7 +609,7 @@ export async function runPipeline(
       updateStageCost(3, costTracker.getStageCost(3)?.estimatedCost ?? 0);
       updatePipelineCost(costTracker.getTotalCost());
       if (config.approvalRequired) {
-        const decision = await waitForApproval(3);
+        const decision = await getApprovalDecision({ stepId: "stage-" + 3, stageIndex: 3 });
         if (decision === 'rejected') throw new Error('Stage 3 rejected by user');
       }
       stateMachine.advance();
@@ -1213,7 +651,7 @@ export async function runPipeline(
       updateStageCost(4, costTracker.getStageCost(4)?.estimatedCost ?? 0);
       updatePipelineCost(costTracker.getTotalCost());
       if (config.approvalRequired) {
-        const decision = await waitForApproval(4);
+        const decision = await getApprovalDecision({ stepId: "stage-" + 4, stageIndex: 4 });
         if (decision === 'rejected') throw new Error('Stage 4 rejected by user');
       }
       stateMachine.advance();
@@ -1226,7 +664,7 @@ export async function runPipeline(
       display.onStageSkip(5, 'build');
     } else {
       // Create feature branches before build
-      createFeatureBranches(featureSlug, repoPaths, workspaceDir, repoNames);
+      createPipelineFeatureBranches(featureSlug, repoPaths, workspaceDir, repoNames);
 
       display.onStageStart(5, 'build');
       updatePipelineStage(5, 'running');
@@ -1277,7 +715,7 @@ export async function runPipeline(
       updateStageCost(5, costTracker.getStageCost(5)?.estimatedCost ?? 0);
       updatePipelineCost(costTracker.getTotalCost());
       if (config.approvalRequired) {
-        const decision = await waitForApproval(5);
+        const decision = await getApprovalDecision({ stepId: "stage-" + 5, stageIndex: 5 });
         if (decision === 'rejected') throw new Error('Stage 5 rejected by user');
       }
       stateMachine.advance();
@@ -1374,7 +812,7 @@ export async function runPipeline(
       updateStageCost(6, costTracker.getStageCost(6)?.estimatedCost ?? 0);
       updatePipelineCost(costTracker.getTotalCost());
       if (config.approvalRequired) {
-        const decision = await waitForApproval(6);
+        const decision = await getApprovalDecision({ stepId: "stage-" + 6, stageIndex: 6 });
         if (decision === 'rejected') throw new Error('Stage 6 rejected by user');
       }
       stateMachine.advance();
