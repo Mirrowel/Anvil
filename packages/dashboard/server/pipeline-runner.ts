@@ -555,6 +555,91 @@ export class PipelineRunner extends EventEmitter {
     return v;
   }
 
+  // ── Rerun-from (Phase C — reviewer rolls back to a prior stage) ──────
+
+  private pendingRerunFromStage: number | null = null;
+  private rerunFromNote: string | null = null;
+
+  /**
+   * Reviewer asked to roll the pipeline back to `targetIndex` and replay
+   * with `note` as failure context. Validated by caller (dashboard's
+   * after-stage hook) — runner trusts the bounds. Cleared once consumed
+   * by the loop.
+   */
+  requestRerunFromStage(targetIndex: number, note: string | null): void {
+    if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= STAGES.length) {
+      return;
+    }
+    this.pendingRerunFromStage = targetIndex;
+    const trimmed = note?.trim() ?? '';
+    this.rerunFromNote = trimmed.length > 0 ? trimmed : null;
+  }
+
+  private consumeRerunRequest(): { targetIndex: number; note: string | null } | null {
+    if (this.pendingRerunFromStage === null) return null;
+    const v = { targetIndex: this.pendingRerunFromStage, note: this.rerunFromNote };
+    this.pendingRerunFromStage = null;
+    this.rerunFromNote = null;
+    return v;
+  }
+
+  /**
+   * Reset stage state for indices [fromIndex .. toIndex] inclusive so the
+   * pipeline loop can replay them. Per-repo sub-state, costs, errors,
+   * artifacts and agentIds all cleared.
+   */
+  private resetStagesForRerun(fromIndex: number, toIndex: number): void {
+    for (let j = fromIndex; j <= toIndex; j++) {
+      const s = this.state.stages[j];
+      if (!s) continue;
+      s.status = 'pending';
+      s.artifact = '';
+      s.error = null;
+      s.cost = 0;
+      s.startedAt = null;
+      s.completedAt = null;
+      s.agentId = null;
+      s.tokens = undefined;
+      if (Array.isArray(s.repos)) {
+        for (const r of s.repos) {
+          r.status = 'pending';
+          r.artifact = '';
+          r.cost = 0;
+          r.error = null;
+          r.agentId = null;
+        }
+      }
+    }
+  }
+
+  /**
+   * Wipe manifest fields written by stages [fromIndex .. toIndex] so the
+   * "do not re-derive" prefix doesn't carry stale claims into the rerun.
+   */
+  private clearManifestFieldsForStages(fromIndex: number, toIndex: number): void {
+    const stageFields: Record<string, ReadonlyArray<string>> = {
+      requirements: ['acceptanceCriteria', 'affectedRepos'],
+      specs: ['apiEndpoints', 'tablesTouched', 'testBehaviors'],
+      tasks: ['filesPlanned'],
+      build: ['changeBrief'],
+      validate: ['openQuestions'],
+    };
+    for (let j = fromIndex; j <= toIndex; j++) {
+      const stage = STAGES[j];
+      const fields = stageFields[stage.name];
+      if (!fields) continue;
+      for (const f of fields) {
+        try {
+          this.manifestStore.patchField(
+            this.config.project, this.state.featureSlug,
+            f as never, 'unset', null as never, `rerun-from-${stage.name}`,
+          );
+        } catch { /* best-effort — extractor may not have run */ }
+      }
+    }
+    this.invalidateManifestBlock();
+  }
+
   /**
    * Best-effort list of files modified by this run so far, prefixed with the
    * repo name so policy globs like `backend/internal/db/**` can match across
@@ -1422,6 +1507,30 @@ export class PipelineRunner extends EventEmitter {
               this.cancelled = true;
               break;
             }
+          }
+
+          // Phase C — rerun-from: if the reviewer asked to roll back to a
+          // prior stage, reset the loop counter, wipe intermediate state +
+          // manifest fields, set the rerun note as failure context, and
+          // skip the artifact-write / manifest-extraction phase below.
+          const rerun = this.consumeRerunRequest();
+          if (rerun !== null) {
+            const target = rerun.targetIndex;
+            this.resetStagesForRerun(target, i);
+            this.clearManifestFieldsForStages(target, i);
+            if (rerun.note) {
+              this.config.failureContext =
+                `Rerun requested by reviewer at stage "${STAGES[target].name}":\n${rerun.note}`;
+            }
+            prevArtifact = target > 0
+              ? (this.state.stages[target - 1]?.artifact ?? '')
+              : '';
+            this.broadcastState();
+            this.checkpoint();
+            console.log(`[pipeline] Rerun-from requested → resetting to stage ${target} (${STAGES[target].name})`);
+            // The loop's i++ at end of iteration will land on `target`.
+            i = target - 1;
+            continue;
           }
 
           // Phase B — modify-artifact: if the reviewer edited the artifact

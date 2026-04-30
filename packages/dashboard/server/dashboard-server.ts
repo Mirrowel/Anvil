@@ -4877,6 +4877,17 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
             && final.resumeDecision.editedArtifact.length > 0) {
           runner.applyArtifactEdit(info.stageIndex, final.resumeDecision.editedArtifact);
         }
+        // Phase C — `rerun-from`: roll the pipeline loop back to the
+        // chosen stage. Default target is the just-paused stage (rerun
+        // it with the note). Out-of-range indices are silently dropped
+        // by the runner — clamp to the current stage as a safety net.
+        if (final?.resumeDecision?.action === 'rerun-from') {
+          const requested = typeof final.resumeDecision.rerunFromStage === 'number'
+            ? final.resumeDecision.rerunFromStage
+            : info.stageIndex;
+          const clamped = Math.max(0, Math.min(requested, info.stageIndex));
+          runner.requestRerunFromStage(clamped, final.resumeDecision.note ?? null);
+        }
       });
     }
 
