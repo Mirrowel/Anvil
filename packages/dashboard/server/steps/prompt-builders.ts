@@ -80,6 +80,14 @@ export interface PromptBuilderContext {
   workspaceDir: string;
   baseBranch: string;
   failureContext?: string;
+  /**
+   * Reviewer feedback from the most recent pause resume. Surfaced at the
+   * top of the next stage's user prompt as a "User note from review:"
+   * block. PipelineRunner consumes-and-clears its review-note slot when
+   * building this context so the note only reaches the immediate next
+   * stage.
+   */
+  reviewNote?: string;
   actionType?: 'feature' | 'bugfix' | 'fix' | 'spike' | 'review';
 
   // ── State ─────────────────────────────────────────────────────────────
@@ -486,13 +494,16 @@ export function buildStagePrompt(
   const resumeCtx = ctx.failureContext
     ? `\n\nIMPORTANT — This is a RETRY. The previous run failed:\n${ctx.failureContext}\nFix the issues and proceed. All prior stage artifacts are included above.`
     : '';
+  const reviewBlock = ctx.reviewNote
+    ? `\n\n## User note from review (read this FIRST and apply throughout this stage)\n${ctx.reviewNote}`
+    : '';
   const repoList = ctx.repoNames.length > 0
     ? `\nRepositories: ${ctx.repoNames.join(', ')}`
     : '';
 
   switch (stage.name) {
     case 'requirements':
-      return `${feature}${repoList}\n\nProduce high-level requirements for this feature across the entire project. Identify which repositories need changes and why. Include success criteria.${prev}${resumeCtx}`;
+      return `${feature}${repoList}${reviewBlock}\n\nProduce high-level requirements for this feature across the entire project. Identify which repositories need changes and why. Include success criteria.${prev}${resumeCtx}`;
     case 'ship': {
       const prLabels = ['anvil'];
       const at = ctx.actionType ?? 'feature';
@@ -500,10 +511,10 @@ export function buildStagePrompt(
       else if (at === 'spike' || at === 'review') prLabels.push(at);
       else prLabels.push('enhancement');
       const labelFlags = prLabels.map((l) => `--label "${l}"`).join(' ');
-      return `${feature}${repoList}\n\nShip the changes for each repository. The code has been validated — build, lint, and tests all pass.\n\nThe code is already on a feature branch "anvil/${ctx.featureSlug}". For each repo with changes:\n1. Run a final quick check: build and lint to confirm everything is clean\n2. If ANY errors remain, fix them before proceeding\n3. Stage and commit all changes with a clear commit message: "[anvil] ${ctx.feature}"\n4. Push the feature branch to origin\n5. Create a PR from the feature branch to "${ctx.baseBranch}" using: gh pr create --base "${ctx.baseBranch}" --head "anvil/${ctx.featureSlug}" ${labelFlags}\n\nDo NOT merge to ${ctx.baseBranch}. Only create PRs. Do NOT create a PR if the code has unfixed errors.${prev}${resumeCtx}`;
+      return `${feature}${repoList}${reviewBlock}\n\nShip the changes for each repository. The code has been validated — build, lint, and tests all pass.\n\nThe code is already on a feature branch "anvil/${ctx.featureSlug}". For each repo with changes:\n1. Run a final quick check: build and lint to confirm everything is clean\n2. If ANY errors remain, fix them before proceeding\n3. Stage and commit all changes with a clear commit message: "[anvil] ${ctx.feature}"\n4. Push the feature branch to origin\n5. Create a PR from the feature branch to "${ctx.baseBranch}" using: gh pr create --base "${ctx.baseBranch}" --head "anvil/${ctx.featureSlug}" ${labelFlags}\n\nDo NOT merge to ${ctx.baseBranch}. Only create PRs. Do NOT create a PR if the code has unfixed errors.${prev}${resumeCtx}`;
     }
     default:
-      return `${feature}${repoList}${prev}${resumeCtx}`;
+      return `${feature}${repoList}${reviewBlock}${prev}${resumeCtx}`;
   }
 }
 
@@ -522,6 +533,10 @@ export function buildRepoStagePrompt(
     ? `\n\nIMPORTANT — This is a RETRY. The previous run failed:\n${ctx.failureContext}\nFix the issues and proceed.`
     : '';
 
+  const reviewBlock = ctx.reviewNote
+    ? `\n\n## User note from review (read this FIRST and apply throughout this stage)\n${ctx.reviewNote}`
+    : '';
+
   const prev = prevArtifact ? `\n\n## Prior stage output:\n${prevArtifact.slice(0, 12000)}` : '';
 
   const hlReqs = ctx.loadHighLevelRequirements();
@@ -531,13 +546,13 @@ export function buildRepoStagePrompt(
 
   switch (stage.name) {
     case 'repo-requirements':
-      return `${feature}\n\nProduce requirements specific to the "${repoName}" repository. What changes does THIS repo need for this feature? Include success criteria.${hlReqsBlock}${prev}`;
+      return `${feature}${reviewBlock}\n\nProduce requirements specific to the "${repoName}" repository. What changes does THIS repo need for this feature? Include success criteria.${hlReqsBlock}${prev}`;
 
     case 'specs': {
       const repoReqsBlock = repoArtifacts.requirements
         ? `\n\n## Requirements for ${repoName}\n${repoArtifacts.requirements}`
         : prev;
-      return `${feature}\n\nProduce a detailed technical specification for changes in "${repoName}". Include file paths, function signatures, API changes, data model changes, and how components interact.${hlReqsBlock}${repoReqsBlock}`;
+      return `${feature}${reviewBlock}\n\nProduce a detailed technical specification for changes in "${repoName}". Include file paths, function signatures, API changes, data model changes, and how components interact.${hlReqsBlock}${repoReqsBlock}`;
     }
 
     case 'tasks': {
@@ -548,7 +563,7 @@ export function buildRepoStagePrompt(
         ? `\n\n## Requirements for ${repoName}\n${repoArtifacts.requirements}`
         : '';
       const context = specsBlock || repoReqsFallback || prev;
-      return `${feature}\n\nBreak down the spec into ordered implementation tasks for "${repoName}". Each task should include: file path, description, acceptance criteria. Order tasks so dependencies come first.${hlReqsBlock}${context}`;
+      return `${feature}${reviewBlock}\n\nBreak down the spec into ordered implementation tasks for "${repoName}". Each task should include: file path, description, acceptance criteria. Order tasks so dependencies come first.${hlReqsBlock}${context}`;
     }
 
     case 'build': {
@@ -606,6 +621,7 @@ export function buildRepoStagePrompt(
       sections.push(`- Do NOT make git commits — that happens in the ship stage.`);
       sections.push(`- Do NOT ask for clarification. Decide from the context above and proceed.`);
 
+      if (reviewBlock) sections.push(reviewBlock);
       if (resumeCtx) sections.push(resumeCtx);
       return sections.join('\n');
     }
@@ -641,12 +657,13 @@ export function buildRepoStagePrompt(
       sections.push(`\nDo NOT make git commits.`);
       sections.push(`Do NOT ask for missing information. Use the codebase and context above to validate.`);
 
+      if (reviewBlock) sections.push(reviewBlock);
       if (resumeCtx) sections.push(resumeCtx);
       return sections.join('\n');
     }
 
     default:
-      return `${feature}\n\nWork on "${repoName}".${prev}${resumeCtx}`;
+      return `${feature}${reviewBlock}\n\nWork on "${repoName}".${prev}${resumeCtx}`;
   }
 }
 

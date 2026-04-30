@@ -4035,8 +4035,10 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
             auditLog.record({
               runId: state.runId, project: state.project,
               event: state.resumeDecision?.action === 'cancel' ? 'rejected'
-                : state.resumeDecision?.action === 'modify' ? 'modified'
-                : 'approved',
+                : (state.resumeDecision?.action === 'modify-artifact'
+                    || state.resumeDecision?.action === 'rerun-from')
+                  ? 'modified'
+                  : 'approved',
               actor: 'dashboard-user',
               details: state.resumeDecision ? { ...state.resumeDecision } : undefined,
             });
@@ -4046,9 +4048,13 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
                 learningsStore.record(state.project, {
                   runId: state.runId,
                   planVersion: 1,
-                  outcome: state.resumeDecision.action === 'approve' ? 'approved'
-                    : state.resumeDecision.action === 'modify' ? 'modified'
-                    : 'rejected',
+                  outcome: (state.resumeDecision.action === 'approve'
+                      || state.resumeDecision.action === 'approve-with-note')
+                    ? 'approved'
+                    : (state.resumeDecision.action === 'modify-artifact'
+                        || state.resumeDecision.action === 'rerun-from')
+                      ? 'modified'
+                      : 'rejected',
                   touchedTopLevelDirs: [],
                   rejectionReason: state.resumeDecision.note,
                   approvedBy: state.resumedBy,
@@ -4854,6 +4860,13 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
         const final = pauseStore.get(info.runId);
         if (final?.resumeDecision?.action === 'cancel') {
           throw new Error(`pipeline cancelled at ${info.stageName}`);
+        }
+        // Hand the reviewer's note off to the runner so the NEXT stage's
+        // user prompt picks it up via the prompt-builder context. Empty
+        // / missing notes are silently ignored by the runner.
+        const note = final?.resumeDecision?.note;
+        if (typeof note === 'string' && note.trim().length > 0) {
+          runner.setReviewNote(note);
         }
       });
     }

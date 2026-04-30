@@ -1151,7 +1151,7 @@ function App() {
               <PausedBanner
                 data={activePause}
                 onReview={() => setReviewModalOpen(() => true)}
-                onCancel={() => pausedRunsState.resume(activePause.pause.runId, 'reject-cancel')}
+                onCancel={() => pausedRunsState.resume(activePause.pause.runId, 'cancel')}
               />
             )}
             {showStageSpend && runCost && (
@@ -1447,8 +1447,8 @@ function App() {
       {reviewModalOpen && activePause && (
         <PlanReviewModal
           data={activePause}
-          onResolve={(action, note, planPatch) => {
-            pausedRunsState.resume(activePause.pause.runId, action, note, planPatch);
+          onResolve={(decision) => {
+            pausedRunsState.resume(activePause.pause.runId, decision);
             setReviewModalOpen(() => false);
           }}
           onClose={() => setReviewModalOpen(() => false)}

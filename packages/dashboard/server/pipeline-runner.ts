@@ -466,6 +466,14 @@ export class PipelineRunner extends EventEmitter {
   private kbManager: KnowledgeBaseManager | null;
   private afterStageHook: AfterStageHook | null = null;
   /**
+   * Review-time feedback from the most recent pause resume. Set by the
+   * dashboard's after-stage hook when the user resumes with
+   * `approve-with-note` (or any action carrying a `note`). Read once by
+   * the next stage's prompt builders, then cleared so the note doesn't
+   * leak into stages it wasn't intended for.
+   */
+  private pendingReviewNote: string | null = null;
+  /**
    * Phase 2: feature manifest is rendered into the projectPrompt of every
    * stage so downstream agents stop re-deriving fields earlier stages already
    * produced. Memoised per-snapshot — invalidated whenever a stage patches
@@ -474,6 +482,39 @@ export class PipelineRunner extends EventEmitter {
   private cachedManifestBlock: string | null = null;
 
   setAfterStageHook(hook: AfterStageHook | null): void { this.afterStageHook = hook; }
+
+  /**
+   * Stash a reviewer's feedback note so the next stage's user prompt
+   * gets a "User note from review:" block prepended. Called by the
+   * dashboard-server after-stage hook the moment a pause resolves.
+   *
+   * Set in two phases so per-repo fanout (which calls getPromptContext
+   * multiple times within a single stage) all sees the same note:
+   *   1. After-stage hook calls `setReviewNote(note)` → pendingReviewNote
+   *   2. Pipeline loop calls `armReviewNoteForCurrentStage()` once at
+   *      stage entry → currentStageReviewNote (read by every prompt build)
+   *   3. Pipeline loop calls `clearStageReviewNote()` once at stage exit
+   */
+  setReviewNote(note: string | null): void {
+    const trimmed = note?.trim() ?? '';
+    this.pendingReviewNote = trimmed.length > 0 ? trimmed : null;
+  }
+  private currentStageReviewNote: string | null = null;
+  /** Move the most recent pause note onto the current stage. No-op when none. */
+  private armReviewNoteForCurrentStage(): void {
+    if (this.pendingReviewNote) {
+      this.currentStageReviewNote = this.pendingReviewNote;
+      this.pendingReviewNote = null;
+    }
+  }
+  /** Clear the per-stage review note so it doesn't bleed into the next stage. */
+  private clearStageReviewNote(): void {
+    this.currentStageReviewNote = null;
+  }
+  /** Read the active review note (for prompt builders). Does NOT clear. */
+  private peekReviewNote(): string | null {
+    return this.currentStageReviewNote;
+  }
 
   /**
    * Best-effort list of files modified by this run so far, prefixed with the
@@ -912,6 +953,10 @@ export class PipelineRunner extends EventEmitter {
       workspaceDir: this.workspaceDir,
       baseBranch: this.getBaseBranch(),
       failureContext: this.config.failureContext,
+      // Surfaced for the immediate next stage only — pipeline loop arms
+      // it on stage entry and clears it on stage exit, so per-repo fanout
+      // sees the same note across calls.
+      reviewNote: this.peekReviewNote() ?? undefined,
       actionType: this.config.actionType,
       repoNames: this.state.repoNames,
       featureSlug: this.state.featureSlug,
@@ -1264,6 +1309,11 @@ export class PipelineRunner extends EventEmitter {
 
         console.log(`[pipeline] Entering stage "${stage.name}" (${i + 1}/${STAGES.length})`);
 
+        // Move any pending reviewer note from the prior pause onto this
+        // stage so every spawn (per-repo fanout, per-task build) sees the
+        // same note. Cleared after the stage completes.
+        this.armReviewNoteForCurrentStage();
+
         // Ensure Claude CLI auth is valid before spawning agents
         await this.ensureAuth(stage.name);
 
@@ -1448,6 +1498,11 @@ export class PipelineRunner extends EventEmitter {
             status: 'failed',
           });
           return this.state;
+        } finally {
+          // The reviewer note (if any) applied to THIS stage only. Drop it
+          // before advancing so the next stage starts fresh and can pick up
+          // a brand-new note set by its own after-stage pause resolution.
+          this.clearStageReviewNote();
         }
       }
 

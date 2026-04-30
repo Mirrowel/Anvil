@@ -59,6 +59,14 @@ export interface PromptBuilderContext {
     workspaceDir: string;
     baseBranch: string;
     failureContext?: string;
+    /**
+     * Reviewer feedback from the most recent pause resume. Surfaced at the
+     * top of the next stage's user prompt as a "User note from review:"
+     * block. PipelineRunner consumes-and-clears its review-note slot when
+     * building this context so the note only reaches the immediate next
+     * stage.
+     */
+    reviewNote?: string;
     actionType?: 'feature' | 'bugfix' | 'fix' | 'spike' | 'review';
     repoNames: string[];
     featureSlug: string;

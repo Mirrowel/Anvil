@@ -85,7 +85,11 @@ function errorMessage(err: unknown): string {
 }
 
 function isValidAction(value: unknown): value is ResumeDecision['action'] {
-  return value === 'approve' || value === 'modify' || value === 'cancel';
+  return value === 'approve'
+    || value === 'approve-with-note'
+    || value === 'modify-artifact'
+    || value === 'rerun-from'
+    || value === 'cancel';
 }
 
 function normaliseDecision(raw: unknown): ResumeDecision | null {
@@ -94,7 +98,10 @@ function normaliseDecision(raw: unknown): ResumeDecision | null {
   if (!isValidAction(obj.action)) return null;
   const out: ResumeDecision = { action: obj.action };
   if (typeof obj.note === 'string') out.note = obj.note;
-  if (obj.planPatch !== undefined) out.planPatch = obj.planPatch;
+  if (typeof obj.editedArtifact === 'string') out.editedArtifact = obj.editedArtifact;
+  if (typeof obj.rerunFromStage === 'number' && Number.isInteger(obj.rerunFromStage) && obj.rerunFromStage >= 0) {
+    out.rerunFromStage = obj.rerunFromStage;
+  }
   return out;
 }
 

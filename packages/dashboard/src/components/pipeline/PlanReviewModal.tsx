@@ -17,11 +17,11 @@ import {
   XCircle,
 } from 'lucide-react';
 import { PlanRiskPanel } from './PlanRiskPanel.js';
-import type { PausedRunData, ResumeAction } from './pipeline-ui-types.js';
+import type { PausedRunData, ResumeDecision } from './pipeline-ui-types.js';
 
 export interface PlanReviewModalProps {
   data: PausedRunData;
-  onResolve: (action: ResumeAction, note?: string, planPatch?: unknown) => void;
+  onResolve: (decision: ResumeDecision) => void;
   onClose: () => void;
 }
 
@@ -110,23 +110,22 @@ export function PlanReviewModal({ data, onResolve, onClose }: PlanReviewModalPro
   }, [modifyText]);
 
   const handleSaveModify = useCallback(() => {
-    try {
-      const parsed: unknown = JSON.parse(modifyText);
-      setModifyError(null);
-      onResolve('modify', undefined, parsed);
-    } catch (e) {
-      setModifyError(e instanceof Error ? e.message : 'Invalid JSON');
-    }
+    // Phase E will replace the JSON-patch panel with markdown artifact
+    // editing — for now treat the textarea contents as the new artifact.
+    setModifyError(null);
+    onResolve({ action: 'modify-artifact', editedArtifact: modifyText });
   }, [modifyText, onResolve]);
 
   const handleSubmitReplan = useCallback(() => {
     const trimmed = note.trim();
     if (!trimmed) return;
-    onResolve('replan-with-note', trimmed);
+    // Default rerun target is the previous stage. Phase E will surface a
+    // dropdown so the user can pick which stage to roll back to.
+    onResolve({ action: 'rerun-from', note: trimmed });
   }, [note, onResolve]);
 
   const handleConfirmCancel = useCallback(() => {
-    onResolve('reject-cancel');
+    onResolve({ action: 'cancel' });
   }, [onResolve]);
 
   const runIdShort = useMemo(() => pause.runId.slice(0, 8), [pause.runId]);
@@ -440,7 +439,7 @@ export function PlanReviewModal({ data, onResolve, onClose }: PlanReviewModalPro
             }}>
               <button
                 ref={approveRef}
-                onClick={() => onResolve('approve')}
+                onClick={() => onResolve({ action: 'approve' })}
                 aria-label="Approve plan (A)"
                 style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

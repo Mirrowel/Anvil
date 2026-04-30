@@ -47,10 +47,33 @@ export interface PausedRunData {
   tokenCostEstimate?: TokenCostEstimate;
 }
 
-export type ResumeAction = 'approve' | 'modify' | 'reject-cancel' | 'replan-with-note';
+/**
+ * Canonical action set for resolving a paused pipeline run. Matches
+ * `pipeline-pause-handlers.ts:isValidAction` server-side — keep them in
+ * sync.
+ *
+ *   approve            — proceed as-is.
+ *   approve-with-note  — proceed but inject `note` into the NEXT stage's
+ *                        user prompt as a "User note from review:" block.
+ *   modify-artifact    — server replaces the paused stage's artifact text
+ *                        with `editedArtifact` before the next stage runs.
+ *   rerun-from         — discard work from `rerunFromStage` onwards and
+ *                        replay; `note` is injected as failure context.
+ *   cancel             — kill the run.
+ */
+export type ResumeAction =
+  | 'approve'
+  | 'approve-with-note'
+  | 'modify-artifact'
+  | 'rerun-from'
+  | 'cancel';
 
 export interface ResumeDecision {
   action: ResumeAction;
+  /** Free-text feedback. Required for approve-with-note + rerun-from. */
   note?: string;
-  planPatch?: unknown;
+  /** Replacement markdown for the just-paused stage's artifact (modify-artifact only). */
+  editedArtifact?: string;
+  /** Stage index to roll back to; intermediate stages are marked pending and replayed. */
+  rerunFromStage?: number;
 }

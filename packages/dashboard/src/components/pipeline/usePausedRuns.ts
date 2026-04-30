@@ -3,15 +3,20 @@
 // avoid the stale-closure bug class we fight elsewhere in the dashboard.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PausedRunData, ResumeAction } from './pipeline-ui-types.js';
+import type { PausedRunData, ResumeAction, ResumeDecision } from './pipeline-ui-types.js';
 
 export interface UsePausedRunsResult {
   pauses: PausedRunData[];
+  /**
+   * Resolve a paused run.
+   * - Pass an action string for fire-and-forget actions: `resume(id, 'cancel')`,
+   *   `resume(id, 'approve')`.
+   * - Pass a full `ResumeDecision` for actions that need a note,
+   *   `editedArtifact`, or `rerunFromStage`.
+   */
   resume: (
     runId: string,
-    action: ResumeAction,
-    note?: string,
-    patch?: unknown,
+    decisionOrAction: ResumeAction | ResumeDecision,
   ) => void;
   loading: boolean;
 }
@@ -131,12 +136,15 @@ export function usePausedRuns(
   }, [ws]);
 
   const resume = useCallback(
-    (runId: string, action: ResumeAction, note?: string, patch?: unknown) => {
+    (runId: string, decisionOrAction: ResumeAction | ResumeDecision) => {
       if (!ws) return;
+      const decision: ResumeDecision = typeof decisionOrAction === 'string'
+        ? { action: decisionOrAction }
+        : decisionOrAction;
       ws.send(JSON.stringify({
         action: 'resume-pipeline',
         runId,
-        decision: { action, note, planPatch: patch },
+        decision,
       }));
     },
     [ws],

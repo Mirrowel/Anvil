@@ -15,11 +15,33 @@ export type PauseStatus =
   | 'cancelled'
   | 'timed-out';
 
+/**
+ * Canonical resume actions. Mirrored client-side in
+ * `dashboard/src/components/pipeline/pipeline-ui-types.ts`.
+ *
+ *   approve            — proceed as-is.
+ *   approve-with-note  — proceed but inject `note` into the next stage's prompt.
+ *   modify-artifact    — replace the paused stage's artifact with
+ *                        `editedArtifact` before the next stage runs.
+ *   rerun-from         — discard work from `rerunFromStage` onwards and
+ *                        replay; `note` is injected as failure context.
+ *   cancel             — kill the run.
+ */
+export type ResumeAction =
+  | 'approve'
+  | 'approve-with-note'
+  | 'modify-artifact'
+  | 'rerun-from'
+  | 'cancel';
+
 export interface ResumeDecision {
-  action: 'approve' | 'modify' | 'cancel';
+  action: ResumeAction;
+  /** Free-text feedback. Required for approve-with-note and rerun-from. */
   note?: string;
-  /** JSON patch for plan modification when action === 'modify'. */
-  planPatch?: unknown;
+  /** Replacement markdown body for the just-paused stage's artifact. */
+  editedArtifact?: string;
+  /** Stage index to roll back to; intermediate stages are marked pending and replayed. */
+  rerunFromStage?: number;
 }
 
 export interface PauseState {
