@@ -40,6 +40,7 @@ import {
 import {
   runPerRepoStageForRepo,
   combinePerRepoArtifacts,
+  disallowedToolsForPersona,
 } from './steps/per-repo-stage.step.js';
 import {
   runBuildForOneRepo,
@@ -1876,10 +1877,12 @@ export class PipelineRunner extends EventEmitter {
     const prompt = this.buildStagePrompt(stage, prevArtifact);
     const projectPrompt = this.buildProjectPrompt(stage);
 
-    // Non-engineer/tester personas cannot write files. Agent tool always disabled (P8).
-    const disallowedTools = (stage.persona !== 'engineer' && stage.persona !== 'tester')
-      ? ['Write', 'Edit', 'NotebookEdit', 'Agent']
-      : ['Agent'];
+    // Persona-driven tool gating (defined in per-repo-stage.step.ts):
+    //   - engineer / tester: full toolbelt (mutate code, run tests).
+    //   - analyst / architect / lead: KB-only (no Grep/Glob/Bash) so the
+    //     model uses the injected Knowledge Base instead of re-exploring.
+    //   - clarifier / others: read-only exploration allowed, no mutation.
+    const disallowedTools = disallowedToolsForPersona(stage.persona);
 
     const result = await spawnAndWait({
       agentManager: this.agentManager,

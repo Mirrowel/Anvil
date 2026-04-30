@@ -111,11 +111,25 @@ describe('disallowedToolsForPersona', () => {
   });
 
   it('disables write tools + Bash for non-engineer/non-tester personas', () => {
-    for (const p of ['analyst', 'architect', 'lead', 'test-author', 'clarifier']) {
+    // Read-only-explorer personas (clarifier asks questions, test-author
+    // generates tests against the existing tree). Keep Grep + Glob.
+    for (const p of ['test-author', 'clarifier']) {
       assert.deepEqual(
         disallowedToolsForPersona(p),
         ['Write', 'Edit', 'NotebookEdit', 'Bash', 'Agent'],
         `persona "${p}" should have write tools + Bash disabled`,
+      );
+    }
+  });
+
+  it('disables exploration tools (Grep/Glob) for KB-only personas', () => {
+    // Spec-writing personas read from the injected Knowledge Base, not
+    // from re-exploring the repo. They keep Read for spot-checks.
+    for (const p of ['analyst', 'architect', 'lead']) {
+      assert.deepEqual(
+        disallowedToolsForPersona(p),
+        ['Write', 'Edit', 'NotebookEdit', 'Bash', 'Grep', 'Glob', 'Agent'],
+        `persona "${p}" should have exploration tools disabled (KB-only)`,
       );
     }
   });
@@ -174,7 +188,7 @@ describe('runPerRepoStageForRepo', () => {
     });
     assert.equal(f.spawned.length, 1);
     const spec = f.spawned[0];
-    assert.deepEqual(spec.disallowedTools, ['Write', 'Edit', 'NotebookEdit', 'Bash', 'Agent']);
+    assert.deepEqual(spec.disallowedTools, ['Write', 'Edit', 'NotebookEdit', 'Bash', 'Grep', 'Glob', 'Agent']);
     assert.equal(spec.cwd, '/tmp/api');
     assert.equal(spec.stage, 'specs:api');
     assert.equal(spec.name, 'architect-api');
