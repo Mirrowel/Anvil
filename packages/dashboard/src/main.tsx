@@ -329,7 +329,7 @@ function App() {
   const pausedRunsWs = wsConnected ? wsRef.current : null;
   const pausedRunsState = usePausedRuns(pausedRunsWs, currentProject?.name ?? null);
   const activePause = pausedRunsState.pauses.find(
-    (p) => p.pause.runId === urlRunId && p.pause.status === 'paused-awaiting-user',
+    (p) => p?.pause?.runId === urlRunId && p?.pause?.status === 'paused-awaiting-user',
   );
 
   // Auto-close the review modal when the server-side pause goes away

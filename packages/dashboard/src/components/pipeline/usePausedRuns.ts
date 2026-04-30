@@ -33,8 +33,21 @@ function isRecord(x: unknown): x is Record<string, unknown> {
 function extractPauseList(payload: unknown): PausedRunData[] | null {
   if (!isRecord(payload)) return null;
   const list = payload.pauses;
-  if (Array.isArray(list)) return list as PausedRunData[];
-  return null;
+  if (!Array.isArray(list)) return null;
+  // The legacy `list-pipeline-pauses` server response sometimes returns
+  // bare PauseState records (without the `pause` wrapper); guard so a
+  // single malformed entry doesn't crash predicates that read `.pause.runId`.
+  const sanitised: PausedRunData[] = [];
+  for (const entry of list) {
+    if (!isRecord(entry)) continue;
+    if (isRecord(entry.pause) && typeof (entry.pause as { runId?: unknown }).runId === 'string') {
+      sanitised.push(entry as unknown as PausedRunData);
+    } else if (typeof (entry as { runId?: unknown }).runId === 'string') {
+      // Bare PauseState — wrap so consumers can read `.pause` uniformly.
+      sanitised.push({ pause: entry as unknown as PausedRunData['pause'] });
+    }
+  }
+  return sanitised;
 }
 
 function extractPausedRun(payload: unknown): PausedRunData | null {
