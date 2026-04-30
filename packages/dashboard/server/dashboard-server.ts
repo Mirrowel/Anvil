@@ -36,7 +36,6 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 
 import { AgentManager, type AgentState } from '@anvil/agent-core';
-import { createAdapter } from './adapters/adapter-factory.js';
 import { PipelineRunner } from './pipeline-runner.js';
 import type { PipelineRunState } from './pipeline-runner.js';
 import { ProjectLoader } from './project-loader.js';
@@ -804,12 +803,11 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
   // ── Shared services ─────────────────────────────────────────────────
   const projectLoader = new ProjectLoader();
   const featureStore = new FeatureStore();
-  // AgentManager lives in @anvil/agent-core (the source of truth). The
-  // adapter factory is injected so agent-core stays decoupled from
-  // dashboard's BaseAdapter family — `createAdapter` returns a BaseAdapter
-  // which structurally satisfies agent-core's `AgentAdapter` (5-event
-  // EventEmitter).
-  const agentManager = new AgentManager({ adapterFactory: createAdapter });
+  // AgentManager lives in @anvil/agent-core (the source of truth) and
+  // resolves its own adapter via ProviderRegistry — no factory injection
+  // needed. Pass `{ adapterFactory: customFactory }` if a non-default
+  // resolution is required (tests, custom routing).
+  const agentManager = new AgentManager();
   const memoryStore = new MemoryStore();
   const kbManager = new KnowledgeBaseManager(projectLoader);
   const planStore = new PlanStore(ANVIL_HOME);

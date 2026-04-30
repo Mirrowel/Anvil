@@ -20,6 +20,7 @@ import {
   type AgentProcessOpts,
 } from './session.js';
 import type { AgentAdapterFactory } from './adapter.js';
+import { defaultAdapterFactory } from './default-adapter-factory.js';
 import type {
   AgentCheckpointHook,
   AgentCostHook,
@@ -31,8 +32,13 @@ import type {
 import { AgentNotFoundError } from './types.js';
 
 export interface AgentManagerOpts {
-  /** Adapter factory — required. Same factory is reused for every spawn. */
-  adapterFactory: AgentAdapterFactory;
+  /**
+   * Adapter factory — optional. Defaults to `defaultAdapterFactory`, which
+   * resolves a `LanguageModelBridge` for the spec's model via
+   * `ProviderRegistry`. Pass a custom factory for tests or to inject a
+   * pre-built adapter. Same factory is reused for every spawn.
+   */
+  adapterFactory?: AgentAdapterFactory;
   /** Test seam — clock. Defaults to `Date.now`. */
   now?: () => number;
   /** Test seam — `setTimeout` substitute used by processes. */
@@ -54,9 +60,9 @@ export class AgentManager extends EventEmitter {
   protected readonly setTimeoutImpl: (fn: () => void, ms: number) => void;
   protected readonly nextTickImpl: (fn: () => void) => void;
 
-  constructor(opts: AgentManagerOpts) {
+  constructor(opts: AgentManagerOpts = {}) {
     super();
-    this.adapterFactory = opts.adapterFactory;
+    this.adapterFactory = opts.adapterFactory ?? defaultAdapterFactory;
     this.now = opts.now ?? Date.now;
     this.setTimeoutImpl = opts.setTimeoutImpl ?? ((fn, ms) => { setTimeout(fn, ms); });
     this.nextTickImpl = opts.nextTickImpl ?? ((fn) => { process.nextTick(fn); });

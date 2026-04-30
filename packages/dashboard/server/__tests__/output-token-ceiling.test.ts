@@ -1,5 +1,5 @@
 /**
- * STAGE_OUTPUT_LIMITS table + AgentCoreBridge round-trip checks.
+ * STAGE_OUTPUT_LIMITS table + LanguageModelBridge round-trip checks.
  *
  * The adapter-internals slice of this test (max_tokens body, finish_reason
  * normalization, claude stop_reason capture) lives in agent-core now —
@@ -11,7 +11,7 @@
  *   - STAGE_OUTPUT_LIMITS coverage of every pipeline stage (orthogonal to
  *     adapter migration).
  *   - Bridge-level checks that prove the dashboard's `BaseAdapter` contract
- *     still works once `createAdapter()` returns an `AgentCoreBridge`.
+ *     still works once `createAdapter()` returns an `LanguageModelBridge`.
  */
 
 import { describe, it } from 'node:test';
@@ -23,13 +23,13 @@ import {
   maxOutputTokensForStage,
   listStageNames,
 } from '../pipeline-runner.js';
-import { AgentCoreBridge } from '../adapters/agent-core-bridge.js';
-import type { AdapterCostInfo } from '../adapters/base-adapter.js';
-import type {
-  ModelAdapter,
-  ModelAdapterConfig,
-  ModelAdapterResult,
-  ProviderCapabilities,
+import {
+  LanguageModelBridge,
+  type AdapterCostInfo,
+  type ModelAdapter,
+  type ModelAdapterConfig,
+  type ModelAdapterResult,
+  type ProviderCapabilities,
 } from '@anvil/agent-core';
 
 // ── STAGE_OUTPUT_LIMITS table ─────────────────────────────────────────────
@@ -66,7 +66,7 @@ describe('STAGE_OUTPUT_LIMITS', () => {
   });
 });
 
-// ── AgentCoreBridge contract ──────────────────────────────────────────────
+// ── LanguageModelBridge contract ──────────────────────────────────────────────
 
 /** Minimal in-memory ModelAdapter that records the config it was called with. */
 class FakeModelAdapter implements ModelAdapter {
@@ -106,13 +106,13 @@ class FakeModelAdapter implements ModelAdapter {
   }
 }
 
-describe('AgentCoreBridge', () => {
+describe('LanguageModelBridge', () => {
   it('forwards setMaxOutputTokens to the wrapped adapter via run() config', async () => {
     const fake = new FakeModelAdapter({
       capabilities: { tier: 'function-calling', streaming: true, toolUse: true, fileSystem: false, shellExecution: false, sessionResume: false, maxOutputTokens: true },
       result: { output: '', inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0, provider: 'openai', model: 'gpt-4o-mini' },
     });
-    const bridge = new AgentCoreBridge(
+    const bridge = new LanguageModelBridge(
       { prompt: 'hi', model: 'gpt-4o-mini', sessionId: 's1', cwd: process.cwd() },
       fake,
       'openai',
@@ -141,7 +141,7 @@ describe('AgentCoreBridge', () => {
         stopReason: 'max_tokens',
       },
     });
-    const bridge = new AgentCoreBridge(
+    const bridge = new LanguageModelBridge(
       { prompt: 'hi', model: 'gpt-4o-mini', sessionId: 's2', cwd: process.cwd() },
       fake,
       'openai',
@@ -164,7 +164,7 @@ describe('AgentCoreBridge', () => {
       capabilities: { tier: 'agentic', streaming: true, toolUse: true, fileSystem: true, shellExecution: true, sessionResume: true, cache: 'explicit', cacheTtlSeconds: 300, structuredOutput: 'tool-shim', maxOutputTokens: false },
       result: { output: '', inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0, provider: 'claude', model: 'claude-sonnet-4-6' },
     });
-    const bridge = new AgentCoreBridge(
+    const bridge = new LanguageModelBridge(
       { prompt: 'unused', model: 'claude-sonnet-4-6', sessionId: 's3', cwd: process.cwd() },
       fake,
       'claude',
@@ -184,7 +184,7 @@ describe('AgentCoreBridge', () => {
       result: { output: 'hello world', inputTokens: 1, outputTokens: 2, costUsd: 0, durationMs: 1, provider: 'openai', model: 'gpt-4o-mini' },
       streamLines: [assistantFrame],
     });
-    const bridge = new AgentCoreBridge(
+    const bridge = new LanguageModelBridge(
       { prompt: 'hi', model: 'gpt-4o-mini', sessionId: 's4', cwd: process.cwd() },
       fake,
       'openai',
@@ -206,7 +206,7 @@ describe('AgentCoreBridge', () => {
   });
 
   it('emits markCacheBreakpoint sentinel only when promptCache === explicit', () => {
-    const claude = new AgentCoreBridge(
+    const claude = new LanguageModelBridge(
       { prompt: 'unused', model: 'claude-sonnet-4-6', sessionId: 's5', cwd: process.cwd() },
       new FakeModelAdapter({
         capabilities: { tier: 'agentic', streaming: true, toolUse: true, fileSystem: true, shellExecution: true, sessionResume: true, cache: 'explicit' },
@@ -214,7 +214,7 @@ describe('AgentCoreBridge', () => {
       }),
       'claude',
     );
-    const openai = new AgentCoreBridge(
+    const openai = new LanguageModelBridge(
       { prompt: 'unused', model: 'gpt-4o-mini', sessionId: 's6', cwd: process.cwd() },
       new FakeModelAdapter({
         capabilities: { tier: 'function-calling', streaming: true, toolUse: true, fileSystem: false, shellExecution: false, sessionResume: false, cache: 'auto' },

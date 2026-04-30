@@ -1,30 +1,28 @@
 /**
- * Bridge — wraps an `@anvil/agent-core` `ModelAdapter` so it satisfies the
- * dashboard's `BaseAdapter` event-emit contract.
+ * `LanguageModelBridge` — adapts an `@anvil/agent-core` `ModelAdapter` (or a
+ * future `LanguageModel`) to the `AgentAdapter` interface that
+ * `AgentProcess` consumes (5-event EventEmitter: `content` / `activity` /
+ * `result` / `error-output` / `exit`).
  *
- * The dashboard consumes adapters as stateful EventEmitters (`start()`,
- * `kill()`, plus `content` / `activity` / `result` / `error-output` / `exit`
- * events). agent-core's `ModelAdapter.run(config, output)` is a stateless
- * Promise-returning call that writes Anvil Stream Format NDJSON to the
- * supplied stream. The bridge converts between the two:
+ * Two surfaces in one class:
+ *   - `AgentAdapter` (lifecycle): `start()` / `kill()` + the 5 events.
+ *     This is what `AgentProcess` drives.
+ *   - Prompt-construction helpers: `capabilities` (with `promptCache`
+ *     stance), `markCacheBreakpoint(prompt, position)`, `countTokens(text)`.
+ *     These let prompt-envelope code make caching decisions before the
+ *     spawn — out of band of the lifecycle.
  *
- *   - `start()` kicks `run()` off against an in-process Writable that
- *     parses NDJSON lines and re-emits them as dashboard events.
- *   - The final `result` frame on the wire is ignored — the bridge waits
- *     for `run()` to resolve and emits `result` from the richer
- *     `ModelAdapterResult` (which includes `stopReason` / cache token
+ * Behavior:
+ *   - `start()` kicks `ModelAdapter.run()` against an in-process Writable
+ *     that parses Anvil Stream Format NDJSON and re-emits dashboard events.
+ *   - The wire-format `result` frame is ignored — the bridge waits for
+ *     `run()` to resolve and emits `result` from the richer
+ *     `ModelAdapterResult` (which includes `stopReason` + cache token
  *     counts that the wire format doesn't carry).
- *   - Errors raised by `run()` are surfaced as `error-output` + `exit(1)`.
- *
- * Capability mapping:
- *   - `agent-core/ProviderCapabilities.cache` → `AdapterCapabilities.promptCache`
- *   - `agent-core/ProviderCapabilities.cacheTtlSeconds` → same
- *   - `agent-core/ProviderCapabilities.maxOutputTokens` → same
- *   - `agent-core/ProviderCapabilities.structuredOutput` → same
- *
- * Phase 1 of the dashboard consolidation. See DASHBOARD-CONSOLIDATION-PLAN.md.
+ *   - Errors from `run()` surface as `error-output` + `exit(1)`.
  */
 
+import { EventEmitter } from 'node:events';
 import { Writable } from 'node:stream';
 import type {
   ModelAdapter,
@@ -32,13 +30,12 @@ import type {
   ModelAdapterResult,
   ProviderCapabilities,
   ProviderName,
-} from '@anvil/agent-core';
-import {
-  BaseAdapter,
-  type AdapterCapabilities,
-  type AdapterConfig,
-  type AdapterCostInfo,
-} from './base-adapter.js';
+} from '../../types.js';
+import type { AdapterRequest, AgentAdapter } from './adapter.js';
+import type {
+  AdapterCapabilities,
+  AdapterCostInfo,
+} from './legacy-adapter-types.js';
 
 // ── Capability mapping ───────────────────────────────────────────────────
 
@@ -56,7 +53,7 @@ function mapCapabilities(caps: ProviderCapabilities): AdapterCapabilities {
   };
 }
 
-// ── Tool-use summary (mirrors dashboard claude-adapter behavior) ─────────
+// ── Tool-use summary ─────────────────────────────────────────────────────
 
 function summarizeToolUse(name: string, input: Record<string, unknown>): string {
   switch (name) {
@@ -89,34 +86,29 @@ function summarizeToolUse(name: string, input: Record<string, unknown>): string 
 
 // ── Bridge ───────────────────────────────────────────────────────────────
 
-export class AgentCoreBridge extends BaseAdapter {
-  private adapter: ModelAdapter;
-  private providerName: ProviderName;
-  private capabilitiesCache: AdapterCapabilities;
-  private maxOutputTokens?: number;
+export class LanguageModelBridge extends EventEmitter implements AgentAdapter {
+  private readonly request: AdapterRequest;
+  private readonly adapter: ModelAdapter;
+  private readonly providerName: ProviderName;
+  private readonly capabilitiesCache: AdapterCapabilities;
+  private maxOutputTokensOverride?: number;
   private isStarted = false;
   private isKilled = false;
+  private activityCounter = 0;
 
-  constructor(config: AdapterConfig, adapter: ModelAdapter, providerName: ProviderName) {
-    super(config);
+  constructor(
+    request: AdapterRequest,
+    adapter: ModelAdapter,
+    providerName: ProviderName,
+  ) {
+    super();
+    this.request = request;
     this.adapter = adapter;
     this.providerName = providerName;
     this.capabilitiesCache = mapCapabilities(adapter.capabilities);
   }
 
-  override get capabilities(): AdapterCapabilities {
-    return this.capabilitiesCache;
-  }
-
-  override setMaxOutputTokens(n: number): void {
-    if (n > 0) this.maxOutputTokens = n;
-  }
-
-  override markCacheBreakpoint(prompt: string, position: number): string {
-    if (this.capabilitiesCache.promptCache !== 'explicit') return prompt;
-    const safe = Math.max(0, Math.min(prompt.length, position));
-    return prompt.slice(0, safe) + '\n<!-- anvil:cache-breakpoint -->\n' + prompt.slice(safe);
-  }
+  // ── AgentAdapter surface ─────────────────────────────────────────────
 
   start(): void {
     if (this.isStarted) return;
@@ -124,13 +116,17 @@ export class AgentCoreBridge extends BaseAdapter {
     void this.runAdapter();
   }
 
-  kill(): void {
+  kill(_signal?: string): void {
     this.isKilled = true;
     try {
       this.adapter.kill?.();
     } catch {
       // best-effort
     }
+  }
+
+  setMaxOutputTokens(n: number): void {
+    if (n > 0) this.maxOutputTokensOverride = n;
   }
 
   get pid(): number | undefined {
@@ -141,26 +137,48 @@ export class AgentCoreBridge extends BaseAdapter {
     return this.isKilled;
   }
 
-  // ── Internal ──────────────────────────────────────────────────────────
+  // ── Prompt-construction surface ───────────────────────────────────────
+
+  get capabilities(): AdapterCapabilities {
+    return this.capabilitiesCache;
+  }
+
+  /** Heuristic estimator (chars / 4). Concrete adapters with exact token
+   *  counters can override; bridges use the heuristic. */
+  countTokens(text: string): number {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+  }
+
+  /** Insert a cache breakpoint marker into `prompt` at byte `position`.
+   *  No-op for `auto` / `none` providers. */
+  markCacheBreakpoint(prompt: string, position: number): string {
+    if (this.capabilitiesCache.promptCache !== 'explicit') return prompt;
+    const safe = Math.max(0, Math.min(prompt.length, position));
+    return prompt.slice(0, safe) + '\n<!-- anvil:cache-breakpoint -->\n' + prompt.slice(safe);
+  }
+
+  /** Provider name surfaced for diagnostics. */
+  get provider(): ProviderName {
+    return this.providerName;
+  }
+
+  // ── Internals ─────────────────────────────────────────────────────────
 
   private buildAdapterConfig(): ModelAdapterConfig {
     return {
-      userPrompt: this.config.prompt,
-      projectPrompt: this.config.projectPrompt,
-      model: this.config.model,
-      workingDir: this.config.cwd,
-      // Stage / persona aren't part of the dashboard's AdapterConfig; the
-      // ModelAdapters that need them (router-driven cli flows) receive
-      // them from cli pathways instead. Pass empty strings here — adapter
-      // implementations don't error on empty stage/persona.
+      userPrompt: this.request.prompt,
+      projectPrompt: this.request.projectPrompt,
+      model: this.request.model,
+      workingDir: this.request.cwd,
       stage: '',
       persona: '',
-      sessionId: this.config.sessionId,
-      resume: this.config.resume,
-      permissionMode: this.config.permissionMode,
-      allowedTools: this.config.allowedTools,
-      disallowedTools: this.config.disallowedTools,
-      maxOutputTokens: this.maxOutputTokens,
+      sessionId: this.request.sessionId,
+      resume: this.request.resume,
+      permissionMode: this.request.permissionMode,
+      allowedTools: this.request.allowedTools,
+      disallowedTools: this.request.disallowedTools,
+      maxOutputTokens: this.maxOutputTokensOverride ?? this.request.maxOutputTokens,
     };
   }
 
@@ -175,7 +193,6 @@ export class AgentCoreBridge extends BaseAdapter {
       runError = err instanceof Error ? err : new Error(String(err));
     }
 
-    // Drain any buffered content the parser hasn't seen yet.
     sink.end();
 
     if (runError) {
@@ -199,7 +216,7 @@ export class AgentCoreBridge extends BaseAdapter {
       this.emit('result', {
         result: result.output ?? '',
         cost,
-        sessionId: result.sessionId ?? this.config.sessionId,
+        sessionId: result.sessionId ?? this.request.sessionId,
       });
     }
 
@@ -208,7 +225,7 @@ export class AgentCoreBridge extends BaseAdapter {
 
   /**
    * Build a Writable that parses Anvil Stream Format NDJSON line-by-line
-   * and re-emits dashboard events. The result frame is ignored here —
+   * and re-emits AgentAdapter events. The result frame is ignored here —
    * the bridge surfaces it from the resolved ModelAdapterResult instead.
    */
   private createStreamSink(): Writable {
@@ -231,10 +248,14 @@ export class AgentCoreBridge extends BaseAdapter {
     });
   }
 
+  private nextActivityId(): string {
+    return `act-${this.request.sessionId.slice(0, 8)}-${++this.activityCounter}`;
+  }
+
   private handleStreamLine(line: string): void {
     const trimmed = line.trim();
     if (!trimmed) return;
-    let parsed: any;
+    let parsed: { type?: string; message?: { content?: Array<Record<string, unknown>> } };
     try {
       parsed = JSON.parse(trimmed);
     } catch {
@@ -242,7 +263,7 @@ export class AgentCoreBridge extends BaseAdapter {
     }
     if (parsed?.type !== 'assistant' || !Array.isArray(parsed.message?.content)) return;
 
-    for (const block of parsed.message.content as Array<Record<string, unknown>>) {
+    for (const block of parsed.message.content) {
       if (block.type === 'text' && typeof block.text === 'string') {
         this.emit('content', block.text);
         this.emit('activity', {
@@ -272,10 +293,5 @@ export class AgentCoreBridge extends BaseAdapter {
         });
       }
     }
-  }
-
-  /** Provider name surfaced for diagnostics — not part of BaseAdapter contract. */
-  get provider(): ProviderName {
-    return this.providerName;
   }
 }

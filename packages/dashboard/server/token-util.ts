@@ -11,7 +11,7 @@
  * through `countTokens` so future tokenizer upgrades take effect everywhere.
  */
 
-import type { BaseAdapter } from './adapters/base-adapter.js';
+import type { PromptAwareAdapter } from '@anvil/agent-core';
 
 const HEURISTIC_DIVISOR = 4;
 
@@ -37,7 +37,7 @@ export function heuristicTokenCountFromBytes(byteLen: number): number {
  * execution (e.g., KB indexing utilities).
  */
 export function countTokens(
-  adapter: BaseAdapter | null | undefined,
+  adapter: PromptAwareAdapter | null | undefined,
   text: string,
 ): number {
   if (adapter) return adapter.countTokens(text);

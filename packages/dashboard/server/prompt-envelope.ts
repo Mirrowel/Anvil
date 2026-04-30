@@ -27,7 +27,7 @@
  * available for adapters that consume a single string.
  */
 
-import type { BaseAdapter } from './adapters/base-adapter.js';
+import type { PromptAwareAdapter } from '@anvil/agent-core';
 
 export interface PromptEnvelopeInput {
   // ── STABLE ──────────────────────────────────────────────
@@ -79,7 +79,7 @@ function sectionIfNonEmpty(title: string, body: string): string | null {
 
 export function buildPromptEnvelope(
   input: PromptEnvelopeInput,
-  adapter: BaseAdapter | null | undefined,
+  adapter: PromptAwareAdapter | null | undefined,
 ): PromptEnvelopeOutput {
   const stableParts = [
     STABLE_HEADER,

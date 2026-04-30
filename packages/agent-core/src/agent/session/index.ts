@@ -27,6 +27,19 @@ export type {
 } from './adapter.js';
 export { buildAdapterRequest } from './adapter.js';
 
+// Default factory + bridge (the concrete production adapter resolution path).
+export { LanguageModelBridge } from './language-model-bridge.js';
+export {
+  defaultAdapterFactory,
+  defaultAdapterFactoryFn,
+  resolveProvider,
+} from './default-adapter-factory.js';
+export type {
+  AdapterCapabilities,
+  AdapterCostInfo,
+  PromptAwareAdapter,
+} from './legacy-adapter-types.js';
+
 export type {
   AgentActivity,
   AgentCheckpointHook,

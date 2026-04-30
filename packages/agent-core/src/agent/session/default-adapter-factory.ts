@@ -1,38 +1,32 @@
 /**
- * Adapter factory — resolves a model id to an `@anvil/agent-core`
- * `ModelAdapter` and wraps it in an `AgentCoreBridge` so the dashboard's
- * `BaseAdapter` consumers (AgentManager, AgentProcess, prompt-envelope,
- * token-util) keep their existing event-emit interface.
+ * Default `AgentAdapterFactory` for `AgentManager`.
  *
- * Provider resolution preserves dashboard-specific behavior that
- * agent-core's registry doesn't carry:
+ * Resolves a `SpawnConfig`'s model field to an `@anvil/agent-core`
+ * `ModelAdapter` via `ProviderRegistry`, then wraps it in a
+ * `LanguageModelBridge` so `AgentProcess` can drive it through the 5-event
+ * `AgentAdapter` surface.
+ *
+ * Provider resolution heuristic:
  *   - `gemini-*` prefers the Gemini CLI when the binary is on PATH; if not,
  *     falls back to the HTTP API adapter (`gemini`).
  *   - Model ids containing `/` route to OpenRouter.
  *   - Otherwise we delegate to `ProviderRegistry.resolveFromModelId` which
  *     covers Claude / OpenAI / Gemini-API.
- *
- * Phase 1 of the dashboard consolidation. See DASHBOARD-CONSOLIDATION-PLAN.md.
  */
 
 import { execSync } from 'node:child_process';
-import { ProviderRegistry, type ModelAdapter, type ProviderName } from '@anvil/agent-core';
-import { BaseAdapter, type AdapterConfig } from './base-adapter.js';
-import { AgentCoreBridge } from './agent-core-bridge.js';
+import { ProviderRegistry } from '../../registry.js';
+import type { ModelAdapter, ProviderName } from '../../types.js';
+import type {
+  AdapterRequest,
+  AgentAdapter,
+  AgentAdapterFactory,
+} from './adapter.js';
+import { LanguageModelBridge } from './language-model-bridge.js';
 
 // ── Provider resolution ──────────────────────────────────────────────────
 
-/**
- * Resolve which agent-core provider should handle a given model id.
- *
- * Mirrors the legacy dashboard heuristic so call sites that pre-compute the
- * provider string (e.g., for logging) keep behaving the same.
- */
 export function resolveProvider(modelId: string): ProviderName {
-  return resolveProviderByHeuristic(modelId);
-}
-
-export function resolveProviderByHeuristic(modelId: string): ProviderName {
   const id = modelId.toLowerCase();
 
   // Gemini: prefer CLI when available, fall back to HTTP API.
@@ -77,16 +71,23 @@ function geminiCliAvailable(): boolean {
 // ── Factory ──────────────────────────────────────────────────────────────
 
 /**
- * Create the appropriate adapter for a given config.
- * Returned adapter is always an `AgentCoreBridge` — the dashboard sees the
- * familiar `BaseAdapter` event surface; agent-core handles the actual call.
+ * Default factory used by `AgentManager` when no `adapterFactory` is
+ * passed to its constructor. Resolves a `LanguageModelBridge` for the
+ * given request via `ProviderRegistry`.
+ *
+ * Returned adapter is always a `LanguageModelBridge` — `AgentProcess`
+ * sees the 5-event `AgentAdapter` surface; agent-core handles the actual
+ * call via the registered `ModelAdapter`.
  */
-export function createAdapter(config: AdapterConfig): BaseAdapter {
+export function defaultAdapterFactory(request: AdapterRequest): AgentAdapter {
   const registry = ProviderRegistry.getInstance();
-  const provider = resolveProvider(config.model);
-  const adapter = resolveAdapterOrFallback(registry, provider);
-  return new AgentCoreBridge(config, adapter.adapter, adapter.provider);
+  const provider = resolveProvider(request.model);
+  const resolved = resolveAdapterOrFallback(registry, provider);
+  return new LanguageModelBridge(request, resolved.adapter, resolved.provider);
 }
+
+/** Type alias matching `AgentAdapterFactory` — exported for explicit typing. */
+export const defaultAdapterFactoryFn: AgentAdapterFactory = defaultAdapterFactory;
 
 function resolveAdapterOrFallback(
   registry: ProviderRegistry,

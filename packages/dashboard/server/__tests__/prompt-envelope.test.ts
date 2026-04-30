@@ -13,9 +13,9 @@ import {
   buildPromptEnvelope,
   type PromptEnvelopeInput,
 } from '../prompt-envelope.js';
-import type { BaseAdapter } from '../adapters/base-adapter.js';
+import type { PromptAwareAdapter } from '@anvil/agent-core';
 
-type AdapterStub = Pick<BaseAdapter, 'capabilities' | 'markCacheBreakpoint'>;
+type AdapterStub = Pick<PromptAwareAdapter, 'capabilities' | 'markCacheBreakpoint'>;
 
 const STABLE: Pick<
   PromptEnvelopeInput,
@@ -86,7 +86,7 @@ describe('buildPromptEnvelope — explicit cache marker', () => {
     };
     const env = buildPromptEnvelope(
       makeInput({ stageInstructions: 'Run' }),
-      explicitAdapter as BaseAdapter,
+      explicitAdapter as PromptAwareAdapter,
     );
     assert.ok(env.prompt.includes('MARKER'));
   });
@@ -100,7 +100,7 @@ describe('buildPromptEnvelope — explicit cache marker', () => {
     };
     const env = buildPromptEnvelope(
       makeInput({ stageInstructions: 'Run' }),
-      autoAdapter as BaseAdapter,
+      autoAdapter as PromptAwareAdapter,
     );
     assert.ok(!env.prompt.includes('MARKER'));
     assert.equal(env.prompt, env.stable + '\n\n' + env.variable);
