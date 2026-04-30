@@ -22,7 +22,11 @@ import {
   runClarifyForProject,
   type RunClarifyForProjectResult,
 } from '../steps/clarify-stage.step.js';
-import type { AgentManager, AgentState, SpawnConfig } from '../agent-manager.js';
+import type {
+  AgentSessionRegistry as AgentManager,
+  AgentSessionState as AgentState,
+  SessionSpec as SpawnConfig,
+} from '@anvil/agent-core';
 
 interface FakeOpts {
   /** First-phase poll responses (explore). */

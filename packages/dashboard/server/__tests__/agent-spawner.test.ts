@@ -13,7 +13,11 @@ import {
   spawnAndWait,
   waitForAgent,
 } from '../steps/agent-spawner.js';
-import type { AgentManager, AgentState, SpawnConfig } from '../agent-manager.js';
+import type {
+  AgentSessionRegistry as AgentManager,
+  AgentSessionState as AgentState,
+  SessionSpec as SpawnConfig,
+} from '@anvil/agent-core';
 
 interface FakeOpts {
   /** Status sequence the next getAgent() calls return. */

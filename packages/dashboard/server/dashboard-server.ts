@@ -35,9 +35,10 @@ import { fileURLToPath } from 'node:url';
 // @ts-ignore — ws is a runtime dependency
 import { WebSocketServer, WebSocket } from 'ws';
 
-import { AgentManager } from './agent-manager.js';
-import type { AgentState } from './agent-manager.js';
-import type { AgentActivity } from './agent-process.js';
+import {
+  AgentSessionRegistry as AgentManager,
+  type AgentSessionState as AgentState,
+} from '@anvil/agent-core';
 import { createAdapter } from './adapters/adapter-factory.js';
 import { PipelineRunner } from './pipeline-runner.js';
 import type { PipelineRunState } from './pipeline-runner.js';
@@ -82,9 +83,11 @@ import { BridgedCostLedger } from './cost-bridge.js';
 import { CostBreachHandler } from './cost-breach-handler.js';
 import type { BreachState } from './cost-types.js';
 import { CostBreachSweeper } from './cost-breach-sweeper.js';
-import { BlobStore } from './checkpoint-blob-store.js';
-import { CheckpointStore } from './checkpoint-store.js';
-import { computeKey as computeCheckpointKey } from './checkpoint-key.js';
+import {
+  BlobStore,
+  CheckpointStore,
+  computeKey as computeCheckpointKey,
+} from '@anvil/agent-core';
 import { CheckpointSimilarityIndex } from './checkpoint-similarity-index.js';
 import { embedPrompt } from './prompt-similarity.js';
 import { loadPolicy, evaluatePolicy } from './pipeline-policy.js';

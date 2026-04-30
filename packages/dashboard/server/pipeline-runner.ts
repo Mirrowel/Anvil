@@ -15,7 +15,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execSync, spawn as cpSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { AgentManager } from './agent-manager.js';
+import { AgentSessionRegistry as AgentManager } from '@anvil/agent-core';
 import { ProjectLoader } from './project-loader.js';
 import type { ProjectInfo } from './project-loader.js';
 import { FeatureStore } from './feature-store.js';

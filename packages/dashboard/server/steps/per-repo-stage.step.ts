@@ -24,7 +24,7 @@
  */
 
 import { spawnAndWait } from './agent-spawner.js';
-import type { AgentManager } from '../agent-manager.js';
+import type { AgentSessionRegistry as AgentManager } from '@anvil/agent-core';
 import type { Step, StepContext } from '@anvil/core-pipeline';
 
 /**
