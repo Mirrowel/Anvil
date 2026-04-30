@@ -10,6 +10,12 @@ import pc from 'picocolors';
 import { info, success, error, warn } from '../logger.js';
 import { findProject } from '../project/loader.js';
 import { getAnvilDirs } from '../home.js';
+import {
+  BlobStore,
+  CheckpointStore,
+  runWithCheckpoint,
+  type CheckpointInputs,
+} from '@anvil/agent-core';
 
 interface PRData {
   number: number;
@@ -334,7 +340,28 @@ export const learnCommand = new Command('learn')
       const prompt = buildLearningPrompt(pr, feedback, diff);
 
       try {
-        const output = await spawnAgent(prompt);
+        // Wrap with agent-core's runWithCheckpoint so re-runs against the
+        // same PR state hit the cache and skip the LLM call. PR + diff
+        // content go into the cache key — any change invalidates.
+        const ANVIL_HOME = process.env.ANVIL_HOME || process.env.FF_HOME || join(homedir(), '.anvil');
+        const blobStore = new BlobStore(ANVIL_HOME);
+        const checkpointStore = new CheckpointStore({ anvilHome: ANVIL_HOME, blobStore });
+        const checkpointInputs: CheckpointInputs & { inputs: unknown } = {
+          stage: 'kb-grounding',
+          taskId: `learn:${pr.url}`,
+          promptVersion: 'learn-v1',
+          model: 'agent-default',
+          inputs: { prompt },
+        };
+        const output = await runWithCheckpoint(checkpointStore, blobStore, {
+          project: resolvedProject,
+          runFamily: `learn-${Date.now().toString(36)}`,
+          inputs: checkpointInputs,
+          run: () => spawnAgent(prompt),
+          serialize: (s) => s,
+          deserialize: (b) => b.toString('utf-8'),
+          onHit: () => info(`    PR #${pr.number}: cache hit — reusing prior extraction`),
+        });
         const learnings = parseLearningsFromOutput(output, pr.url, resolvedProject);
 
         if (learnings.length > 0) {
