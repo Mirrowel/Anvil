@@ -222,13 +222,46 @@ After D2, `SpawnConfig` and `AgentProcessConfig` both become deprecated type ali
 
 | Phase | Description | Commit | Status |
 |---|---|---|---|
-| 0 | Audit + ADR + plan | _pending_ | drafted 2026-04-30 |
-| 1 | agent-core surface design + types | — | not started |
-| 2 | Lift `AgentSession` + Registry into agent-core | — | not started |
-| 3 | Move checkpoint cache into agent-core | — | not started |
-| 4 | Dashboard cuts over | — | not started |
-| 5 | cli orchestrator migrates | — | not started |
-| 6 | Tests + docs + ADR finalize + tag | — | not started |
+| 0 | Audit + ADR + plan | `b712300` | landed 2026-04-30 |
+| 1 | agent-core surface design + types | `881407b` | landed 2026-04-30 |
+| 2 | Lift `AgentSession` + Registry into agent-core | `a8c0b3f` | landed 2026-04-30 |
+| 3 | Move checkpoint cache into agent-core | `3be39ee` | landed 2026-04-30 |
+| 4 | Dashboard cuts over | `fcae760` | landed 2026-04-30 |
+| 5 | cli `diff` consumes checkpoint cache | `c21d7dd` | landed 2026-04-30 |
+| 6 | Tests + docs + ADR finalize | _this commit_ | in progress |
+
+### Cumulative outcome
+
+| Surface | Before | After |
+|---|---:|---:|
+| `dashboard/server/agent-manager.ts` | 444 LOC class | 28 LOC re-export shim |
+| `dashboard/server/agent-process.ts` | 120 LOC class | 31 LOC re-export shim |
+| `dashboard/server/agent-runner-wrapper.ts` | 189 LOC | 9 LOC re-export shim |
+| `dashboard/server/checkpoint-store.ts` | 387 LOC | 9 LOC re-export shim |
+| `dashboard/server/checkpoint-blob-store.ts` | 144 LOC | 9 LOC re-export shim |
+| `dashboard/server/checkpoint-key.ts` | ~125 LOC | 14 LOC re-export shim |
+| `dashboard/server/checkpoint-types.ts` | ~75 LOC | 13 LOC re-export shim |
+| `agent-core/src/agent/session/` | (did not exist) | 4 source files (~580 LOC) + 2 test files (~510 LOC) |
+| `agent-core/src/checkpoint/` | (did not exist) | 5 source files (~960 LOC, lifted) + 4 test files (~1080 LOC, lifted) |
+
+**Net repo delta:** dashboard shrinks by ~1,400 LOC (classes deleted; shims add ~115 LOC); agent-core grows by ~580 LOC (new session module) + ~960 LOC (lifted checkpoint code that previously lived in dashboard). The 960 LOC didn't disappear — it relocated to its proper home so cli now consumes it too. Net repo LOC delta: **−~190 LOC** with one canonical `AgentSessionRegistry` instead of two same-named classes.
+
+**Test coverage:**
+
+| Suite | Pre | Post | Delta |
+|---|---:|---:|---:|
+| `@anvil/agent-core` | 156 tests / 44 suites | 241 tests / 66 suites | +85 / +22 |
+| `@anvil-dev/dashboard` server | 642 / 180 | 642 / 180 | 0 (lifted tests live in agent-core now) |
+| Combined | 798 / 224 | 883 / 246 | +85 / +22 |
+
+agent-core's 85 new tests break down as: 21 type-shape locks (Phase 1) + 28 `AgentSession`/`AgentSessionRegistry` runtime parity tests (Phase 2) + 36 lifted from dashboard's checkpoint suite (Phase 3 — same behavior, new home).
+
+**D10 invariant verified:** dashboard's WebSocket message protocol unchanged. The 4 registry events (`agent-output`, `agent-activity`, `agent-done`, `agent-error`) and 5 session events (`content`, `activity`, `result`, `error-output`, `exit`) carry byte-identical payload shapes. Dashboard's existing `BaseAdapter` family structurally satisfies agent-core's new `AgentAdapter` interface — no adapter rewriting required.
+
+**Honestly deferred:**
+- **Full collapse of agent-core's existing single-shot `AgentManager.runAgent()`** (per ADR D6) into a thin wrapper over `AgentSessionRegistry`. Today the cli-style `AgentManager` survives unchanged in `agent-core/src/agent/agent-manager.ts` (125 LOC); it has no production consumers but is exported. Collapsing it would require an `AgentAdapter` impl that wraps `agent/spawn.ts:spawnAgent()` and translates the `AgentEvent` discriminated union into the 5-event surface. ~80 LOC of careful event-shape translation. Tractable but separate work.
+- **cli orchestrator full migration** to `AgentSessionRegistry` (per ADR D7). cli's main pipeline orchestrator (`cli/src/pipeline/orchestrator.ts`) does not use either `AgentManager` class today — it shells out via `execSync`. Phase 5 wired up the meaningful consumer (`commands/diff.ts` for the per-call cache); broader cli orchestrator integration is gated on cli growing multi-agent state-tracking needs.
+- **Re-export shim deletion** (final §4.2 step). The 7 dashboard re-export shims (~95 LOC total) stay in place to preserve existing dashboard call sites. Phase 6 leaves them; a follow-up PR can update direct imports across `pipeline-runner.ts`, `dashboard-server.ts`, the 5 step modules, and 5 test files in one mechanical rename pass.
 
 ---
 

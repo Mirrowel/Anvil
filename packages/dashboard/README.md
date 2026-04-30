@@ -11,12 +11,12 @@ The dashboard is a **consumer** of four extracted Anvil packages
 
 | Package | Used for |
 |---|---|
-| `@anvil/agent-core` | Provider adapters (`anthropic-bridge`, `openai-bridge`, …) — dashboard's `AgentManager` wraps these via the `BaseAdapter` (EventEmitter) shape |
+| `@anvil/agent-core` | Provider adapters + agent lifecycle (`AgentSession` / `AgentSessionRegistry`) + per-call checkpoint cache (`runWithCheckpoint`, `CheckpointStore`, `BlobStore`). Dashboard's `agent-manager.ts` is now a re-export shim aliasing `AgentSessionRegistry` as `AgentManager` for backwards-compat. |
 | `@anvil/core-pipeline` | `EventBus` + `Step<I,O>` + `StepRegistry` + `Pipeline` — dashboard's `pipeline-runner.ts` orchestrates Steps from `server/steps/` |
 | `@anvil/knowledge-core` | Codebase fingerprinting, structural-hash diffing, KB-tier prompt injection |
 | `@anvil/memory-core` | `HybridMemoryStore` (JSONL canonical + SQLite hot index) — dashboard's `memory-store.ts` is now a thin façade over this |
 
-`packages/cli` and the dashboard share these packages — the same Step factories that lift `pipeline-runner.ts` features (per-repo fanout, per-task build, clarify Q&A, fix-loop, post-build guards, prompt builders) are usable from cli too.
+`packages/cli` and the dashboard share these packages — the same Step factories that lift `pipeline-runner.ts` features (per-repo fanout, per-task build, clarify Q&A, fix-loop, post-build guards, prompt builders) are usable from cli too. As of the agent-manager consolidation, `cli/src/commands/diff.ts` also consumes `runWithCheckpoint` so re-runs against the same git state hit the per-call cache (see `AGENT-MANAGER-CONSOLIDATION-ADR.md`).
 
 ---
 
