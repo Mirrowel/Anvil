@@ -40,6 +40,14 @@ export type {
   PromptAwareAdapter,
 } from './legacy-adapter-types.js';
 
+// Single-shot helper for callers that don't need the full AgentManager
+// registry (cli commands like diff, learn, migrate, test-gen).
+export {
+  runWithAgent,
+  type RunWithAgentOptions,
+  type RunWithAgentResult,
+} from './run-with-agent.js';
+
 export type {
   AgentActivity,
   AgentCheckpointHook,

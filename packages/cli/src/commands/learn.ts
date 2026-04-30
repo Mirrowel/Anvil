@@ -2,7 +2,7 @@
 // Post-merge learning loop — analyzes merged PRs to extract reusable learnings
 
 import { Command } from 'commander';
-import { execSync, spawn } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -13,6 +13,7 @@ import { getAnvilDirs } from '../home.js';
 import {
   BlobStore,
   CheckpointStore,
+  runWithAgent,
   runWithCheckpoint,
   type CheckpointInputs,
 } from '@anvil/agent-core';
@@ -158,42 +159,25 @@ function parseLearningsFromOutput(output: string, prUrl: string, projectName: st
   return learnings;
 }
 
-function spawnAgent(prompt: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const projectPrompt =
-      'You are analyzing PR review feedback to extract reusable learnings for future AI-generated code. ' +
-      'Extract patterns, conventions, and anti-patterns from the review comments and code changes. ' +
-      'Output each learning on its own line in the format: [type] description\n' +
-      'Where type is one of: convention, pattern, anti-pattern, preference\n' +
-      'Be specific and actionable. Focus on what reviewers corrected or suggested.';
+async function spawnAgent(prompt: string, project: string): Promise<string> {
+  const projectPrompt =
+    'You are analyzing PR review feedback to extract reusable learnings for future AI-generated code. ' +
+    'Extract patterns, conventions, and anti-patterns from the review comments and code changes. ' +
+    'Output each learning on its own line in the format: [type] description\n' +
+    'Where type is one of: convention, pattern, anti-pattern, preference\n' +
+    'Be specific and actionable. Focus on what reviewers corrected or suggested.';
 
-    const child = spawn('claude', ['-p', `${projectPrompt}\n\n${prompt}`], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(stdout.trim());
-      } else {
-        reject(new Error(`Agent exited with code ${code}: ${stderr}`));
-      }
-    });
-
-    child.on('error', (err) => {
-      reject(err);
-    });
+  const result = await runWithAgent({
+    name: 'learn',
+    persona: 'cli',
+    project,
+    stage: 'kb-grounding',
+    prompt,
+    projectPrompt,
+    model: 'claude-3-5-sonnet',
+    cwd: process.cwd(),
   });
+  return result.output.trim();
 }
 
 function saveLearnings(
@@ -357,7 +341,7 @@ export const learnCommand = new Command('learn')
           project: resolvedProject,
           runFamily: `learn-${Date.now().toString(36)}`,
           inputs: checkpointInputs,
-          run: () => spawnAgent(prompt),
+          run: () => spawnAgent(prompt, resolvedProject),
           serialize: (s) => s,
           deserialize: (b) => b.toString('utf-8'),
           onHit: () => info(`    PR #${pr.number}: cache hit — reusing prior extraction`),
