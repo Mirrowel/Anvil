@@ -441,7 +441,13 @@ Format your response EXACTLY like this — each question must start on its own l
 2. **[Question topic]**: Your specific question here?
 3. **[Question topic]**: Your specific question here?
 
-Keep each question self-contained and clear. Do not combine multiple questions into one numbered item. End with: "Please answer these questions so I can proceed with detailed requirements."`;
+Keep each question self-contained and clear. Do not combine multiple questions into one numbered item. End with: "Please answer these questions so I can proceed with detailed requirements."
+
+CRITICAL OUTPUT RULES (especially for thinking-mode models):
+- Your FINAL message MUST be plain text containing the numbered question list above. NOT a tool call. NOT just internal reasoning.
+- Do not stop after only reading files — file reads are exploration, not output. After exploration you MUST emit the numbered list as text.
+- If you find yourself reasoning without writing, stop reasoning and write the numbered list now.
+- The numbered list IS your answer. There is no "next step" — just emit the questions.`;
 
   if (hasKB) {
     return `Feature: "${ctx.feature}"

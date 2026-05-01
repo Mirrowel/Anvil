@@ -195,6 +195,40 @@ describe('runClarifyForProject — no Q&A pairs collected', () => {
     assert.equal(result.artifact, 'plain prose, no numbering');
     assert.equal(result.synthesizeRan, false);
   });
+
+  it('emits a generic catch-all question when the model produces empty text', async () => {
+    // Repro of the kimi-k2.6 thinking-mode failure: model spent its
+    // turns on tool reads + reasoning but never wrote final text.
+    // Without the defensive fallback the user sees one BLANK question.
+    const f = fakeAgentManager({ exploreArtifact: '' });
+    const askedQuestions: string[] = [];
+    const result = await runClarifyForProject({
+      ...baseOptions({
+        inputResolver: async (q) => {
+          askedQuestions.push(q);
+          return '';
+        },
+      }),
+      agentManager: f.manager,
+    });
+    assert.equal(askedQuestions.length, 1);
+    assert.notEqual(askedQuestions[0], '', 'must NOT show an empty question to the user');
+    assert.match(askedQuestions[0], /could not generate clarifying questions/i);
+    assert.equal(result.synthesizeRan, false);
+  });
+
+  it('treats whitespace-only artifact as empty (defensive)', async () => {
+    const f = fakeAgentManager({ exploreArtifact: '   \n  \t  \n' });
+    const askedQuestions: string[] = [];
+    await runClarifyForProject({
+      ...baseOptions({
+        inputResolver: async (q) => { askedQuestions.push(q); return ''; },
+      }),
+      agentManager: f.manager,
+    });
+    assert.equal(askedQuestions.length, 1);
+    assert.match(askedQuestions[0], /could not generate clarifying questions/i);
+  });
 });
 
 // ── runClarifyForProject — Q&A loop + synthesize ────────────────────────
