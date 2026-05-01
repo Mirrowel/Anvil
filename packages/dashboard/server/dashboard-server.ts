@@ -160,6 +160,8 @@ const ALLOWED_ENV_KEYS = new Set([
   'OPENROUTER_API_KEY', 'COHERE_API_KEY', 'VOYAGE_API_KEY',
   'MISTRAL_API_KEY', 'GITHUB_TOKEN', 'OLLAMA_HOST',
   'ANTHROPIC_API_KEY',
+  // OpenCode Go subscription — agentic local-tier replacement for Ollama
+  'OPENCODE_API_KEY', 'OPENCODE_BASE_URL',
 ]);
 try {
   const envPath = join(ANVIL_HOME, '.env');
@@ -3891,6 +3893,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
             cohere: 'COHERE_API_KEY',
             voyage: 'VOYAGE_API_KEY',
             mistral: 'MISTRAL_API_KEY',
+            opencode: 'OPENCODE_API_KEY',
           };
           const envVar = envVarMap[provider];
           if (!envVar) {
@@ -3988,6 +3991,18 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
             if (!apiKey) { error = 'OPENROUTER_API_KEY not set'; }
             else {
               const res = await fetch('https://openrouter.ai/api/v1/models', {
+                headers: { 'Authorization': `Bearer ${apiKey}` },
+                signal: AbortSignal.timeout(10000),
+              });
+              success = res.ok;
+              if (!success) error = `HTTP ${res.status}: ${await res.text().catch(() => '')}`.slice(0, 200);
+            }
+          } else if (provider === 'opencode') {
+            const apiKey = process.env.OPENCODE_API_KEY;
+            if (!apiKey) { error = 'OPENCODE_API_KEY not set'; }
+            else {
+              const baseUrl = (process.env.OPENCODE_BASE_URL ?? 'https://opencode.ai/zen/go/v1').replace(/\/+$/, '');
+              const res = await fetch(`${baseUrl}/models`, {
                 headers: { 'Authorization': `Bearer ${apiKey}` },
                 signal: AbortSignal.timeout(10000),
               });

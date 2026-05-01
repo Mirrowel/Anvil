@@ -167,9 +167,34 @@ function detectProviders(): ProviderInfo[] {
     capabilities: ['chat'],
     setupHint: 'Set OPENROUTER_API_KEY environment variable',
     models: [
-      { id: 'anthropic/claude-sonnet-4', displayName: 'Claude Sonnet 4 (via OR)', provider: 'openrouter', capabilities: ['chat'], tier: 'balanced' },
+      { id: 'anthropic/claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6 (via OR)', provider: 'openrouter', capabilities: ['chat'], tier: 'balanced' },
       { id: 'openai/gpt-4o', displayName: 'GPT-4o (via OR)', provider: 'openrouter', capabilities: ['chat'], tier: 'powerful' },
       { id: 'google/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro (via OR)', provider: 'openrouter', capabilities: ['chat'], tier: 'powerful' },
+    ],
+  });
+
+  // OpenCode Go — agentic local-tier replacement for Ollama. Hosted
+  // open coding models behind https://opencode.ai/zen/go/v1.
+  const opencodeAvailable = hasEnv('OPENCODE_API_KEY');
+  providers.push({
+    name: 'opencode',
+    displayName: 'OpenCode Go',
+    type: 'api',
+    available: opencodeAvailable,
+    envVar: 'OPENCODE_API_KEY',
+    capabilities: ['chat'],
+    setupHint: 'Subscribe at https://opencode.ai/zen and paste the API key here. Models inherited from the local tier in ~/.anvil/models.yaml.',
+    models: [
+      { id: 'opencode/qwen3.5-plus', displayName: 'Qwen3.5 Plus', provider: 'opencode', capabilities: ['chat'], tier: 'fast' },
+      { id: 'opencode/qwen3.6-plus', displayName: 'Qwen3.6 Plus', provider: 'opencode', capabilities: ['chat'], tier: 'fast' },
+      { id: 'opencode/kimi-k2.6', displayName: 'Kimi K2.6', provider: 'opencode', capabilities: ['chat'], tier: 'balanced' },
+      { id: 'opencode/glm-5.1', displayName: 'GLM-5.1', provider: 'opencode', capabilities: ['chat'], tier: 'balanced' },
+      { id: 'opencode/deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', provider: 'opencode', capabilities: ['chat'], tier: 'fast' },
+      { id: 'opencode/deepseek-v4-pro', displayName: 'DeepSeek V4 Pro', provider: 'opencode', capabilities: ['chat'], tier: 'balanced' },
+      { id: 'opencode/glm-5', displayName: 'GLM-5', provider: 'opencode', capabilities: ['chat'], tier: 'fast' },
+      { id: 'opencode/kimi-k2.5', displayName: 'Kimi K2.5', provider: 'opencode', capabilities: ['chat'], tier: 'fast' },
+      { id: 'opencode/minimax-m2.7', displayName: 'MiniMax M2.7', provider: 'opencode', capabilities: ['chat'], tier: 'balanced' },
+      { id: 'opencode/mimo-v2.5-pro', displayName: 'MiMo V2.5 Pro', provider: 'opencode', capabilities: ['chat'], tier: 'balanced' },
     ],
   });
 
