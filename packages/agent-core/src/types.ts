@@ -30,7 +30,8 @@ export type ProviderName =
   | 'openrouter'
   | 'ollama'
   | 'gemini-cli'
-  | 'adk';
+  | 'adk'
+  | 'opencode';
 
 export type ProviderTier = 'agentic' | 'function-calling' | 'text-only';
 

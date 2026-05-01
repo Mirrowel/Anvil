@@ -4,7 +4,7 @@
 #
 # Schema:
 #   - id              (str)         model id passed to the provider
-#   - provider        (enum)        ollama | claude | openai | gemini | openrouter | gemini-cli | adk
+#   - provider        (enum)        ollama | claude | openai | gemini | openrouter | gemini-cli | adk | opencode
 #   - tier            (enum)        local | cheap | premium
 #   - capabilities    (str array)   subset of [embed, rerank, code, reasoning, vision]
 #   - complexity_max  (enum)        S | M | L
@@ -20,30 +20,60 @@
 #                                   not the resolver
 
 models:
-  # ─── Big-model GPU slot (one resident at a time on 16 GB) ─────────────
-  # Both qwen3:14b and gemma4:e4b set exclusive_slot:true so the LocalExecutor
-  # FIFO-serializes them with confirmed eviction (poll /api/ps). They never
-  # co-reside; switching between them costs one eviction round-trip.
-  - id: qwen3:14b
-    provider: ollama
+  # ─── Local tier — OpenCode Go subscription ────────────────────────────
+  # Hosted open-coding models behind https://opencode.ai/zen/go/v1.
+  # Replaces Ollama for the local tier when OPENCODE_API_KEY is set —
+  # frees the 12 GB GPU VRAM Ollama needed for qwen3:14b. Cost-counted
+  # via the Go subscription ($10/mo flat) rather than per-token.
+  - id: opencode/qwen3.5-plus
+    provider: opencode
     tier: local
     capabilities: [code, reasoning]
     complexity_max: M
-    vram_gb: 12     # measured: 12.1 GB at num_ctx=16384 (Q4_K_M)
-    exclusive_slot: true
+    vram_gb: 0
+    exclusive_slot: false
+    context_window: 32768
+
+  - id: opencode/qwen3.6-plus
+    provider: opencode
+    tier: local
+    capabilities: [code, reasoning]
+    complexity_max: M
+    vram_gb: 0
+    exclusive_slot: false
+    context_window: 32768
+
+  - id: opencode/kimi-k2.6
+    provider: opencode
+    tier: local
+    capabilities: [code, reasoning]
+    complexity_max: L
+    vram_gb: 0
+    exclusive_slot: false
+    context_window: 65536
+
+  - id: opencode/glm-5.1
+    provider: opencode
+    tier: local
+    capabilities: [code, reasoning]
+    complexity_max: L
+    vram_gb: 0
+    exclusive_slot: false
+    context_window: 65536
+
+  - id: opencode/deepseek-v4-flash
+    provider: opencode
+    tier: local
+    capabilities: [code, reasoning]
+    complexity_max: S
+    vram_gb: 0
+    exclusive_slot: false
     context_window: 16384
 
-  - id: gemma4:e4b
-    provider: ollama
-    tier: local
-    capabilities: [vision, code, reasoning]
-    complexity_max: S
-    vram_gb: 11     # measured: 10.6 GB at num_ctx=8192 (Q4_K_M, 8B params)
-    exclusive_slot: true
-    context_window: 8192
-
   # ─── Co-resident utility models, used by knowledge-core directly ──────
-  # Small enough to share VRAM with whichever big model holds the slot.
+  # Embed + rerank stay on Ollama because OpenCode Go doesn't host them
+  # and we need them locally for the hybrid retrieval pipeline. Small
+  # enough to share VRAM with whichever big model holds the GPU.
   - id: bge-m3
     provider: ollama
     tier: local
@@ -64,7 +94,7 @@ models:
     consumed_by: knowledge-core
     context_window: 4096
 
-  # ─── Premium escalation tier (cloud) ──────────────────────────────────
+  # ─── Cheap escalation tier (cloud) ────────────────────────────────────
   - id: claude-haiku-4-5-20251001
     provider: claude
     tier: cheap
@@ -73,6 +103,7 @@ models:
     vram_gb: 0
     exclusive_slot: false
 
+  # ─── Premium escalation tier (cloud) ──────────────────────────────────
   - id: claude-sonnet-4-6
     provider: claude
     tier: premium

@@ -78,6 +78,16 @@ interface ChatCompletionChunk {
     delta?: {
       role?: string;
       content?: string;
+      /**
+       * Thinking-model reasoning trace, OpenRouter-normalized field
+       * name. Streamed in pieces. Models like DeepSeek V4 and Kimi K2
+       * REQUIRE the structured `reasoning_details` to be echoed back
+       * in the next turn's assistant message; otherwise the upstream
+       * rejects with "reasoning_content is missing in assistant tool
+       * call".
+       */
+      reasoning?: string;
+      reasoning_details?: ReasoningDetail[];
       tool_calls?: ToolCallDelta[];
     };
     finish_reason?: string | null;
@@ -91,6 +101,13 @@ interface ChatCompletionChunk {
     prompt_tokens_details?: { cached_tokens?: number };
     completion_tokens_details?: { reasoning_tokens?: number };
   };
+}
+
+interface ReasoningDetail {
+  type: string;          // e.g. 'reasoning.text'
+  text?: string;
+  format?: string;       // e.g. 'unknown'
+  index?: number;
 }
 
 interface ToolCallDelta {
@@ -112,6 +129,12 @@ interface AccumulatedToolCall {
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | null;
+  /** Required for thinking models when continuing the conversation.
+   *  OpenRouter accepts either the string form OR the structured
+   *  reasoning_details array — sending both maximises upstream
+   *  compatibility (some providers want one, some the other). */
+  reasoning?: string;
+  reasoning_details?: ReasoningDetail[];
   tool_calls?: AccumulatedToolCall[];
   tool_call_id?: string;
 }
@@ -232,10 +255,18 @@ export class OpenRouterAdapter implements ModelAdapter {
         }
 
         // Append assistant turn to history so the model sees its own
-        // tool_calls when we re-prompt with results.
+        // tool_calls when we re-prompt with results. Thinking models
+        // (DeepSeek V4, Kimi K2, GLM thinking variants…) require the
+        // reasoning trace echoed back — without it they 400 with
+        // "reasoning_content is missing in assistant tool call".
+        // Send both `reasoning` (string) and `reasoning_details`
+        // (structured) so OpenRouter can map to whichever shape the
+        // upstream provider expects.
         messages.push({
           role: 'assistant',
           content: turn.text || null,
+          ...(turn.reasoning ? { reasoning: turn.reasoning } : {}),
+          ...(turn.reasoningDetails.length > 0 ? { reasoning_details: turn.reasoningDetails } : {}),
           tool_calls: turn.toolCalls,
         });
 
@@ -318,6 +349,8 @@ export class OpenRouterAdapter implements ModelAdapter {
     output: NodeJS.WritableStream,
   ): Promise<{
     text: string;
+    reasoning: string;
+    reasoningDetails: ReasoningDetail[];
     toolCalls: AccumulatedToolCall[];
     inputTokens: number;
     outputTokens: number;
@@ -371,6 +404,8 @@ export class OpenRouterAdapter implements ModelAdapter {
     output: NodeJS.WritableStream,
   ): Promise<{
     text: string;
+    reasoning: string;
+    reasoningDetails: ReasoningDetail[];
     toolCalls: AccumulatedToolCall[];
     inputTokens: number;
     outputTokens: number;
@@ -380,6 +415,8 @@ export class OpenRouterAdapter implements ModelAdapter {
     finishReason: string | undefined;
   }> {
     let text = '';
+    let reasoning = '';
+    const reasoningDetails: ReasoningDetail[] = [];
     let inputTokens = 0;
     let outputTokens = 0;
     let cachedReadTokens = 0;
@@ -419,6 +456,24 @@ export class OpenRouterAdapter implements ModelAdapter {
         if (delta?.content) {
           text += delta.content;
           emitContent(output, delta.content);
+        }
+        if (delta?.reasoning) {
+          // Accumulate but don't stream to user — reasoning is for the
+          // upstream's continuation, not for the dashboard activity log.
+          reasoning += delta.reasoning;
+        }
+        if (delta?.reasoning_details && Array.isArray(delta.reasoning_details)) {
+          for (const rd of delta.reasoning_details) {
+            // Merge by index — like tool_calls, reasoning_details are
+            // streamed piecewise and grouped by `index`.
+            const idx = typeof rd.index === 'number' ? rd.index : reasoningDetails.length;
+            const existing = reasoningDetails[idx];
+            if (!existing) {
+              reasoningDetails[idx] = { ...rd, text: rd.text ?? '' };
+            } else if (rd.text) {
+              existing.text = (existing.text ?? '') + rd.text;
+            }
+          }
         }
         if (delta?.tool_calls) {
           for (const tcDelta of delta.tool_calls) {
@@ -461,6 +516,8 @@ export class OpenRouterAdapter implements ModelAdapter {
 
     return {
       text,
+      reasoning,
+      reasoningDetails: reasoningDetails.filter(Boolean),
       toolCalls,
       inputTokens,
       outputTokens,

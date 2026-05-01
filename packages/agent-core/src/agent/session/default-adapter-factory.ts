@@ -50,6 +50,10 @@ export function resolveProvider(modelId: string): ProviderName {
     return 'openai';
   }
 
+  // OpenCode Go: registry uses `opencode/<model>` to disambiguate from
+  // OpenRouter's slug format. Must come BEFORE the generic slash-check.
+  if (id.startsWith('opencode/')) return 'opencode';
+
   // OpenRouter uses `org/model` format
   if (id.includes('/')) {
     return 'openrouter';

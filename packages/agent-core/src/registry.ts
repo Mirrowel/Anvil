@@ -15,6 +15,7 @@ import { OpenRouterAdapter } from './openrouter-adapter.js';
 import { OllamaAdapter } from './ollama-adapter.js';
 import { GeminiCliAdapter } from './gemini-cli-adapter.js';
 import { AdkAdapter } from './adk-adapter.js';
+import { OpenCodeAdapter } from './opencode-adapter.js';
 import { instrumentModelAdapter } from './telemetry/instrument.js';
 
 const AGENTIC_STAGES = new Set(['build', 'validate', 'ship']);
@@ -223,5 +224,6 @@ export class ProviderRegistry {
     this.register(new OllamaAdapter());
     this.register(new GeminiCliAdapter());
     this.register(new AdkAdapter());
+    this.register(new OpenCodeAdapter());
   }
 }

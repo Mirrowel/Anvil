@@ -26,7 +26,7 @@ export type ModelTier = 'local' | 'cheap' | 'premium';
 export type ModelConsumer = 'agent-core' | 'knowledge-core';
 
 const PROVIDERS: readonly ProviderName[] = [
-  'claude', 'openai', 'gemini', 'openrouter', 'ollama', 'gemini-cli', 'adk',
+  'claude', 'openai', 'gemini', 'openrouter', 'ollama', 'gemini-cli', 'adk', 'opencode',
 ];
 const CAPABILITIES: readonly ModelCapability[] = ['embed', 'rerank', 'code', 'reasoning', 'vision'];
 const COMPLEXITIES: readonly ModelComplexity[] = ['S', 'M', 'L'];
