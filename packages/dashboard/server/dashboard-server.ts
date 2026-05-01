@@ -162,6 +162,13 @@ const ALLOWED_ENV_KEYS = new Set([
   'ANTHROPIC_API_KEY',
   // OpenCode Go subscription — agentic local-tier replacement for Ollama
   'OPENCODE_API_KEY', 'OPENCODE_BASE_URL',
+  // Observability — OTel exporter wiring. ANVIL_OTEL_CONSOLE=1 dumps
+  // spans to stdout for debugging (no collector required). Otherwise
+  // setting OTEL_EXPORTER_OTLP_ENDPOINT enables the OTLP-HTTP exporter.
+  'OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_HEADERS',
+  'OTEL_SERVICE_NAME', 'OTEL_TRACES_SAMPLER',
+  'OTEL_RESOURCE_ATTRIBUTES', 'ANVIL_OTEL_CONSOLE',
+  'ANVIL_OTEL_DISABLED', 'ANVIL_OTEL_RECORD_CONTENT', 'ANVIL_ENV',
 ]);
 try {
   const envPath = join(ANVIL_HOME, '.env');
@@ -183,6 +190,47 @@ try {
     if (loaded > 0) console.log(`[dashboard] Loaded ${loaded} API key(s) from ${envPath}`);
   }
 } catch { /* ok — no .env file */ }
+
+// ── Telemetry auto-detect ──────────────────────────────────────────────
+// If the user is running an OTLP collector locally (port 4318) and
+// hasn't explicitly set OTEL_EXPORTER_OTLP_ENDPOINT, point at it. This
+// flips telemetry from noop → otlp without forcing the user to learn
+// our env-var convention. Probe is best-effort and bounded to 800ms so
+// dashboard start isn't blocked by a slow loopback.
+async function autoDetectTelemetry(): Promise<void> {
+  if (process.env.ANVIL_OTEL_DISABLED === '1') return;
+  if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+    console.log(`[dashboard] OTel exporter → ${process.env.OTEL_EXPORTER_OTLP_ENDPOINT} (configured)`);
+    return;
+  }
+  if (process.env.ANVIL_OTEL_CONSOLE === '1') {
+    console.log('[dashboard] OTel exporter → console (ANVIL_OTEL_CONSOLE=1)');
+    return;
+  }
+  const candidate = 'http://localhost:4318';
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 800);
+    // Probe the OTLP HTTP traces endpoint with a HEAD request — collectors
+    // typically 405 on HEAD (method not allowed) but the connection
+    // succeeds, which is enough to confirm something's listening.
+    const res = await fetch(`${candidate}/v1/traces`, { method: 'HEAD', signal: ctrl.signal })
+      .catch(() => null);
+    clearTimeout(timer);
+    if (res && (res.ok || res.status === 405 || res.status === 404)) {
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = candidate;
+      if (!process.env.OTEL_SERVICE_NAME) process.env.OTEL_SERVICE_NAME = 'anvil-dashboard';
+      console.log(`[dashboard] OTel collector detected at ${candidate} — exporter enabled (service.name=${process.env.OTEL_SERVICE_NAME})`);
+    } else {
+      console.log('[dashboard] No OTel collector at localhost:4318 — telemetry off (set OTEL_EXPORTER_OTLP_ENDPOINT to override)');
+    }
+  } catch {
+    console.log('[dashboard] OTel collector probe failed — telemetry off');
+  }
+}
+// Fire-and-forget; the actual tracer is initialized lazily on first
+// agent call, by which time process.env will be populated.
+void autoDetectTelemetry();
 
 // ── MIME map ────────────────────────────────────────────────────────────
 const MIME: Record<string, string> = {
