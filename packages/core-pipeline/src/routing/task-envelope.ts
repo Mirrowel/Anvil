@@ -20,15 +20,29 @@
  * prose only when a fact can't be expressed mechanically.
  */
 
-import type { ModelCapability, ModelComplexity } from '@anvil/agent-core';
+import type { ModelCapability, ModelComplexity, ModelTier } from '@anvil/agent-core';
 
 export type TaskOperation = 'create' | 'modify' | 'delete';
+
+/**
+ * Priority drives execution order in the build stage. P0 tasks ship
+ * before P1 ships before P2. Within a priority bucket the topological
+ * sort by `depends_on` decides order.
+ */
+export type TaskPriority = 'P0' | 'P1' | 'P2';
 
 export interface TaskRouting {
   capability: ModelCapability;
   complexity: ModelComplexity;
   needs_vision?: boolean;
   context_estimate_tokens: number;
+  /**
+   * Optional per-task tier hint. When set, the per-task resolver
+   * promotes this tier to the front of the chain (followed by the
+   * stage's normal `prefer` minus this tier). Lets the planner say
+   * "this one's mechanical, do it locally" or "this one needs Sonnet".
+   */
+  preferred_tier?: ModelTier;
 }
 
 export interface TaskAcceptancePredicate {
@@ -60,6 +74,10 @@ export interface TaskEnvelope {
   acceptance_criteria: TaskAcceptanceCriterion[];
   tests_required?: TaskTestRequirement[];
   done_definition?: string[];
+  /** Optional priority. Default = 'P1' when missing. */
+  priority?: TaskPriority;
+  /** Task ids that MUST complete before this task can start. */
+  depends_on?: string[];
 }
 
 export class TaskEnvelopeValidationError extends Error {
@@ -72,6 +90,8 @@ export class TaskEnvelopeValidationError extends Error {
 const CAPABILITIES: readonly ModelCapability[] = ['embed', 'rerank', 'code', 'reasoning', 'vision'];
 const COMPLEXITIES: readonly ModelComplexity[] = ['S', 'M', 'L'];
 const OPERATIONS: readonly TaskOperation[] = ['create', 'modify', 'delete'];
+const TIERS: readonly ModelTier[] = ['local', 'cheap', 'premium'];
+const PRIORITIES: readonly TaskPriority[] = ['P0', 'P1', 'P2'];
 
 export function parseTaskEnvelope(raw: unknown, ctx = '<task>'): TaskEnvelope {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -104,6 +124,12 @@ export function parseTaskEnvelope(raw: unknown, ctx = '<task>'): TaskEnvelope {
   }
   if (r.done_definition !== undefined) {
     out.done_definition = requireStringArray(r.done_definition, `${ctx}.done_definition`, { allowEmpty: true });
+  }
+  if (r.priority !== undefined) {
+    out.priority = requireEnum(r.priority, PRIORITIES, `${ctx}.priority`);
+  }
+  if (r.depends_on !== undefined) {
+    out.depends_on = requireStringArray(r.depends_on, `${ctx}.depends_on`, { allowEmpty: true });
   }
 
   return out;
@@ -143,6 +169,9 @@ function parseRouting(raw: unknown, ctx: string): TaskRouting {
   };
   if (r.needs_vision !== undefined) {
     out.needs_vision = requireBoolean(r.needs_vision, `${ctx}.needs_vision`);
+  }
+  if (r.preferred_tier !== undefined) {
+    out.preferred_tier = requireEnum(r.preferred_tier, TIERS, `${ctx}.preferred_tier`);
   }
   return out;
 }

@@ -109,3 +109,13 @@ export {
   permissionClassesForStage,
 } from './routing/stage-permissions.js';
 export type { ToolClass } from './routing/stage-permissions.js';
+export {
+  resolveModelForTask,
+  orderTasksForDispatch,
+  TaskCycleError,
+} from './routing/resolve-model-for-task.js';
+export type {
+  ResolveModelForTaskOptions,
+  OrderedTaskBatch,
+} from './routing/resolve-model-for-task.js';
+export type { TaskPriority } from './routing/task-envelope.js';
