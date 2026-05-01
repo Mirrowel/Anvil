@@ -197,7 +197,18 @@ export class OpenRouterAdapter implements ModelAdapter {
     maxOutputTokens: true,
   };
 
-  private abortController: AbortController | null = null;
+  /**
+   * In-flight AbortControllers — one per concurrent run() invocation.
+   * The adapter is a singleton (registered once with ProviderRegistry),
+   * but per-repo stages run multiple repos in parallel against it. A
+   * single instance-level field would let one call's `finally` block
+   * null out the controller while another call is still mid-fetch,
+   * causing "Cannot read properties of null (reading 'signal')". The
+   * Set lets every concurrent call own its own AbortController without
+   * trampling, and `kill()` aborts ALL of them (matches legacy
+   * "stop the run" semantics).
+   */
+  private activeControllers = new Set<AbortController>();
 
   // -- Configuration --------------------------------------------------------
 
@@ -237,17 +248,18 @@ export class OpenRouterAdapter implements ModelAdapter {
   }
 
   kill(): void {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
+    for (const ac of this.activeControllers) {
+      try { ac.abort(); } catch { /* already aborted */ }
     }
+    this.activeControllers.clear();
   }
 
   async run(config: ModelAdapterConfig, output: NodeJS.WritableStream): Promise<ModelAdapterResult> {
     const apiKey = this.getApiKey();
     if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
 
-    this.abortController = new AbortController();
+    const abortController = new AbortController();
+    this.activeControllers.add(abortController);
     const startMs = Date.now();
 
     const messages: ChatMessage[] = [];
@@ -268,7 +280,7 @@ export class OpenRouterAdapter implements ModelAdapter {
 
     try {
       for (let iter = 0; iter < maxIter; iter++) {
-        const turn = await this.runOneTurn(apiKey, messages, tools, config, output);
+        const turn = await this.runOneTurn(apiKey, messages, tools, config, output, abortController.signal);
         aggregatedText += turn.text;
         totalIn += turn.inputTokens;
         totalOut += turn.outputTokens;
@@ -303,7 +315,7 @@ export class OpenRouterAdapter implements ModelAdapter {
           const call: ToolCall = { id: tc.id, name: tc.function.name, arguments: args };
           emitToolUse(output, call.name, args, tc.id);
 
-          const result = await invokeTool(config.toolExecutor, call, config.workingDir, this.abortController.signal);
+          const result = await invokeTool(config.toolExecutor, call, config.workingDir, abortController.signal);
           emitToolResult(output, { toolUseId: tc.id, content: result.content, isError: result.isError });
 
           messages.push({
@@ -313,14 +325,14 @@ export class OpenRouterAdapter implements ModelAdapter {
           });
         }
 
-        if (this.abortController.signal.aborted) {
+        if (abortController.signal.aborted) {
           stopReason = 'aborted';
           break;
         }
       }
       if (stopReason === undefined) stopReason = 'iteration_limit';
     } finally {
-      this.abortController = null;
+      this.activeControllers.delete(abortController);
     }
 
     const durationMs = Date.now() - startMs;
@@ -375,6 +387,7 @@ export class OpenRouterAdapter implements ModelAdapter {
     tools: OpenAIToolDef[] | undefined,
     config: ModelAdapterConfig,
     output: NodeJS.WritableStream,
+    signal: AbortSignal,
   ): Promise<{
     text: string;
     reasoning: string;
@@ -410,7 +423,7 @@ export class OpenRouterAdapter implements ModelAdapter {
         ...this.getExtraHeaders(),
       },
       body: JSON.stringify(body),
-      signal: this.abortController!.signal,
+      signal,
     });
 
     if (!response.ok) {

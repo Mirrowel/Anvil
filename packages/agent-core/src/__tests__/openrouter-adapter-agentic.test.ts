@@ -316,6 +316,34 @@ describe('OpenRouterAdapter — agentic loop', () => {
     assert.match(observedHeaders!['Authorization'], /^Bearer sk-or-test/);
   });
 
+  it('survives concurrent run() calls on the same adapter instance', async () => {
+    // Repro: per-repo stages (build for backend + frontend) call the
+    // same singleton adapter in parallel. Pre-fix the adapter held a
+    // single instance-level abortController; one call's `finally`
+    // nulled it out while the other was mid-loop, crashing with
+    // "Cannot read properties of null (reading 'signal')".
+    let inflight = 0;
+    let maxInflight = 0;
+    globalThis.fetch = (async () => {
+      inflight += 1;
+      maxInflight = Math.max(maxInflight, inflight);
+      // Hold the connection open briefly so both calls overlap.
+      await new Promise((r) => setTimeout(r, 30));
+      inflight -= 1;
+      return sseTextOnly('ok');
+    }) as typeof fetch;
+
+    const adapter = new OpenRouterAdapter();
+    const results = await Promise.all([
+      adapter.run({ ...baseConfig, userPrompt: 'first' }, new StubWritable() as unknown as NodeJS.WritableStream),
+      adapter.run({ ...baseConfig, userPrompt: 'second' }, new StubWritable() as unknown as NodeJS.WritableStream),
+    ]);
+
+    assert.equal(maxInflight, 2, 'both calls must run concurrently');
+    assert.equal(results[0].stopReason, 'end_turn');
+    assert.equal(results[1].stopReason, 'end_turn');
+  });
+
   it('falls back to {_raw} when tool_call arguments are malformed JSON', async () => {
     let turn = 0;
     globalThis.fetch = (async () => {

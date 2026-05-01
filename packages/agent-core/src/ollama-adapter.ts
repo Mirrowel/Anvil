@@ -134,7 +134,16 @@ export class OllamaAdapter implements ModelAdapter {
     maxOutputTokens: false,
   };
 
-  private abortController: AbortController | null = null;
+  /**
+   * In-flight AbortControllers — one per concurrent run() invocation.
+   * The adapter is a singleton, but per-repo stages (build/validate/
+   * specs/tasks) run multiple repos in parallel against it. A single
+   * instance-level field would let one call's `finally` block null out
+   * the controller while another is still mid-fetch, causing
+   * "Cannot read properties of null (reading 'signal')". The Set lets
+   * concurrent calls each own their own controller; kill() aborts all.
+   */
+  private activeControllers = new Set<AbortController>();
 
   /**
    * @param executor — Single-slot FIFO queue used when a call sets
@@ -165,10 +174,10 @@ export class OllamaAdapter implements ModelAdapter {
   }
 
   kill(): void {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
+    for (const ac of this.activeControllers) {
+      try { ac.abort(); } catch { /* already aborted */ }
     }
+    this.activeControllers.clear();
   }
 
   async run(
@@ -185,7 +194,8 @@ export class OllamaAdapter implements ModelAdapter {
     config: ModelAdapterConfig,
     output: NodeJS.WritableStream,
   ): Promise<ModelAdapterResult> {
-    this.abortController = new AbortController();
+    const abortController = new AbortController();
+    this.activeControllers.add(abortController);
     const startMs = Date.now();
 
     const messages: ChatMessage[] = [];
@@ -210,7 +220,7 @@ export class OllamaAdapter implements ModelAdapter {
         // If trimming can't bring history below num_ctx, escalate.
         trimHistoryIfNeeded(messages, numCtx, config.model);
 
-        const turn = await this.runOneTurn(messages, tools, numCtx, config, output);
+        const turn = await this.runOneTurn(messages, tools, numCtx, config, output, abortController.signal);
         aggregatedText += turn.text;
         totalIn += turn.inputTokens;
         totalOut += turn.outputTokens;
@@ -239,7 +249,7 @@ export class OllamaAdapter implements ModelAdapter {
           const call: ToolCall = { id: callId, name: toolCall.function.name, arguments: args };
           emitToolUse(output, call.name, args, callId);
 
-          const result = await invokeTool(config.toolExecutor, call, config.workingDir, this.abortController.signal);
+          const result = await invokeTool(config.toolExecutor, call, config.workingDir, abortController.signal);
           emitToolResult(output, { toolUseId: callId, content: result.content, isError: result.isError });
 
           messages.push({
@@ -249,14 +259,14 @@ export class OllamaAdapter implements ModelAdapter {
           });
         }
 
-        if (this.abortController.signal.aborted) {
+        if (abortController.signal.aborted) {
           stopReason = 'aborted';
           break;
         }
       }
       if (stopReason === undefined) stopReason = 'iteration_limit';
     } finally {
-      this.abortController = null;
+      this.activeControllers.delete(abortController);
     }
 
     const durationMs = totalDurMs > 0 ? totalDurMs : Date.now() - startMs;
@@ -293,6 +303,7 @@ export class OllamaAdapter implements ModelAdapter {
     numCtx: number,
     config: ModelAdapterConfig,
     output: NodeJS.WritableStream,
+    signal: AbortSignal,
   ): Promise<{
     text: string;
     toolCalls: OllamaToolCall[];
@@ -316,7 +327,7 @@ export class OllamaAdapter implements ModelAdapter {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: this.abortController!.signal,
+      signal,
     });
 
     if (!response.ok) {
