@@ -71,6 +71,12 @@ export interface RunBuildForRepoOptions {
     pollIntervalMs?: number;
     /** Override sleep primitive (forwarded to spawnAndWait). Test seam. */
     sleep?: (ms: number) => Promise<void>;
+    /**
+     * Per-stage allow list for tool names. Build needs read+write+exec —
+     * without this, agentic non-Claude adapters fall back to read-only and
+     * the engineer can't actually edit code.
+     */
+    allowedTools?: string[];
 }
 export interface RunBuildForRepoResult {
     /** Combined artifact (task outputs joined in original task order). */

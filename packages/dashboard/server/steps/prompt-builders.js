@@ -134,6 +134,16 @@ export function buildProjectPrompt(ctx, stage) {
                 message: `Knowledge Base loaded for "${ctx.project}" (${knowledgeGraph.length} chars, source=${kb.sourceLabel}) → injecting into ${stage.persona} agent`,
             });
         }
+        else if (tier === 'none') {
+            // Stage policy intentionally skips KB injection — e.g. shipping
+            // (git operations: commit / branch / PR — no codebase reasoning
+            // needed). Don't claim "no KB available"; the KB exists, this
+            // stage just doesn't need it.
+            ctx.emit('project-event', {
+                source: 'knowledge-base',
+                message: `Knowledge Base intentionally skipped for "${stage.name}" stage (policy: tier=none). KB is available but not needed for this stage.`,
+            });
+        }
         else {
             ctx.emit('project-event', {
                 source: 'knowledge-base',
@@ -313,7 +323,13 @@ Format your response EXACTLY like this — each question must start on its own l
 2. **[Question topic]**: Your specific question here?
 3. **[Question topic]**: Your specific question here?
 
-Keep each question self-contained and clear. Do not combine multiple questions into one numbered item. End with: "Please answer these questions so I can proceed with detailed requirements."`;
+Keep each question self-contained and clear. Do not combine multiple questions into one numbered item. End with: "Please answer these questions so I can proceed with detailed requirements."
+
+CRITICAL OUTPUT RULES (especially for thinking-mode models):
+- Your FINAL message MUST be plain text containing the numbered question list above. NOT a tool call. NOT just internal reasoning.
+- Do not stop after only reading files — file reads are exploration, not output. After exploration you MUST emit the numbered list as text.
+- If you find yourself reasoning without writing, stop reasoning and write the numbered list now.
+- The numbered list IS your answer. There is no "next step" — just emit the questions.`;
     if (hasKB) {
         return `Feature: "${ctx.feature}"
 Project: ${ctx.project}
@@ -377,7 +393,7 @@ export function buildStagePrompt(ctx, stage, prevArtifact) {
             else
                 prLabels.push('enhancement');
             const labelFlags = prLabels.map((l) => `--label "${l}"`).join(' ');
-            return `${feature}${repoList}${reviewBlock}\n\nShip the changes for each repository. The code has been validated — build, lint, and tests all pass.\n\nThe code is already on a feature branch "anvil/${ctx.featureSlug}". For each repo with changes:\n1. Run a final quick check: build and lint to confirm everything is clean\n2. If ANY errors remain, fix them before proceeding\n3. Stage and commit all changes with a clear commit message: "[anvil] ${ctx.feature}"\n4. Push the feature branch to origin\n5. Create a PR from the feature branch to "${ctx.baseBranch}" using: gh pr create --base "${ctx.baseBranch}" --head "anvil/${ctx.featureSlug}" ${labelFlags}\n\nDo NOT merge to ${ctx.baseBranch}. Only create PRs. Do NOT create a PR if the code has unfixed errors.${prev}${resumeCtx}`;
+            return `${feature}${repoList}${reviewBlock}\n\nShip the changes for each repository. The code is already on a feature branch "anvil/${ctx.featureSlug}".\n\nMANDATORY for every repo (even if prior stages reported errors):\n1. Stage and commit any uncommitted changes — git add -A && git commit -m "[anvil] ${ctx.feature}". If there's nothing new to commit, skip this step but continue.\n2. Push the feature branch to origin — git push -u origin "anvil/${ctx.featureSlug}". This is REQUIRED — the user needs the branch on the remote to review. If push fails, surface the exact error.\n3. Create a PR — gh pr create --base "${ctx.baseBranch}" --head "anvil/${ctx.featureSlug}" ${labelFlags}\n   - If the build / validate / test stages had failures, mark the PR as DRAFT (add --draft) and include a "## Known Issues" section in the body listing what's broken so the reviewer can see the work-in-progress and finish it.\n   - If everything passed, create a regular PR (no --draft).\n\nNon-negotiable: every repo with a feature branch MUST end with a pushed branch and an open PR (draft or not). Reporting back "I didn't ship because errors exist" is NOT an acceptable outcome — you ship as a draft instead. Do NOT merge to ${ctx.baseBranch}.${prev}${resumeCtx}`;
         }
         default:
             return `${feature}${repoList}${reviewBlock}${prev}${resumeCtx}`;

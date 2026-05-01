@@ -56,6 +56,13 @@ export interface RunPerRepoStageOptions {
     pollIntervalMs?: number;
     /** Override sleep primitive (forwarded to spawnAndWait). Test seam. */
     sleep?: (ms: number) => Promise<void>;
+    /**
+     * Per-stage allow list for tool names (drives BuiltinToolExecutor for
+     * non-Claude agentic adapters). When undefined the bridge falls back to
+     * read-only — that's safe for analyst/architect stages but BREAKS
+     * engineer/tester stages that need write/exec.
+     */
+    allowedTools?: string[];
 }
 export interface RunPerRepoStageResult {
     agentId: string;

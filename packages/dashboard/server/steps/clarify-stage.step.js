@@ -53,6 +53,7 @@ export async function runClarifyForProject(opts) {
             projectPrompt: opts.projectPrompt,
             permissionMode: 'bypassPermissions',
             disallowedTools: [...CLARIFY_DISALLOWED_TOOLS],
+            allowedTools: opts.allowedTools,
             maxOutputTokens: opts.maxOutputTokens,
         },
         isCancelled: opts.isCancelled,
@@ -64,9 +65,31 @@ export async function runClarifyForProject(opts) {
     let totalCost = explore.cost;
     // Phase B — Q&A loop.
     const parsed = parseClarifyQuestions(explore.artifact);
-    // Mirror the legacy fallback: when no questions parse out, treat the
-    // entire explore output as a single block.
-    const questions = parsed.length > 0 ? parsed : [explore.artifact];
+    const trimmedArtifact = explore.artifact.trim();
+    // Three-tier fallback:
+    //   1. Parsed numbered list — happy path.
+    //   2. Non-empty unparsed output — legacy: treat the whole artifact
+    //      as one question (still useful, e.g. model wrote prose).
+    //   3. Empty artifact — model spent its turns on tool reads /
+    //      thinking but never emitted final text. Surface a clear
+    //      catch-all question so the user can drive the run forward
+    //      instead of seeing a blank Q1.
+    let questions;
+    if (parsed.length > 0) {
+        questions = parsed;
+    }
+    else if (trimmedArtifact.length > 0) {
+        questions = [trimmedArtifact];
+    }
+    else {
+        console.warn(`[clarify] model produced no parseable text for ${opts.project}; ` +
+            `agentId=${explore.agentId}. Falling back to a generic clarifier question.`);
+        questions = [
+            'I could not generate clarifying questions automatically. ' +
+                'Please describe the feature in more detail — scope, constraints, ' +
+                'edge cases, and any acceptance criteria you have in mind.',
+        ];
+    }
     const qaPairs = [];
     let cancelled = false;
     for (let qi = 0; qi < questions.length; qi += 1) {

@@ -68,6 +68,7 @@ export async function runPerRepoStageForRepo(opts) {
             projectPrompt: opts.projectPrompt,
             permissionMode: 'bypassPermissions',
             disallowedTools: disallowedToolsForPersona(opts.persona),
+            allowedTools: opts.allowedTools,
             maxOutputTokens: opts.maxOutputTokens,
         },
         isCancelled: opts.isCancelled,

@@ -117,6 +117,7 @@ export async function runFixLoop(opts) {
                 projectPrompt: opts.buildRepoProjectPromptForBuildStage(repoName),
                 permissionMode: 'bypassPermissions',
                 disallowedTools: disallowedToolsForPersona('engineer'),
+                allowedTools: opts.allowedTools,
                 maxOutputTokens: opts.maxOutputTokens,
             },
             isCancelled: opts.isCancelled,

@@ -71,6 +71,10 @@ export interface RunFixLoopOptions {
     /** Test seams. */
     pollIntervalMs?: number;
     sleep?: (ms: number) => Promise<void>;
+    /** Per-stage allow list. Fix-loop needs read+write+exec to apply
+     *  mechanical fixes — without this, agentic non-Claude adapters fall
+     *  back to read-only and the engineer agent can't actually edit code. */
+    allowedTools?: string[];
 }
 export interface RunFixLoopResult {
     /** Combined fix-output across all repos (single-repo: that one agent's output). */
