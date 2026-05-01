@@ -27,6 +27,7 @@ import {
   ModelResolutionError,
   UnknownStageError,
   allowedToolsForStage,
+  permissionClassesForStage,
 } from '@anvil/core-pipeline';
 import { parseTasks, bundleFiles } from './engineer-task-bundler.js';
 import type { ParsedTask } from './engineer-task-bundler.js';
@@ -262,6 +263,18 @@ export interface PipelineStageState {
   repos: RepoAgentState[];
   /** Token breakdown for this stage; absent for skipped/pending stages. */
   tokens?: StageTokenStats;
+  /**
+   * Model id resolved for this stage by the registry-driven resolver.
+   * Surfaced so the UI can show "build → qwen3:14b" badges and so users
+   * can SEE local models firing rather than just inferring from cost.
+   */
+  resolvedModel?: string;
+  /**
+   * Tool-permission classes the stage is running under.
+   * 'read' / 'write' / 'exec'. Surfaced so the UI can show 🔒 / 📝 / ⚡
+   * badges next to each stage.
+   */
+  permissionClasses?: ('read' | 'write' | 'exec')[];
 }
 
 export interface PipelineRunState {
@@ -1083,6 +1096,16 @@ export class PipelineRunner extends EventEmitter {
    * so new models are picked up automatically without code changes.
    */
   private resolveModelForStage(stageName: string): string {
+    const picked = this.pickModelForStage(stageName);
+    this.recordResolvedStageState(stageName, picked);
+    return picked;
+  }
+
+  /**
+   * Pure resolution chain — no state mutation. Extracted so the public
+   * resolver can layer on the state-recording side effect for UI surfacing.
+   */
+  private pickModelForStage(stageName: string): string {
     // 1. factory.yaml per-stage override always wins (project-specific
     //    pinning beats every other rule).
     const yamlModels = this.projectLoader.getConfig(this.config.project)?.pipeline?.models;
@@ -1133,6 +1156,24 @@ export class PipelineRunner extends EventEmitter {
    */
   private allowedToolsForCurrentStage(stageName: string): string[] {
     return allowedToolsForStage(stageName);
+  }
+
+  /**
+   * Stamp the per-stage state with the resolved model + permission set
+   * the moment the resolver is consulted. Called from resolveModelForStage
+   * which fires once per stage entry, so the UI sees the routing
+   * decision in real time.
+   */
+  private recordResolvedStageState(stageName: string, model: string): void {
+    const stageIdx = this.state.stages.findIndex((s) => s.name === stageName);
+    if (stageIdx === -1) return;
+    const stage = this.state.stages[stageIdx];
+    // Don't clobber an explicit override that's already been recorded
+    // (e.g. by an earlier per-task call within the same stage).
+    if (stage.resolvedModel && stage.resolvedModel === model) return;
+    stage.resolvedModel = model;
+    stage.permissionClasses = permissionClassesForStage(stageName);
+    this.broadcastState();
   }
 
   /**

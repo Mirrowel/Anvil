@@ -251,6 +251,10 @@ export interface DashboardStageState {
     cost: number;
     error: string | null;
   }>;
+  /** Phase 8 — model id resolved by the registry-driven resolver. */
+  resolvedModel?: string;
+  /** Phase 8 — tool-permission classes for this stage. */
+  permissionClasses?: ('read' | 'write' | 'exec')[];
 }
 
 export interface DashboardPipeline {
@@ -5142,6 +5146,10 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
               cost: r.cost,
               error: r.error,
             })) : undefined,
+            // Phase 8 — surface routing decisions so the UI can show
+            // "build → qwen3:14b" badges and 🔒/📝/⚡ permission glyphs.
+            resolvedModel: s.resolvedModel,
+            permissionClasses: s.permissionClasses,
           })),
           startedAt: pipelineState.startedAt,
           cost: { inputTokens: 0, outputTokens: 0, estimatedCost: pipelineState.totalCost },

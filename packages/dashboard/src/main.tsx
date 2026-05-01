@@ -109,6 +109,10 @@ interface DashboardStageState {
     cost: number;
     error: string | null;
   }>;
+  /** Phase 8 — registry-resolved model id for this stage. */
+  resolvedModel?: string;
+  /** Phase 8 — tool-permission classes enforced for this stage. */
+  permissionClasses?: ('read' | 'write' | 'exec')[];
 }
 
 interface DashboardPipeline {
@@ -187,6 +191,11 @@ function toPipelineData(pipeline: DashboardPipeline | null): PipelineData | null
         cost: r.cost,
         error: r.error,
       })),
+      // Phase 8 — propagate routing decision from the server so the
+      // pipeline view can show "build → qwen3:14b" badges + 🔒/📝/⚡
+      // permission glyphs.
+      resolvedModel: s.resolvedModel,
+      permissionClasses: s.permissionClasses,
     })),
     totalCost: pipeline.cost.estimatedCost,
     pendingApproval: null,

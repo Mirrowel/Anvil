@@ -10,6 +10,7 @@ export interface StageChipData {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
   cost?: number;
   modelLabel?: string;
+  permissionClasses?: ('read' | 'write' | 'exec')[];
 }
 
 export interface StageChipsProps {
@@ -142,17 +143,42 @@ export function StageChips({ stages, currentStage: _currentStage, onStageSelect,
                 {getDisplayName(stage.name)}
               </span>
 
+              {/* Permission badge — read 🔒 / write 📝 / exec ⚡ */}
+              {stage.permissionClasses && stage.permissionClasses.length > 0 && (
+                <span
+                  title={`Tools allowed: ${stage.permissionClasses.join(', ')}`}
+                  style={{
+                    fontSize: 10,
+                    fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-tertiary)',
+                    background: 'var(--bg-elevated-3)',
+                    padding: '1px 5px',
+                    borderRadius: 'var(--radius-sm)',
+                    lineHeight: '16px',
+                  }}
+                >
+                  {stage.permissionClasses.includes('exec')
+                    ? 'r/w/x'
+                    : stage.permissionClasses.includes('write')
+                      ? 'r/w'
+                      : 'r'}
+                </span>
+              )}
+
               {/* Model badge */}
               {stage.modelLabel && (
-                <span style={{
-                  fontSize: 10,
-                  fontFamily: 'var(--font-mono)',
-                  color: 'var(--text-tertiary)',
-                  background: 'var(--bg-elevated-3)',
-                  padding: '1px 5px',
-                  borderRadius: 'var(--radius-sm)',
-                  lineHeight: '16px',
-                }}>
+                <span
+                  title={`Resolved: ${stage.modelLabel}`}
+                  style={{
+                    fontSize: 10,
+                    fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-tertiary)',
+                    background: 'var(--bg-elevated-3)',
+                    padding: '1px 5px',
+                    borderRadius: 'var(--radius-sm)',
+                    lineHeight: '16px',
+                  }}
+                >
                   {stage.modelLabel}
                 </span>
               )}

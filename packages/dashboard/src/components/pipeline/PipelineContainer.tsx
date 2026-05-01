@@ -60,6 +60,11 @@ export interface PipelineStageData {
   cost?: number;
   perRepo?: boolean;
   repos?: RepoState[];
+  /** Model id resolved by the registry-driven resolver. Surfaced as a
+   *  badge so users can see "build → qwen3:14b" routing in real time. */
+  resolvedModel?: string;
+  /** Permission classes enforced for this stage's tool executor. */
+  permissionClasses?: ('read' | 'write' | 'exec')[];
 }
 
 export interface PipelineData {
@@ -128,13 +133,16 @@ export function PipelineContainer({
     if (!userSelected && isRunning) setSelectedStage(currentStage);
   }, [currentStage, isRunning, userSelected, setSelectedStage]);
 
-  // Build stage chips data
+  // Build stage chips data. Prefer the per-stage resolvedModel that the
+  // server stamps when the registry resolver fires; fall back to the
+  // legacy modelPerStage map for stages that haven't run yet.
   const modelPerStage = pipelineData?.modelPerStage;
   const stageChips: StageChipData[] = (pipelineData?.stages ?? []).map((s, idx) => ({
     name: s.name,
     status: s.status === 'waiting' ? 'running' : s.status,
     cost: s.cost,
-    modelLabel: modelPerStage?.[idx],
+    modelLabel: s.resolvedModel ?? modelPerStage?.[idx],
+    permissionClasses: s.permissionClasses,
   }));
 
   const inputPlaceholder = isWaiting
