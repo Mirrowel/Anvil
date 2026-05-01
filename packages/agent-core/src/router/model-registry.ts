@@ -42,6 +42,12 @@ export interface ModelEntry {
   vram_gb: number;
   exclusive_slot: boolean;
   context_tokens?: number;
+  /**
+   * Ollama `num_ctx` cap — bounds VRAM cost of context. Set to a value
+   * smaller than the model's max so context tokens don't eat the GPU
+   * headroom needed by weights. Ignored for cloud providers.
+   */
+  context_window?: number;
   consumed_by?: ModelConsumer;
   /** Optional non-Ollama HTTP endpoint. Reserved for future providers. */
   endpoint?: string;
@@ -139,10 +145,30 @@ export function parseModelRegistry(raw: unknown, sourcePath = '<inline>'): Model
       throw new ModelRegistryValidationError(`duplicate model id "${entry.id}" at index ${i}`);
     }
     seenIds.add(entry.id);
+    enforceExclusiveSlotInvariant(entry, i);
     models.push(entry);
   }
 
   return { models };
+}
+
+/**
+ * Big GPU-resident models MUST set `exclusive_slot: true` so the
+ * `LocalExecutor` FIFO can serialize them. Co-resident utility models
+ * (embed, rerank consumed by knowledge-core) are exempt — they share VRAM
+ * with the held big-slot model by design.
+ */
+const EXCLUSIVE_SLOT_VRAM_THRESHOLD_GB = 5;
+
+function enforceExclusiveSlotInvariant(entry: ModelEntry, index: number): void {
+  if (entry.provider !== 'ollama') return;          // cloud providers don't use the slot
+  if (entry.consumed_by === 'knowledge-core') return; // co-residents are exempt
+  if (entry.vram_gb < EXCLUSIVE_SLOT_VRAM_THRESHOLD_GB) return;
+  if (entry.exclusive_slot) return;
+  throw new ModelRegistryValidationError(
+    `models[${index}] (${entry.id}): vram_gb=${entry.vram_gb} ≥ ${EXCLUSIVE_SLOT_VRAM_THRESHOLD_GB} requires exclusive_slot:true ` +
+    `to prevent VRAM thrashing. Set exclusive_slot:true, or mark consumed_by:knowledge-core if it is a co-resident utility model.`,
+  );
 }
 
 function validateEntry(rawEntry: unknown, index: number): ModelEntry {
@@ -180,6 +206,9 @@ function validateEntry(rawEntry: unknown, index: number): ModelEntry {
 
   if (e.context_tokens !== undefined) {
     out.context_tokens = requireNumber(e.context_tokens, `${ctx}.context_tokens`, { min: 1, integer: true });
+  }
+  if (e.context_window !== undefined) {
+    out.context_window = requireNumber(e.context_window, `${ctx}.context_window`, { min: 256, integer: true });
   }
   if (e.consumed_by !== undefined) {
     out.consumed_by = requireEnum(e.consumed_by, CONSUMERS, `${ctx}.consumed_by`);

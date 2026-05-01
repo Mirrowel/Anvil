@@ -236,6 +236,122 @@ describe('parseModelRegistry — validation errors', () => {
   });
 });
 
+describe('parseModelRegistry — exclusive_slot invariant for big GPU models', () => {
+  it('rejects vram_gb >= 5 ollama model without exclusive_slot', () => {
+    assert.throws(
+      () =>
+        parseModelRegistry({
+          models: [
+            {
+              id: 'qwen3:14b',
+              provider: 'ollama',
+              tier: 'local',
+              capabilities: ['code', 'reasoning'],
+              complexity_max: 'M',
+              vram_gb: 9,
+              exclusive_slot: false,
+            },
+          ],
+        }),
+      /exclusive_slot:true/,
+      'big ollama model without exclusive_slot must be rejected',
+    );
+  });
+
+  it('accepts vram_gb >= 5 ollama model with exclusive_slot: true', () => {
+    const reg = parseModelRegistry({
+      models: [
+        {
+          id: 'qwen3:14b',
+          provider: 'ollama',
+          tier: 'local',
+          capabilities: ['code', 'reasoning'],
+          complexity_max: 'M',
+          vram_gb: 9,
+          exclusive_slot: true,
+          context_window: 16384,
+        },
+      ],
+    });
+    assert.equal(reg.models[0].exclusive_slot, true);
+    assert.equal(reg.models[0].context_window, 16384);
+  });
+
+  it('exempts knowledge-core consumed models from the invariant', () => {
+    const reg = parseModelRegistry({
+      models: [
+        {
+          id: 'imaginary-fat-embedder',
+          provider: 'ollama',
+          tier: 'local',
+          capabilities: ['embed'],
+          complexity_max: 'S',
+          vram_gb: 6,
+          exclusive_slot: false,
+          consumed_by: 'knowledge-core',
+        },
+      ],
+    });
+    assert.equal(reg.models.length, 1);
+  });
+
+  it('exempts cloud providers (vram_gb is informational only)', () => {
+    const reg = parseModelRegistry({
+      models: [
+        {
+          id: 'claude-opus-4-7',
+          provider: 'claude',
+          tier: 'premium',
+          capabilities: ['code', 'reasoning', 'vision'],
+          complexity_max: 'L',
+          vram_gb: 0,
+          exclusive_slot: false,
+        },
+      ],
+    });
+    assert.equal(reg.models.length, 1);
+  });
+
+  it('allows small ollama models without exclusive_slot (under threshold)', () => {
+    const reg = parseModelRegistry({
+      models: [
+        {
+          id: 'gemma4:e4b',
+          provider: 'ollama',
+          tier: 'local',
+          capabilities: ['vision', 'code', 'reasoning'],
+          complexity_max: 'S',
+          vram_gb: 3,
+          exclusive_slot: false,
+          context_window: 8192,
+        },
+      ],
+    });
+    assert.equal(reg.models.length, 1);
+  });
+
+  it('rejects context_window below the 256 floor', () => {
+    assert.throws(
+      () =>
+        parseModelRegistry({
+          models: [
+            {
+              id: 'too-small-ctx',
+              provider: 'ollama',
+              tier: 'local',
+              capabilities: ['code'],
+              complexity_max: 'S',
+              vram_gb: 1,
+              exclusive_slot: false,
+              context_window: 128,
+            },
+          ],
+        }),
+      ModelRegistryValidationError,
+    );
+  });
+});
+
 describe('loadModelRegistry — filesystem', () => {
   it('returns empty registry when no models.yaml exists', () => {
     const reg = loadModelRegistry({

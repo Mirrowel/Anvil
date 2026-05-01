@@ -11,7 +11,9 @@
 #   - vram_gb         (number)      0 for cloud / CPU-only models
 #   - exclusive_slot  (bool)        true ⇒ goes through process-local FIFO queue
 #                                   (only big GPU-resident locals; embed/rerank stay false)
-#   - context_tokens  (int, opt)    minimum-context filter
+#                                   MANDATORY for vram_gb >= 5 unless consumed_by=knowledge-core
+#   - context_window  (int, opt)    Ollama num_ctx — caps VRAM cost of context
+#   - context_tokens  (int, opt)    minimum-context filter (resolver eligibility)
 #   - consumed_by     (enum, opt)   agent-core (default) | knowledge-core
 #                                   marker: model is referenced in registry
 #                                   but invoked directly by knowledge-core,
@@ -19,31 +21,38 @@
 
 models:
   # ─── Big-model GPU slot (one resident at a time on 16 GB) ─────────────
-  - id: qwen2.5-coder:7b
+  # Both qwen3:14b and gemma4:e4b set exclusive_slot:true so the LocalExecutor
+  # FIFO-serializes them with confirmed eviction (poll /api/ps). They never
+  # co-reside; switching between them costs one eviction round-trip.
+  - id: qwen3:14b
     provider: ollama
     tier: local
     capabilities: [code, reasoning]
     complexity_max: M
-    vram_gb: 5
+    vram_gb: 9
     exclusive_slot: true
+    context_window: 16384
 
-  - id: gemma3:4b
+  - id: gemma4:e4b
     provider: ollama
     tier: local
-    capabilities: [vision, code]
+    capabilities: [vision, code, reasoning]
     complexity_max: S
-    vram_gb: 3.5
+    vram_gb: 3
     exclusive_slot: true
+    context_window: 8192
 
   # ─── Co-resident utility models, used by knowledge-core directly ──────
-  - id: nomic-embed-text
+  # Small enough to share VRAM with whichever big model holds the slot.
+  - id: bge-m3
     provider: ollama
     tier: local
     capabilities: [embed]
     complexity_max: S
-    vram_gb: 0.3
+    vram_gb: 1.2
     exclusive_slot: false
     consumed_by: knowledge-core
+    context_window: 8192
 
   - id: qwen3:0.6b
     provider: ollama
@@ -53,6 +62,7 @@ models:
     vram_gb: 0.5
     exclusive_slot: false
     consumed_by: knowledge-core
+    context_window: 4096
 
   # ─── Premium escalation tier (cloud) ──────────────────────────────────
   - id: claude-haiku-4-5-20251001
