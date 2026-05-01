@@ -29,7 +29,7 @@ models:
     tier: local
     capabilities: [code, reasoning]
     complexity_max: M
-    vram_gb: 9
+    vram_gb: 12     # measured: 12.1 GB at num_ctx=16384 (Q4_K_M)
     exclusive_slot: true
     context_window: 16384
 
@@ -38,7 +38,7 @@ models:
     tier: local
     capabilities: [vision, code, reasoning]
     complexity_max: S
-    vram_gb: 3
+    vram_gb: 11     # measured: 10.6 GB at num_ctx=8192 (Q4_K_M, 8B params)
     exclusive_slot: true
     context_window: 8192
 
