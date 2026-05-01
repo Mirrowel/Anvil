@@ -11,6 +11,18 @@ export interface KBRepoStatus {
   nodeCount: number;
   communityCount: number;
   error: string | null;
+  /** Vector store stats (knowledge-core's index_meta.json). null = not embedded yet. */
+  vectorChunks?: number | null;
+  embeddingProvider?: string | null;
+  lastEmbeddedAt?: string | null;
+}
+
+export interface KBProgress {
+  repo: string;
+  message: string;
+  repoIndex: number;
+  totalRepos: number;
+  phase?: string;
 }
 
 export interface KBStatus {
@@ -18,13 +30,15 @@ export interface KBStatus {
   repos: KBRepoStatus[];
   overallStatus: string;
   lastRefreshed: string | null;
+  /** Cached snapshot from the server — populated only while a build is in flight. */
+  currentProgress?: KBProgress | null;
 }
 
 export interface KnowledgeGraphPageProps {
   projectName: string;
   kbStatus: KBStatus | null;
   kbRefreshing: boolean;
-  kbProgress: { repo: string; message: string; repoIndex: number; totalRepos: number } | null;
+  kbProgress: KBProgress | null;
   onRefreshKB: () => void;
   ws: WebSocket | null;
 }
@@ -81,6 +95,12 @@ export function KnowledgeGraphPage({
   const [pgProvider, setPgProvider] = useState<string>('auto');
 
   const repos = kbStatus?.repos ?? [];
+
+  // Effective progress: prefer the live event stream; fall back to the
+  // server-cached snapshot so a client revisiting mid-build still sees
+  // the latest message without waiting for the next tick.
+  const effectiveProgress: KBProgress | null = kbProgress ?? kbStatus?.currentProgress ?? null;
+  const effectiveBuilding = kbRefreshing || kbStatus?.overallStatus === 'building';
 
   // graphContainerRef above is a callback ref that manages the ResizeObserver.
 
@@ -201,8 +221,8 @@ export function KnowledgeGraphPage({
             {kbRefreshing ? 'Building...' : 'Build for Current Project'}
           </button>
 
-          {kbRefreshing && kbProgress && (
-            <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono, monospace)' }}>{kbProgress.message}</div>
+          {effectiveBuilding && effectiveProgress && (
+            <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono, monospace)' }}>{effectiveProgress.message}</div>
           )}
         </div>
       </div>
@@ -241,16 +261,29 @@ export function KnowledgeGraphPage({
         </div>
       </div>
 
-      {/* Progress bar */}
-      {kbRefreshing && kbProgress && (
+      {/* Progress bar — also driven by kbStatus.currentProgress when this
+          client revisits the page after the live ws stream has gone quiet. */}
+      {effectiveBuilding && effectiveProgress && (
         <div style={{ marginBottom: 8, flexShrink: 0 }}>
           <div style={{ height: 3, background: 'var(--bg-base)', borderRadius: 2, overflow: 'hidden' }}>
             <div style={{
-              height: '100%', width: `${Math.round(((kbProgress.repoIndex + 1) / kbProgress.totalRepos) * 100)}%`,
+              height: '100%',
+              width: `${Math.round(((effectiveProgress.repoIndex + 1) / Math.max(1, effectiveProgress.totalRepos)) * 100)}%`,
               background: 'var(--accent)', transition: 'width 0.3s ease',
             }} />
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{kbProgress.message}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{effectiveProgress.message}</div>
+        </div>
+      )}
+
+      {/* Per-repo vector store status — read-only summary of what
+          knowledge-core's embedding pass has indexed into LanceDB. */}
+      {repos.length > 0 && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, flexShrink: 0,
+          fontSize: 11,
+        }}>
+          {repos.map((r) => <RepoVectorPill key={r.repoName} repo={r} />)}
         </div>
       )}
 
@@ -451,6 +484,48 @@ export function KnowledgeGraphPage({
       </div>
     </div>
   );
+}
+
+function RepoVectorPill({ repo }: { repo: KBRepoStatus }) {
+  const chunks = repo.vectorChunks ?? null;
+  const provider = repo.embeddingProvider ?? null;
+  const embedded = chunks !== null && chunks > 0;
+
+  let detail: string;
+  let bg: string;
+  let color: string;
+
+  if (embedded) {
+    detail = `${formatChunkCount(chunks)} chunks${provider ? ` · ${provider}` : ''}`;
+    bg = 'var(--bg-elevated-2)';
+    color = 'var(--text-secondary)';
+  } else {
+    detail = 'not embedded';
+    bg = 'rgba(245, 158, 11, 0.12)';
+    color = 'var(--color-warning, #f59e0b)';
+  }
+
+  const tooltip = embedded && repo.lastEmbeddedAt
+    ? `Last embedded ${formatRelativeTime(repo.lastEmbeddedAt)}`
+    : 'Run anvil index <project> to embed';
+
+  return (
+    <span title={tooltip} style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '3px 8px', borderRadius: 'var(--radius-sm)',
+      background: bg, color, border: '1px solid var(--separator)',
+      fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
+    }}>
+      <Database size={10} />
+      <span style={{ fontWeight: 500 }}>{repo.repoName}</span>
+      <span style={{ opacity: 0.75 }}>· {detail}</span>
+    </span>
+  );
+}
+
+function formatChunkCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
 }
 
 function PageHeader({ projectName }: { projectName: string }) {

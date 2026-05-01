@@ -2122,7 +2122,17 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
         }).then((status) => {
           broadcast({ type: 'kb-status', payload: status });
         }).catch((err) => {
-          broadcast({ type: 'kb-status', payload: { project, repos: [], overallStatus: 'unavailable', lastRefreshed: null, error: err.message } });
+          broadcast({
+            type: 'kb-status',
+            payload: {
+              project,
+              repos: [],
+              overallStatus: 'unavailable',
+              lastRefreshed: null,
+              currentProgress: null,
+              error: err.message,
+            },
+          });
         });
         ws.send(JSON.stringify({ type: 'kb-refresh-started', payload: { project } }));
         break;
