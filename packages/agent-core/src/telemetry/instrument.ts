@@ -132,6 +132,16 @@ class InstrumentedModelAdapter implements ModelAdapter {
           'anvil.stage': config.stage,
           'anvil.persona': config.persona,
           'anvil.session.resume': config.resume === true,
+          // Phase 9 — routing-decision attributes. Lets dashboards
+          // facet by routing tier and capability tier so users can
+          // tell at a glance how much work is going to local vs cloud.
+          'anvil.provider.tier': this.inner.capabilities.tier,
+          'anvil.provider.tool_use': this.inner.capabilities.toolUse,
+          ...(config.exclusiveSlot ? { 'anvil.local.exclusive_slot': true } : {}),
+          ...(config.toolExecutor ? { 'anvil.tool_executor.attached': true } : {}),
+          ...(typeof config.contextWindow === 'number'
+            ? { 'anvil.context_window': config.contextWindow }
+            : {}),
         });
         if (telemetry.recordContent) {
           span.setAttribute(
