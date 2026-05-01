@@ -31,6 +31,7 @@ import type {
   ModelAdapterResult,
   ProviderCapabilities,
   ProviderName,
+  ToolExecutorLike,
 } from '../../types.js';
 import type { AdapterRequest, AgentAdapter } from './adapter.js';
 import type {
@@ -39,6 +40,8 @@ import type {
 } from './legacy-adapter-types.js';
 import { instrumentModelAdapter } from '../../telemetry/instrument.js';
 import { getTracer } from '../../telemetry/tracer.js';
+import { BuiltinToolExecutor } from '../../tools/index.js';
+import { loadModelRegistry } from '../../router/model-registry.js';
 
 // ── Capability mapping ───────────────────────────────────────────────────
 
@@ -179,7 +182,7 @@ export class LanguageModelBridge extends EventEmitter implements AgentAdapter {
   // ── Internals ─────────────────────────────────────────────────────────
 
   private buildAdapterConfig(): ModelAdapterConfig {
-    return {
+    const config: ModelAdapterConfig = {
       userPrompt: this.request.prompt,
       projectPrompt: this.request.projectPrompt,
       model: this.request.model,
@@ -193,6 +196,23 @@ export class LanguageModelBridge extends EventEmitter implements AgentAdapter {
       disallowedTools: this.request.disallowedTools,
       maxOutputTokens: this.maxOutputTokensOverride ?? this.request.maxOutputTokens,
     };
+
+    // Non-Claude providers need a tool executor + bounded context to drive
+    // an agentic loop. Claude CLI ships its own tool runtime; passing one
+    // here would be ignored. Keep the construction lazy so this method
+    // stays cheap when called by adapters that don't loop.
+    if (this.providerName !== 'claude') {
+      const executor = buildBuiltinExecutor(this.request);
+      if (executor) config.toolExecutor = executor;
+      const ctx = lookupContextWindow(this.request.model);
+      if (ctx !== undefined) config.contextWindow = ctx;
+    }
+
+    if (this.request.exclusiveSlot) {
+      config.exclusiveSlot = true;
+    }
+
+    return config;
   }
 
   private async runAdapter(): Promise<void> {
@@ -381,4 +401,55 @@ export class LanguageModelBridge extends EventEmitter implements AgentAdapter {
     }
     this.openToolSpans.clear();
   }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Helpers — tool executor + context window lookup for non-Claude paths
+// ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Build a `BuiltinToolExecutor` for an agentic non-Claude run. The
+ * `request.allowedTools` field carries the per-stage permission set
+ * the dashboard pipeline-runner populated upstream. When it's missing
+ * (legacy spawn sites that haven't been upgraded yet), we conservatively
+ * fall back to read-only tools so the model can still work but never
+ * mutates the workspace.
+ */
+function buildBuiltinExecutor(req: AdapterRequest): ToolExecutorLike | undefined {
+  if (!req.cwd) return undefined;
+  const allowed = req.allowedTools && req.allowedTools.length > 0
+    ? req.allowedTools
+    : ['read_file', 'grep', 'glob', 'list'];
+  return new BuiltinToolExecutor({ allowedTools: allowed });
+}
+
+/**
+ * Look up the configured `context_window` for a model in the registry.
+ * Returns undefined when the model isn't in the registry or has no
+ * context_window set — the adapter then falls back to its own default.
+ *
+ * Cached lazily; the registry file rarely changes during a run.
+ */
+let _registryCache: Map<string, number> | null = null;
+
+function lookupContextWindow(modelId: string): number | undefined {
+  if (!_registryCache) {
+    _registryCache = new Map<string, number>();
+    try {
+      const reg = loadModelRegistry();
+      for (const m of reg.models) {
+        if (m.context_window !== undefined) {
+          _registryCache.set(m.id, m.context_window);
+        }
+      }
+    } catch {
+      // Registry missing/invalid → no context-window data; adapters use defaults.
+    }
+  }
+  return _registryCache.get(modelId);
+}
+
+/** Test/internal — reset the registry cache so the next lookup re-reads. */
+export function _resetBridgeRegistryCache(): void {
+  _registryCache = null;
 }

@@ -71,6 +71,11 @@ export interface AdapterRequest {
   project?: string;
   /** Run id grouping multiple spawns into one logical pipeline run. */
   runId?: string;
+  /** When true, the adapter routes the call through the LocalExecutor's
+   *  single-slot FIFO. Set automatically by the SpawnConfig→AdapterRequest
+   *  mapping when the resolved model has `exclusive_slot:true` in
+   *  `~/.anvil/models.yaml`. */
+  exclusiveSlot?: boolean;
 }
 
 /**
