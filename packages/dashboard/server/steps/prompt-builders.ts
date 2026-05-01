@@ -236,6 +236,15 @@ export function buildProjectPrompt(
         source: 'knowledge-base',
         message: `Knowledge Base loaded for "${ctx.project}" (${knowledgeGraph.length} chars, source=${kb.sourceLabel}) → injecting into ${stage.persona} agent`,
       });
+    } else if (tier === 'none') {
+      // Stage policy intentionally skips KB injection — e.g. shipping
+      // (git operations: commit / branch / PR — no codebase reasoning
+      // needed). Don't claim "no KB available"; the KB exists, this
+      // stage just doesn't need it.
+      ctx.emit('project-event', {
+        source: 'knowledge-base',
+        message: `Knowledge Base intentionally skipped for "${stage.name}" stage (policy: tier=none). KB is available but not needed for this stage.`,
+      });
     } else {
       ctx.emit('project-event', {
         source: 'knowledge-base',
