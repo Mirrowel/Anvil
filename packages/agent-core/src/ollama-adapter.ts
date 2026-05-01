@@ -344,6 +344,11 @@ export class OllamaAdapter implements ModelAdapter {
     let inputTokens = 0;
     let outputTokens = 0;
     let durationMs = 0;
+    // Buffer text deltas and flush at line breaks (or every ~80 chars)
+    // so each activity card holds a readable chunk instead of one
+    // word per row.
+    let pendingText = '';
+    const FLUSH_THRESHOLD = 80;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -366,7 +371,17 @@ export class OllamaAdapter implements ModelAdapter {
         const msg = chunk.message;
         if (msg?.content) {
           text += msg.content;
-          emitContent(output, msg.content);
+          pendingText += msg.content;
+          while (pendingText.includes('\n')) {
+            const nl = pendingText.indexOf('\n');
+            const lineOut = pendingText.slice(0, nl + 1);
+            emitContent(output, lineOut);
+            pendingText = pendingText.slice(nl + 1);
+          }
+          if (pendingText.length >= FLUSH_THRESHOLD) {
+            emitContent(output, pendingText);
+            pendingText = '';
+          }
         }
         if (msg?.tool_calls && msg.tool_calls.length > 0) {
           toolCalls.push(...msg.tool_calls);
@@ -377,6 +392,10 @@ export class OllamaAdapter implements ModelAdapter {
           if (typeof chunk.total_duration === 'number') durationMs = chunk.total_duration / 1_000_000;
         }
       }
+    }
+    // Flush trailing content not ending on a newline.
+    if (pendingText.length > 0) {
+      emitContent(output, pendingText);
     }
 
     return { text, toolCalls, inputTokens, outputTokens, durationMs };

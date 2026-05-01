@@ -469,6 +469,18 @@ export class OpenRouterAdapter implements ModelAdapter {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    // Buffer text deltas and flush at natural breaks (newline OR every
+    // ~80 chars). Without this, OpenAI-compatible streams that emit
+    // one token per chunk produce one activity card per word in the
+    // dashboard — every "passes", "(", "all", ")" gets its own row.
+    // Flushing on `\n` or threshold gives readable line-sized chunks.
+    let pendingText = '';
+    const FLUSH_THRESHOLD = 80;
+    const flushPending = () => {
+      if (pendingText.length === 0) return;
+      emitContent(output, pendingText);
+      pendingText = '';
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -496,7 +508,23 @@ export class OpenRouterAdapter implements ModelAdapter {
         const delta = choice?.delta;
         if (delta?.content) {
           text += delta.content;
-          emitContent(output, delta.content);
+          pendingText += delta.content;
+          // Split the accumulated buffer on newlines so the flush is
+          // always anchored at a natural line boundary; emit each
+          // complete line, retain the trailing partial line.
+          while (pendingText.includes('\n')) {
+            const nl = pendingText.indexOf('\n');
+            const line = pendingText.slice(0, nl + 1);
+            emitContent(output, line);
+            pendingText = pendingText.slice(nl + 1);
+          }
+          // No newline yet but buffer is large — flush so very long
+          // single-line outputs (e.g. one paragraph) don't sit
+          // pending until the very end of the stream.
+          if (pendingText.length >= FLUSH_THRESHOLD) {
+            emitContent(output, pendingText);
+            pendingText = '';
+          }
         }
         if (delta?.reasoning) {
           // Accumulate but don't stream to user — reasoning is for the
@@ -548,6 +576,10 @@ export class OpenRouterAdapter implements ModelAdapter {
         }
       }
     }
+
+    // Flush any trailing content that didn't end on a newline so the
+    // last line of the response surfaces in the activity log.
+    flushPending();
 
     // Sort tool_calls by their original index so loop dispatch order
     // mirrors what the model intended.
