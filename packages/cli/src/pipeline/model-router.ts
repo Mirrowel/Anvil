@@ -1,8 +1,18 @@
 // Cost-aware model routing per pipeline stage
 //
-// Uses weight classes (fast/balanced/powerful) instead of hardcoded model IDs.
-// Model IDs are resolved at runtime via a pluggable resolver function,
-// so new models are picked up without code changes.
+// Two layers, in order of precedence:
+//   1. New capability/complexity resolver backed by ~/.anvil/models.yaml +
+//      packages/cli/src/routing/stage-policy.yaml. Throws if no model
+//      matches; on throw, falls back to layer 2.
+//   2. Legacy weight-class routing (fast/balanced/thorough) with a
+//      pluggable model resolver. Used when models.yaml is missing or the
+//      requested stage isn't in stage-policy.yaml.
+
+import {
+  resolveModelForStage,
+  ModelResolutionError,
+  UnknownStageError,
+} from '../routing/resolve-model-for-stage.js';
 
 export type ModelTier = 'fast' | 'balanced' | 'thorough';
 type WeightClass = 'fast' | 'balanced' | 'powerful';
@@ -102,17 +112,31 @@ export function getModelForStage(
   const normalizedStage = STAGE_NAME_ALIASES[stage] ?? stage;
 
   // 1. Check factory.yaml pipeline.models for stage-specific override
+  //    (operator intent always wins over registry-driven routing).
   if (configModels?.[normalizedStage]) {
     return configModels[normalizedStage]!;
   }
 
-  // 2. Check factory.yaml pipeline.models.default for unknown stages
+  // 2. New: registry-driven resolver (capability/complexity/tier from
+  //    ~/.anvil/models.yaml + stage-policy.yaml). Throws if no match;
+  //    we catch and fall through to the weight-class path so behavior is
+  //    unchanged when models.yaml is missing.
+  try {
+    return resolveModelForStage(normalizedStage).primary;
+  } catch (err) {
+    if (!(err instanceof ModelResolutionError) && !(err instanceof UnknownStageError)) {
+      throw err;
+    }
+    // fall through
+  }
+
+  // 3. Check factory.yaml pipeline.models.default for unknown stages
   const stageKey = normalizedStage as keyof ModelRouting;
   if (configModels?.default && !(stageKey in STAGE_WEIGHTS[tier])) {
     return configModels.default;
   }
 
-  // 3. Resolve via weight class → model ID
+  // 4. Legacy weight-class → model ID resolution.
   const weight = STAGE_WEIGHTS[tier][stageKey] ?? 'balanced';
   return modelResolver(weight);
 }

@@ -14,9 +14,12 @@ import {
   loadModelRegistry,
   resolveModel,
   ModelResolutionError,
+  discoverAvailability,
   type ModelRegistry,
   type ResolvedChain,
+  type DiscoveryAdapter,
 } from '@anvil/agent-core';
+import type { ProviderName } from '@anvil/agent-core';
 import { loadStagePolicy, type StagePolicyMap } from './load-stage-policy.js';
 
 export class UnknownStageError extends Error {
@@ -75,6 +78,35 @@ export function resolveModelForStage(
     },
     registry,
   );
+}
+
+/**
+ * One-shot async boot helper. Loads policy + registry, runs the
+ * availability discovery pass against an injected ProviderRegistry-shaped
+ * dependency, and seeds the resolver cache. Safe to call multiple times
+ * (idempotent except for re-running probes).
+ *
+ * Callers that don't want discovery can simply skip this — the synchronous
+ * `resolveModelForStage` will load on first use and treat all registry
+ * entries as available.
+ */
+export async function initStageRouting(opts: {
+  workspaceRoot?: string;
+  env?: NodeJS.ProcessEnv;
+  /** ProviderRegistry-shaped resolver — anything with `.get(name)` returning an adapter with `checkAvailability`. */
+  providerRegistry?: { get(provider: ProviderName): DiscoveryAdapter | undefined };
+  timeoutMs?: number;
+} = {}): Promise<void> {
+  const policy = loadStagePolicy({ workspaceRoot: opts.workspaceRoot, env: opts.env });
+  const registry = loadModelRegistry({ workspaceRoot: opts.workspaceRoot, env: opts.env });
+  if (opts.providerRegistry) {
+    await discoverAvailability(
+      registry,
+      { getAdapter: (p) => opts.providerRegistry!.get(p) },
+      { timeoutMs: opts.timeoutMs },
+    );
+  }
+  cached = { policy, registry };
 }
 
 /** Test seam — clears the cached policy + registry. */
