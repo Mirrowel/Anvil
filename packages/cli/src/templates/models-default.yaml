@@ -25,24 +25,12 @@ models:
   # Replaces Ollama for the local tier when OPENCODE_API_KEY is set —
   # frees the 12 GB GPU VRAM Ollama needed for qwen3:14b. Cost-counted
   # via the Go subscription ($10/mo flat) rather than per-token.
-  - id: opencode/qwen3.5-plus
-    provider: opencode
-    tier: local
-    capabilities: [code, reasoning]
-    complexity_max: M
-    vram_gb: 0
-    exclusive_slot: false
-    context_window: 32768
-
-  - id: opencode/qwen3.6-plus
-    provider: opencode
-    tier: local
-    capabilities: [code, reasoning]
-    complexity_max: M
-    vram_gb: 0
-    exclusive_slot: false
-    context_window: 32768
-
+  #
+  # Order matters — first model in the registry within a matching tier
+  # wins. Kimi K2.6 promoted to primary because Alibaba's upstream
+  # capacity for OpenCode's Qwen3.5/3.6 routes was hitting frequent
+  # 429s in early testing. Qwen kept as a fallback so they're still
+  # in the chain when capacity returns.
   - id: opencode/kimi-k2.6
     provider: opencode
     tier: local
@@ -60,6 +48,24 @@ models:
     vram_gb: 0
     exclusive_slot: false
     context_window: 65536
+
+  - id: opencode/qwen3.6-plus
+    provider: opencode
+    tier: local
+    capabilities: [code, reasoning]
+    complexity_max: M
+    vram_gb: 0
+    exclusive_slot: false
+    context_window: 32768
+
+  - id: opencode/qwen3.5-plus
+    provider: opencode
+    tier: local
+    capabilities: [code, reasoning]
+    complexity_max: M
+    vram_gb: 0
+    exclusive_slot: false
+    context_window: 32768
 
   - id: opencode/deepseek-v4-flash
     provider: opencode

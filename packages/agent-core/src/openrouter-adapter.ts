@@ -39,6 +39,34 @@ import { emitContent, emitResult, emitToolResult, emitToolUse } from './stream-f
 
 const DEFAULT_MAX_ITERATIONS = 32;
 
+/**
+ * Thrown when an upstream HTTP call fails. Carries the status code so
+ * the dashboard pipeline-runner can decide whether to retry / escalate
+ * the chain (429 quota, 503 outage) vs surface to the user (400 bad
+ * request, 401 auth).
+ */
+export class UpstreamError extends Error {
+  readonly status: number;
+  readonly body: string;
+  /** True when the error class warrants chain-fallback (insufficient
+   *  quota, rate limited, upstream outage). 4xx auth / bad-request
+   *  errors are NOT retryable — they need a config fix. */
+  readonly retryable: boolean;
+  constructor(status: number, body: string) {
+    super(`OpenRouter API ${status}: ${body}`);
+    this.name = 'UpstreamError';
+    this.status = status;
+    this.body = body;
+    this.retryable =
+      status === 429 ||                    // rate limited / quota
+      status === 502 ||                    // bad gateway
+      status === 503 ||                    // service unavailable
+      status === 504 ||                    // gateway timeout
+      status === 0 ||                      // empty body / network
+      /insufficient_quota|rate.?limit/i.test(body);
+  }
+}
+
 // ───────────────────────────────────────────────────────────────────────
 // Pricing fallbacks for well-known OpenRouter slugs. OpenRouter itself
 // returns `usage.cost` in the response when available — that wins. This
@@ -387,9 +415,9 @@ export class OpenRouterAdapter implements ModelAdapter {
 
     if (!response.ok) {
       const errBody = await response.text();
-      throw new Error(`OpenRouter API ${response.status}: ${errBody}`);
+      throw new UpstreamError(response.status, errBody);
     }
-    if (!response.body) throw new Error('OpenRouter API returned no response body');
+    if (!response.body) throw new UpstreamError(0, 'OpenRouter API returned no response body');
 
     return this.consumeSSE(response, output);
   }
