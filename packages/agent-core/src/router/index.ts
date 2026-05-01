@@ -79,3 +79,9 @@ export type {
   LocalExecutorDeps,
   LocalExecutorInspection,
 } from './local-executor.js';
+export { discoverAvailability } from './discovery.js';
+export type {
+  DiscoveryAdapter,
+  DiscoveryDeps,
+  DiscoveryOptions,
+} from './discovery.js';
