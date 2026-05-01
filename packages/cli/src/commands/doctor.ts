@@ -282,7 +282,25 @@ export async function runDoctor(): Promise<boolean> {
 
 export const doctorCommand = new Command('doctor')
   .description('Check project health and dependencies')
-  .action(async () => {
+  .option('--bootstrap-models', 'Write ~/.anvil/models.yaml from the bundled default if missing, then pull any ollama models the registry references but does not have installed locally')
+  .action(async (opts: { bootstrapModels?: boolean }) => {
+    if (opts.bootstrapModels) {
+      const { bootstrapModels, BootstrapError } = await import('./bootstrap-models.js');
+      try {
+        const result = await bootstrapModels();
+        if (result.failed.length > 0) {
+          process.exitCode = 1;
+        }
+        return;
+      } catch (err) {
+        process.stderr.write(
+          (err instanceof BootstrapError ? err.message : String(err)) + '\n',
+        );
+        process.exitCode = 1;
+        return;
+      }
+    }
+
     const allOk = await runDoctor();
     if (!allOk) {
       process.exitCode = 1;
