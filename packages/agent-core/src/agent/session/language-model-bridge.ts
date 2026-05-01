@@ -368,8 +368,25 @@ export class LanguageModelBridge extends EventEmitter implements AgentAdapter {
     for (const block of blocks) {
       if (block.type !== 'tool_result') continue;
       const toolUseId = typeof block.tool_use_id === 'string' ? block.tool_use_id : undefined;
-      if (!toolUseId) continue;
       const isError = block.is_error === true;
+      const rawContent = typeof block.content === 'string' ? block.content : '';
+      // Emit an activity so consumers (dashboard PR scanner, run history,
+      // audit log) see what the tool returned. Without this, `gh pr
+      // create` invoked via bash prints the PR URL into the tool_result
+      // body — but the URL never reaches `agent-activity`, so the
+      // dashboard's `extractPRUrls(content)` scanner can't find it and
+      // PRs never surface in stats. Cap content at 4KB so a stray
+      // `bash: cat huge_file` doesn't blow the activity stream.
+      if (rawContent) {
+        this.emit('activity', {
+          id: this.nextActivityId(),
+          kind: 'text',
+          summary: rawContent.slice(0, 200),
+          content: rawContent.slice(0, 4096),
+          timestamp: Date.now(),
+        });
+      }
+      if (!toolUseId) continue;
       this.closeToolSpan(toolUseId, { isError });
     }
   }
