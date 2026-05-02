@@ -3,6 +3,7 @@ import { BarChart3, TrendingUp, TrendingDown, DollarSign, Clock, CheckCircle2, A
 import type { RunSummary } from '../history/RunRow.js';
 import { useSystem } from '../../context/ProjectContext.js';
 import { costTier, fmtUsd } from '../../lib/cost-tier.js';
+import { TileSkeleton } from '../common/Skeleton.js';
 
 export interface StatsPageProps {
   runs: RunSummary[];
@@ -1338,8 +1339,12 @@ function ReviewsSection() {
       <h3 style={sectionTitleStyle}>PR Reviews</h3>
 
       {loading && !reviews && (
-        <div style={{ ...cardStyle, padding: 'var(--space-md)', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
-          Loading reviews...
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+          gap: 'var(--space-sm)',
+        }} aria-busy="true" aria-label="Loading PR review stats">
+          {Array.from({ length: 6 }, (_, i) => <TileSkeleton key={i} />)}
         </div>
       )}
 

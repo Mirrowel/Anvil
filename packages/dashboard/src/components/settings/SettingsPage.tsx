@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Settings, Key, DollarSign, GitBranch, Bell } from 'lucide-react';
+import { Settings, Key, DollarSign, GitBranch, Bell, AlertCircle } from 'lucide-react';
 import { ComingSoonPanel } from '../common/ComingSoonPanel.js';
+import { TileSkeleton, useLoadingState } from '../common/Skeleton.js';
 
 export interface SettingsPageProps {
   project: string | null;
@@ -40,6 +41,7 @@ export function SettingsPage({ project, ws }: SettingsPageProps) {
   const [keyInput, setKeyInput] = useState('');
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, 'ok' | 'fail'>>({});
+  const { loading: providersLoading, error: providersError, loaded, errored } = useLoadingState();
 
   // Fetch data on mount
   useEffect(() => {
@@ -58,6 +60,7 @@ export function SettingsPage({ project, ws }: SettingsPageProps) {
         const msg = JSON.parse(event.data);
         if (msg.type === 'providers' && msg.payload) {
           setProviders(msg.payload.providers || []);
+          loaded();
         }
         // Backward compat: old auth-status shape (hasKey/isSet, no type field)
         if (msg.type === 'auth-status' && msg.payload) {
@@ -74,6 +77,10 @@ export function SettingsPage({ project, ws }: SettingsPageProps) {
             }
             return Array.from(byName.values());
           });
+          loaded();
+        }
+        if (msg.type === 'error' && typeof msg.payload?.message === 'string' && msg.payload.message.startsWith('discover-providers')) {
+          errored(msg.payload.message);
         }
         if (msg.type === 'auth-key-saved' && msg.payload) {
           setSaveResult((prev) => ({ ...prev, [msg.payload.provider]: 'saved' }));
@@ -94,7 +101,7 @@ export function SettingsPage({ project, ws }: SettingsPageProps) {
     };
     ws.addEventListener('message', handler);
     return () => ws.removeEventListener('message', handler);
-  }, [ws, editingProvider]);
+  }, [ws, editingProvider, loaded, errored]);
 
   const handleSaveKey = useCallback((provider: string) => {
     if (!ws || !keyInput.trim()) return;
@@ -186,6 +193,8 @@ export function SettingsPage({ project, ws }: SettingsPageProps) {
         {activeTab === 'providers' && (
           <ProvidersTab
             providers={providers}
+            loading={providersLoading}
+            error={providersError}
             editingProvider={editingProvider}
             setEditingProvider={setEditingProvider}
             keyInput={keyInput}
@@ -271,6 +280,8 @@ function ProviderStatusDot({ active }: { active: boolean }) {
 
 interface ProvidersTabProps {
   providers: ProviderInfo[];
+  loading: boolean;
+  error: string | null;
   editingProvider: string | null;
   setEditingProvider: (name: string | null) => void;
   keyInput: string;
@@ -284,6 +295,8 @@ interface ProvidersTabProps {
 
 function ProvidersTab({
   providers,
+  loading,
+  error,
   editingProvider,
   setEditingProvider,
   keyInput,
@@ -294,6 +307,42 @@ function ProvidersTab({
   onSaveKey,
   onTestConnection,
 }: ProvidersTabProps) {
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <section aria-label="Loading providers">
+          <h3 style={sectionHeaderStyle}>CLI Tools</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <TileSkeleton />
+            <TileSkeleton />
+            <TileSkeleton />
+          </div>
+        </section>
+        <section aria-label="Loading API providers">
+          <h3 style={sectionHeaderStyle}>API Providers</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <TileSkeleton />
+            <TileSkeleton />
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{
+        padding: 24, background: 'var(--bg-elevated-2)',
+        border: '1px solid var(--color-error)', borderRadius: 'var(--radius-md)',
+        textAlign: 'center', color: 'var(--color-error)', fontSize: 13,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+      }}>
+        <AlertCircle size={24} style={{ color: 'var(--color-error)' }} />
+        <div>{error}</div>
+      </div>
+    );
+  }
+
   // Normalize: determine isAvailable from either new or old shape
   const normalize = (p: ProviderInfo) => ({
     ...p,
@@ -313,7 +362,7 @@ function ProvidersTab({
         textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13,
       }}>
         <Key size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
-        <div>No providers detected. Make sure the dashboard server is running.</div>
+        <div>No providers configured.</div>
       </div>
     );
   }

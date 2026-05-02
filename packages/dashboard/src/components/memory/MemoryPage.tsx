@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Brain, Search, Check, X, AlertCircle } from 'lucide-react';
+import { RowSkeleton, useLoadingState } from '../common/Skeleton.js';
 
 export interface MemoryPageProps {
   project: string | null;
@@ -69,6 +70,7 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'items' | 'proposals'>('items');
+  const { loading, loaded, errored: loadError, reset: resetLoading } = useLoadingState();
 
   const fetchMemories = useCallback(() => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -88,6 +90,7 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
         if (msg.type === 'memories' && msg.payload) {
           setPayload(msg.payload as MemoryPayload);
           setError(null);
+          loaded();
         }
         if (msg.type === 'memory-config' && msg.payload) {
           setConfig(msg.payload as MemoryConfig);
@@ -101,6 +104,9 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
              msg.payload.message.startsWith('Ratify failed') ||
              msg.payload.message.startsWith('Reject failed'))) {
           setError(msg.payload.message);
+          if (msg.payload.message.startsWith('Memory list failed')) {
+            loadError(msg.payload.message);
+          }
         }
       } catch { /* ignore */ }
     };
@@ -108,7 +114,14 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
     fetchMemories();
     fetchConfig();
     return () => ws.removeEventListener('message', handler);
-  }, [ws, project, fetchMemories, fetchConfig]);
+  }, [ws, project, fetchMemories, fetchConfig, loaded, loadError]);
+
+  // Re-show skeleton when the user changes project — fresh fetch is in flight
+  useEffect(() => {
+    resetLoading();
+    // resetLoading is stable inside useLoadingState, no need to depend on it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
 
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -254,7 +267,8 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
       {/* Items tab */}
       {tab === 'items' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {payload?.items.length === 0 && (
+          {loading && <RowSkeleton count={6} height={56} />}
+          {!loading && payload?.items.length === 0 && (
             <div style={{
               padding: 32, textAlign: 'center',
               background: 'var(--bg-elevated-2)',
@@ -265,7 +279,7 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
               No memories yet. Reflection runs at end of every pipeline by default (set <code style={{ fontFamily: 'var(--font-mono)' }}>ANVIL_REFLECTION=off</code> to disable).
             </div>
           )}
-          {payload?.items.map((m) => (
+          {!loading && payload?.items.map((m) => (
             <MemoryItemRow key={m.id} item={m} />
           ))}
         </div>
@@ -274,7 +288,8 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
       {/* Proposals tab */}
       {tab === 'proposals' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {payload?.proposals.length === 0 && (
+          {loading && <RowSkeleton count={4} height={64} />}
+          {!loading && payload?.proposals.length === 0 && (
             <div style={{
               padding: 32, textAlign: 'center',
               background: 'var(--bg-elevated-2)',
@@ -285,7 +300,7 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
               No pending proposals. Sleeptime consolidate runs every 30 minutes by default.
             </div>
           )}
-          {payload?.proposals.map((p) => (
+          {!loading && payload?.proposals.map((p) => (
             <ProposalRow key={p.id} proposal={p} onRatify={handleRatify} onReject={handleReject} />
           ))}
         </div>

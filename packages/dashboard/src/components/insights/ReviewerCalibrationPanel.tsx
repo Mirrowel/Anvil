@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { Activity, AlertCircle } from 'lucide-react';
+import { RowSkeleton } from '../common/Skeleton.js';
 
 interface PersonaRow {
   personaId: string;
@@ -71,8 +72,8 @@ export function ReviewerCalibrationPanel({
 
   if (loading) {
     return (
-      <div style={{ padding: 16, fontSize: 12, color: 'var(--text-tertiary)' }}>
-        Loading reviewer calibration…
+      <div style={{ padding: 16 }} aria-busy="true" aria-label="Loading reviewer calibration">
+        <RowSkeleton count={5} height={28} />
       </div>
     );
   }

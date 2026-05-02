@@ -1285,6 +1285,7 @@ function App() {
         return <RunHistoryList
           ws={wsRef.current}
           runs={runs}
+          loading={projectsLoading}
           initialSelectedId={historySelectedRunId}
           getRunStages={(runId: string) => {
             const run = runs.find((r) => r.id === runId);
