@@ -39,6 +39,7 @@ import { PausedBanner } from './components/pipeline/PausedBanner.js';
 import { PlanReviewModal } from './components/pipeline/PlanReviewModal.js';
 import { usePausedRuns } from './components/pipeline/usePausedRuns.js';
 import { CostBreachHistoryPage } from './components/cost-breaches/CostBreachHistoryPage.js';
+import { MemoryPage } from './components/memory/MemoryPage.js';
 
 // ---------------------------------------------------------------------------
 // Raw content cleaner — strips JSON, tool inputs, commands from Claude's text
@@ -1244,6 +1245,9 @@ function App() {
 
       case 'cost-breaches':
         return <CostBreachHistoryPage project={currentProject?.name ?? null} ws={wsRef.current} />;
+
+      case 'memory':
+        return <MemoryPage project={currentProject?.name ?? null} ws={wsRef.current} />;
 
       case 'pr-board':
         return (

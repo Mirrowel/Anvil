@@ -51,6 +51,7 @@ const iconMap: Record<string, React.ComponentType<{ size?: number; strokeWidth?:
   'triage': AlertTriangle,
   'plan': Map,
   'cost-breaches': DollarSign,
+  'memory': Brain,
   'settings': Settings,
 };
 

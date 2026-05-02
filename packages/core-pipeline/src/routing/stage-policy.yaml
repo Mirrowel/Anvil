@@ -99,3 +99,12 @@ stages:
     capability: reasoning
     complexity: L
     prefer: [premium]                     # PREMIUM-ONLY — feature planning
+
+  # ── Memory hygiene (Phase 4 / PR 4) ────────────────────────────────────
+  # End-of-run reflection extracts typed lessons (semantic / fix-pattern,
+  # approach, episodic, profile) from the run trace. Short, structured —
+  # local first; never pay premium for distillation.
+  reflection:
+    capability: reasoning
+    complexity: S
+    prefer: [local, cheap]                # FREE-TIER — distillation only

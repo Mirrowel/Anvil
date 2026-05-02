@@ -3931,6 +3931,59 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
         break;
       }
 
+      // ── Memory inspector (PR 4) — list / pin / delete / proposals ───
+      case 'list-memories': {
+        try {
+          const { MemoryInspector } = await import('@anvil/memory-core');
+          const inspector = new MemoryInspector(memoryStore.unwrap());
+          const project = msg.project ?? '';
+          const m = msg as unknown as { search?: string; kind?: string; limit?: number };
+          const filter = {
+            namespace: project ? { scope: 'project' as const, projectId: project } : undefined,
+            search: m.search,
+            kind: m.kind as undefined,
+            limit: m.limit,
+          };
+          const items = inspector.list(filter);
+          const stats = inspector.stats(filter.namespace);
+          const proposals = inspector.listProposals('pending', filter.namespace, 50);
+          ws.send(JSON.stringify({ type: 'memories', payload: { items, stats, proposals } }));
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          ws.send(JSON.stringify({ type: 'memories', payload: { items: [], stats: null, proposals: [] } }));
+          ws.send(JSON.stringify({ type: 'error', payload: { message: `Memory list failed: ${message}` } }));
+        }
+        break;
+      }
+
+      case 'ratify-proposal': {
+        try {
+          const { MemoryInspector } = await import('@anvil/memory-core');
+          const inspector = new MemoryInspector(memoryStore.unwrap());
+          const m = msg as unknown as { id: string };
+          const result = inspector.ratifyProposal(m.id);
+          ws.send(JSON.stringify({ type: 'proposal-ratified', payload: result }));
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          ws.send(JSON.stringify({ type: 'error', payload: { message: `Ratify failed: ${message}` } }));
+        }
+        break;
+      }
+
+      case 'reject-proposal': {
+        try {
+          const { MemoryInspector } = await import('@anvil/memory-core');
+          const inspector = new MemoryInspector(memoryStore.unwrap());
+          const m = msg as unknown as { id: string; reason?: string };
+          const ok = inspector.rejectProposal(m.id, m.reason ?? 'manual reject');
+          ws.send(JSON.stringify({ type: 'proposal-rejected', payload: { ok } }));
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          ws.send(JSON.stringify({ type: 'error', payload: { message: `Reject failed: ${message}` } }));
+        }
+        break;
+      }
+
       case 'generate-conventions': {
         const project = msg.project ?? '';
         if (!project) {
@@ -4783,14 +4836,16 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
       console.warn('[dashboard] Failed to update feature record:', err);
     }
 
-    // 4. Memory hygiene (PR 4): the previous post-run auto-savers
+    // 4. Memory hygiene (PR 4). The previous post-run auto-savers
     // (300-char clarification snippet + outcome bookkeeping line) were
     // pure noise — they preserved the question, not the answer, and
     // pushed real lessons off the 4KB cap. Replaced by:
-    //   - recordPrEpisode below for completed runs that produced a PR
-    //     (structured low-noise, auto-ratified per memory-core plan §12).
-    //   - reflectOnRun in a follow-up — needs a tuned reflection prompt
-    //     and a small-tier LLM invoker to extract real learnings.
+    //   a. recordPrEpisode for completed runs that produced a PR
+    //      (structured low-noise, auto-ratified per memory-core plan §12).
+    //   b. reflectOnRun for every completed/failed run (any flow).
+    //      Routes through stage-policy.yaml's `reflection` stage —
+    //      local → cheap. Distilled lessons land in the proposal queue;
+    //      sleeptime `consolidate` ratifies them.
     if (state.status === 'completed' && prUrls.length > 0) {
       try {
         const { recordPrEpisode } = await import('@anvil/memory-core');
@@ -4816,6 +4871,52 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
         }
       } catch (err) {
         console.warn('[dashboard] recordPrEpisode failed:', err);
+      }
+    }
+
+    // 4b. Reflect-on-run — extract typed lessons from the run trace.
+    // Gated behind ANVIL_REFLECTION env knob (default off) so the
+    // tuned prompt can iterate without firing on every run. Set
+    // ANVIL_REFLECTION=1 (or 'always') to enable; ANVIL_REFLECTION=on-success
+    // restricts to completed runs only.
+    const reflectionMode = process.env.ANVIL_REFLECTION ?? 'off';
+    const shouldReflect =
+      reflectionMode === '1' || reflectionMode === 'always' ||
+      (reflectionMode === 'on-success' && state.status === 'completed');
+    if (shouldReflect) {
+      try {
+        const { reflectOnRun, ProposalQueue } = await import('@anvil/memory-core');
+        const { createReflectionInvoker } = await import('./reflection-invoker.js');
+        const queue = new ProposalQueue(memoryStore.unwrap().sqlite);
+        const invoker = createReflectionInvoker({
+          agentManager,
+          project: state.project,
+          runId: state.runId,
+          cwd: getWorkspaceFromConfig(state.project) || join(ANVIL_HOME, 'workspaces', state.project),
+        });
+        const stageSummary = state.stages.map((s) =>
+          `- ${s.label} [${s.status}]${s.error ? `: ${s.error.slice(0, 200)}` : ''}`
+        ).join('\n');
+        const runSummary = [
+          `Project: ${state.project}`,
+          `Feature: ${state.feature}`,
+          `Outcome: ${state.status}`,
+          `Cost: $${(state.totalCost ?? 0).toFixed(2)}`,
+          `Repos: ${state.repoNames.join(', ') || '(none)'}`,
+          ``,
+          `Stages:`,
+          stageSummary,
+        ].join('\n');
+        const result = await reflectOnRun({
+          queue,
+          namespace: { scope: 'project', projectId: state.project },
+          runContext: { runId: state.runId, runSummary },
+          llmInvoke: invoker,
+        });
+        const totalProposals = result.proposalIds.length;
+        console.log(`[dashboard] reflection enqueued ${totalProposals} proposal(s) for run ${state.runId}`);
+      } catch (err) {
+        console.warn('[dashboard] reflectOnRun failed:', err);
       }
     }
   }
@@ -6903,6 +7004,39 @@ Findings array may be empty. No prose outside the JSON block.`;
 
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+  // Sleeptime memory consolidation. Walks pending proposals (from
+  // reflectOnRun) every N ms and ratifies them via memory-core's
+  // defaultDecide (hash-dedupe → MERGE-INTO else ADD). Cancellable.
+  // ANVIL_SLEEPTIME_INTERVAL_MS=0 disables; default 30 minutes.
+  const sleeptimeIntervalMs = (() => {
+    const raw = process.env.ANVIL_SLEEPTIME_INTERVAL_MS;
+    if (raw === undefined) return 30 * 60_000;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : 30 * 60_000;
+  })();
+  let sleeptimeTimer: NodeJS.Timeout | null = null;
+  if (sleeptimeIntervalMs > 0) {
+    const runSleeptime = async () => {
+      try {
+        const { consolidate, ProposalQueue } = await import('@anvil/memory-core');
+        const projects = await projectLoader.listProjects().catch(() => []);
+        const store = memoryStore.unwrap();
+        const queue = new ProposalQueue(store.sqlite);
+        let total = 0;
+        for (const sys of projects) {
+          const result = await consolidate(store, queue, { scope: 'project', projectId: sys.name });
+          total += result.ratified + result.merged;
+        }
+        if (total > 0) console.log(`[sleeptime] consolidated ${total} proposal(s) across ${projects.length} project(s)`);
+      } catch (err) {
+        console.warn('[sleeptime] consolidate failed:', err);
+      }
+    };
+    sleeptimeTimer = setInterval(runSleeptime, sleeptimeIntervalMs);
+    sleeptimeTimer.unref?.();
+    console.log(`[dashboard] sleeptime consolidation every ${Math.round(sleeptimeIntervalMs / 60_000)}m`);
+  }
 
   return new Promise(() => {
     server.listen(port, () => {

@@ -106,6 +106,20 @@ const CLAUDE_BIN = process.env.ANVIL_AGENT_CMD ?? process.env.FF_AGENT_CMD ?? pr
  * Check if the Claude CLI is authenticated.
  * Returns true if logged in, false otherwise.
  */
+/**
+ * Render a Memory.content value (object | string) for prompt injection.
+ * BM25 retrieval returns typed Memory<T> rows; pre-rewire we only ever
+ * stored strings, so the JSON path is the post-rewire shape.
+ */
+function formatContent(content: unknown): string {
+  if (typeof content === 'string') return content.slice(0, 280);
+  try {
+    return JSON.stringify(content).slice(0, 280);
+  } catch {
+    return '';
+  }
+}
+
 function checkClaudeAuth(): boolean {
   try {
     const out = execSync(`${CLAUDE_BIN} auth status --json`, { timeout: 10_000, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -837,20 +851,65 @@ export class PipelineRunner extends EventEmitter {
     return this.lockedKbTierResolved;
   }
 
-  /** Memoised memory block (project + user profile, capped at 4KB). */
+  /**
+   * Memoised memory block (project + user profile, capped at 4KB).
+   *
+   * Retrieval is BM25-keyed by the run's feature description against
+   * the SQLite hot index — top-K relevant entries instead of "newest
+   * 4KB blob." Falls back to the legacy newest-first formatter when
+   * BM25 returns nothing (cold project or stale index).
+   *
+   * `ANVIL_PROMPT_ENVELOPE_DISABLED=1` short-circuits to the legacy
+   * path (rollback hatch documented in the prompt-envelope plan).
+   */
   private getStableMemoryBlock(): string {
     if (this.envelopeDisabled) {
-      const projectMemory = this.memoryStore.formatForPrompt(this.config.project, 'memory');
-      const userProfile = this.memoryStore.formatForPrompt(this.config.project, 'user');
-      const raw = [projectMemory, userProfile].filter(Boolean).join('\n\n');
-      return raw.length > 4000 ? raw.slice(0, 4000) + '\n... [memory truncated]' : raw;
+      return this.formatLegacyMemoryBlock();
     }
     if (this.cachedMemoryBlock !== null) return this.cachedMemoryBlock;
+
+    try {
+      const store = this.memoryStore.unwrap();
+      const projectNs = { scope: 'project' as const, projectId: this.config.project };
+      const userNs = { scope: 'user' as const, projectId: this.config.project };
+      const queryText = this.config.feature || '';
+
+      // BM25 against the SQLite FTS5 hot index — top 8 project + top 5 user.
+      const projectHits = queryText
+        ? store.query(projectNs, { text: queryText, limit: 8 })
+        : store.query(projectNs, { limit: 8 });
+      const userHits = store.query(userNs, { limit: 5 });
+
+      const projectBlock = projectHits.length > 0
+        ? `## Recent project memories (BM25-ranked for "${queryText.slice(0, 60)}")\n` +
+          projectHits.map((m) => `- [${m.kind}${m.subtype ? `:${m.subtype}` : ''}] ${formatContent(m.content)}`).join('\n')
+        : '';
+      const userBlock = userHits.length > 0
+        ? `## User profile\n` +
+          userHits.map((m) => `- ${formatContent(m.content)}`).join('\n')
+        : '';
+
+      const combined = [projectBlock, userBlock].filter(Boolean).join('\n\n');
+      if (combined.length > 0) {
+        this.cachedMemoryBlock = combined.length > 4000
+          ? combined.slice(0, 4000) + '\n... [memory truncated]'
+          : combined;
+        return this.cachedMemoryBlock;
+      }
+    } catch (err) {
+      console.warn('[pipeline] BM25 memory retrieval failed, falling back to legacy:', err);
+    }
+
+    // Cold-start / error path — legacy newest-first formatter
+    this.cachedMemoryBlock = this.formatLegacyMemoryBlock();
+    return this.cachedMemoryBlock;
+  }
+
+  private formatLegacyMemoryBlock(): string {
     const projectMemory = this.memoryStore.formatForPrompt(this.config.project, 'memory');
     const userProfile = this.memoryStore.formatForPrompt(this.config.project, 'user');
     const raw = [projectMemory, userProfile].filter(Boolean).join('\n\n');
-    this.cachedMemoryBlock = raw.length > 4000 ? raw.slice(0, 4000) + '\n... [memory truncated]' : raw;
-    return this.cachedMemoryBlock;
+    return raw.length > 4000 ? raw.slice(0, 4000) + '\n... [memory truncated]' : raw;
   }
 
   /**

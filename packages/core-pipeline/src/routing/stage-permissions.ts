@@ -53,6 +53,9 @@ export const STAGE_TOOL_PERMISSIONS: Readonly<Record<string, readonly ToolClass[
   review:                 ['read'],
   research:               ['read'],
   plan:                   ['read'],
+  // Reflection: distillation only — no tools, no workspace access.
+  // Reads run trace from the prompt, emits JSON proposals.
+  reflection:             [],
 };
 
 /**
