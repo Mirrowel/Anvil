@@ -383,7 +383,7 @@ function ProvidersTab({
             <h3 style={{ ...sectionHeaderStyle, marginBottom: 0 }}>API Providers</h3>
             <span style={{
               padding: '1px 8px', fontSize: 9, fontWeight: 600,
-              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(59, 130, 246, 0.15))',
+              background: 'var(--accent-muted)',
               color: 'var(--accent)',
               borderRadius: 'var(--radius-full)',
               letterSpacing: '0.04em',

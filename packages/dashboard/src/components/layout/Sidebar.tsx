@@ -5,8 +5,8 @@ import {
   PanelLeftClose, PanelLeft, ChevronDown,
   GitCompareArrows, TestTube, Map, Settings,
   Shield, FileCode, AlertTriangle, DollarSign,
-  Anvil,
 } from 'lucide-react';
+import { AnvilLogo } from '../common/AnvilLogo.js';
 
 export interface NavItem {
   id: string;
@@ -189,8 +189,8 @@ export function Sidebar({ items, activeId, collapsed, onNavigate, onToggleCollap
           letterSpacing: '-0.02em',
           whiteSpace: 'nowrap',
         }}>
-          <Anvil size={18} strokeWidth={1.75} />
-          {!collapsed && 'Anvil'}
+          <AnvilLogo size={20} />
+          {!collapsed && 'ANVIL'}
         </span>
       </div>
 
