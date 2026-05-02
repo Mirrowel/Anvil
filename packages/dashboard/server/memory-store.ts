@@ -243,7 +243,11 @@ export class MemoryStore {
     return parsed;
   }
 
-  /** Format entries for prompt injection. */
+  /**
+   * @deprecated Newest-first slice formatter, kept only for the legacy WS
+   * context-preview handlers. Pipeline prompts now use BM25 retrieval via
+   * `PipelineRunner.getStableMemoryBlock`.
+   */
   formatForPrompt(project: string, target: MemoryTarget): string {
     this.migrateOnce(project);
     const memories = this.ordered(this.queryActive(project, target));

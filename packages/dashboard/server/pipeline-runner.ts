@@ -821,10 +821,6 @@ export class PipelineRunner extends EventEmitter {
   // resulting bytes are byte-identical across stages — that's what lets the
   // provider's prompt cache fire (Anthropic explicit, OpenAI auto, Gemini
   // auto). Reset is implicit: a new PipelineRunner instance gets fresh caches.
-  //
-  // Set ANVIL_PROMPT_ENVELOPE_DISABLED=1 to bypass these wins and fall back
-  // to per-stage recomputation (rollback hatch documented in the plan).
-  private envelopeDisabled = process.env.ANVIL_PROMPT_ENVELOPE_DISABLED === '1';
   private cachedMemoryBlock: string | null = null;
   private cachedConventionsBlock: string | null = null;
   private cachedProjectYamlSlice: Map<number, string> = new Map();
@@ -839,7 +835,6 @@ export class PipelineRunner extends EventEmitter {
    * index; ship doesn't need any KB).
    */
   private getLockedKbTier(stage: StageDefinition): 'full' | 'repo-focused' | 'index-only' | 'none' {
-    if (this.envelopeDisabled) return this.kbTierForStage(stage.persona, stage.name);
     if (stage.name === 'ship') return 'none';
     if (stage.name === 'clarify') return 'index-only';
     if (this.lockedKbTierResolved !== null) return this.lockedKbTierResolved;
@@ -855,26 +850,19 @@ export class PipelineRunner extends EventEmitter {
    * Memoised memory block (project + user profile, capped at 4KB).
    *
    * Retrieval is BM25-keyed by the run's feature description against
-   * the SQLite hot index — top-K relevant entries instead of "newest
-   * 4KB blob." Falls back to the legacy newest-first formatter when
-   * BM25 returns nothing (cold project or stale index).
-   *
-   * `ANVIL_PROMPT_ENVELOPE_DISABLED=1` short-circuits to the legacy
-   * path (rollback hatch documented in the prompt-envelope plan).
+   * the SQLite hot index — top-K relevant entries. An empty block is
+   * surfaced honestly when nothing relevant is found rather than
+   * falling back to "newest 4KB blob," which leaked stale unrelated
+   * notes into prompts.
    */
   private getStableMemoryBlock(): string {
-    if (this.envelopeDisabled) {
-      return this.formatLegacyMemoryBlock();
-    }
     if (this.cachedMemoryBlock !== null) return this.cachedMemoryBlock;
-
     try {
       const store = this.memoryStore.unwrap();
       const projectNs = { scope: 'project' as const, projectId: this.config.project };
       const userNs = { scope: 'user' as const, projectId: this.config.project };
       const queryText = this.config.feature || '';
 
-      // BM25 against the SQLite FTS5 hot index — top 8 project + top 5 user.
       const projectHits = queryText
         ? store.query(projectNs, { text: queryText, limit: 8 })
         : store.query(projectNs, { limit: 8 });
@@ -890,26 +878,14 @@ export class PipelineRunner extends EventEmitter {
         : '';
 
       const combined = [projectBlock, userBlock].filter(Boolean).join('\n\n');
-      if (combined.length > 0) {
-        this.cachedMemoryBlock = combined.length > 4000
-          ? combined.slice(0, 4000) + '\n... [memory truncated]'
-          : combined;
-        return this.cachedMemoryBlock;
-      }
+      this.cachedMemoryBlock = combined.length > 4000
+        ? combined.slice(0, 4000) + '\n... [memory truncated]'
+        : combined;
     } catch (err) {
-      console.warn('[pipeline] BM25 memory retrieval failed, falling back to legacy:', err);
+      console.warn('[pipeline] BM25 memory retrieval failed:', err);
+      this.cachedMemoryBlock = '';
     }
-
-    // Cold-start / error path — legacy newest-first formatter
-    this.cachedMemoryBlock = this.formatLegacyMemoryBlock();
     return this.cachedMemoryBlock;
-  }
-
-  private formatLegacyMemoryBlock(): string {
-    const projectMemory = this.memoryStore.formatForPrompt(this.config.project, 'memory');
-    const userProfile = this.memoryStore.formatForPrompt(this.config.project, 'user');
-    const raw = [projectMemory, userProfile].filter(Boolean).join('\n\n');
-    return raw.length > 4000 ? raw.slice(0, 4000) + '\n... [memory truncated]' : raw;
   }
 
   /**
@@ -976,9 +952,6 @@ export class PipelineRunner extends EventEmitter {
 
   /** Memoised project YAML slice — same maxLen returns same bytes. */
   private getStableProjectYamlSlice(maxLen: number): string {
-    if (this.envelopeDisabled) {
-      return this.projectYaml.slice(0, maxLen) || '(not available)';
-    }
     const cached = this.cachedProjectYamlSlice.get(maxLen);
     if (cached !== undefined) return cached;
     const value = this.projectYaml.slice(0, maxLen) || '(not available)';
@@ -997,16 +970,14 @@ export class PipelineRunner extends EventEmitter {
     if (tier === 'none') return { content: '', sourceLabel: 'none' };
     const key = `${tier}|${repoName ?? '__project__'}`;
 
-    if (!this.envelopeDisabled) {
-      const cached = this.cachedKbBlock.get(key);
-      if (cached !== undefined) {
-        // Recover the source label from the cached body. Encoded as a
-        // leading sentinel comment we strip on retrieval.
-        const label = (cached.match(/^<!-- anvil:kb-src:(\w[\w-]*) -->/) ?? [])[1] as
-          | 'repo-focused' | 'index-only' | 'full-with-index' | 'full-blob' | undefined;
-        const content = cached.replace(/^<!-- anvil:kb-src:[\w-]+ -->\n?/, '');
-        return { content, sourceLabel: label ?? 'none' };
-      }
+    const cached = this.cachedKbBlock.get(key);
+    if (cached !== undefined) {
+      // Recover the source label from the cached body. Encoded as a
+      // leading sentinel comment we strip on retrieval.
+      const label = (cached.match(/^<!-- anvil:kb-src:(\w[\w-]*) -->/) ?? [])[1] as
+        | 'repo-focused' | 'index-only' | 'full-with-index' | 'full-blob' | undefined;
+      const content = cached.replace(/^<!-- anvil:kb-src:[\w-]+ -->\n?/, '');
+      return { content, sourceLabel: label ?? 'none' };
     }
 
     let content = '';
@@ -1050,7 +1021,7 @@ export class PipelineRunner extends EventEmitter {
       }
     }
 
-    if (!this.envelopeDisabled && content) {
+    if (content) {
       this.cachedKbBlock.set(key, `<!-- anvil:kb-src:${sourceLabel} -->\n${content}`);
     }
     return { content, sourceLabel };
@@ -1497,28 +1468,6 @@ export class PipelineRunner extends EventEmitter {
       kbManager: this.kbManager,
       emit: (event, payload) => this.emit(event, payload),
     };
-  }
-
-  /**
-   * Pick how much KB context to inject for a given (persona, stage) pair (P2).
-   *
-   * - 'full'         — index + target repo + cross-repo + query context (design stages)
-   * - 'repo-focused' — just the target repo's graph report (coding/test stages)
-   * - 'index-only'   — just the cross-repo index (clarifier — needs the big picture
-   *                    but doesn't need to dig into any single repo's internals)
-   * - 'none'         — skip KB entirely (ship — git operations don't need it)
-   *
-   * Coding stages stay narrow on purpose: it shrinks the system prompt enough to
-   * matter for prompt caching, and the engineer/tester already have the
-   * authoritative source on disk plus a pre-bundled <files> block.
-   */
-  private kbTierForStage(persona: string, stageName: string): 'full' | 'repo-focused' | 'index-only' | 'none' {
-    if (stageName === 'ship') return 'none';
-    if (stageName === 'clarify') return 'index-only';
-    if (persona === 'engineer' || persona === 'tester' || persona === 'test-author') {
-      return 'repo-focused';
-    }
-    return 'full';
   }
 
   /** Persist pipeline state to disk for crash recovery */
