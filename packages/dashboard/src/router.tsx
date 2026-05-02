@@ -26,7 +26,7 @@ export const routes: RouteConfig[] = [
   { path: '/plan/compare', id: 'plan-compare', label: 'Compare plans' },
   { path: '/history', id: 'history', label: 'History', secondary: true },
   { path: '/insights', id: 'insights', label: 'Insights', secondary: true },
-  { path: '/cost-breaches', id: 'cost-breaches', label: 'Cost breaches', secondary: true },
+  { path: '/cost-breaches', id: 'cost-breaches', label: 'Cost breaches', secondary: true, comingSoon: true },
   { path: '/project', id: 'project', label: 'Project', secondary: true },
   { path: '/knowledge-graph', id: 'knowledge-graph', label: 'Knowledge Graph', secondary: true },
 

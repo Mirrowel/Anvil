@@ -285,7 +285,6 @@ export function HomePage({
   const [selectedModel, setSelectedModel] = useState('');
   const [modelTier, setModelTier] = useState<'fast' | 'balanced' | 'thorough' | null>(null);
   const [actionMode, setActionMode] = useState<ActionMode>('build');
-  const [budget, setBudget] = useState<{ used: number; limit: number } | null>(null);
   const [branches, setBranches] = useState<string[]>(['main']);
   const [baseBranch, setBaseBranch] = useState('main');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -297,18 +296,12 @@ export function HomePage({
     }
   }, [availableModels, selectedModel]);
 
-  // Fetch budget status and branches when project changes
+  // Fetch branches when project changes
   useEffect(() => {
     if (!ws || ws.readyState !== WebSocket.OPEN || !selectedProject) return;
     const handler = (evt: MessageEvent) => {
       try {
         const msg = JSON.parse(evt.data);
-        if (msg.type === 'budget-status' && msg.payload) {
-          const p = msg.payload;
-          if (p.maxPerDay || p.dailyLimit) {
-            setBudget({ used: p.todaySpent ?? p.dailyUsed ?? 0, limit: p.maxPerDay ?? p.dailyLimit ?? 200 });
-          }
-        }
         if (msg.type === 'branches' && msg.payload) {
           setBranches(msg.payload.branches || ['main']);
           setBaseBranch(msg.payload.default || 'main');
@@ -316,7 +309,6 @@ export function HomePage({
       } catch { /* ignore non-JSON */ }
     };
     ws.addEventListener('message', handler);
-    ws.send(JSON.stringify({ action: 'get-budget-status', project: selectedProject }));
     ws.send(JSON.stringify({ action: 'get-branches', project: selectedProject }));
     return () => ws.removeEventListener('message', handler);
   }, [ws, selectedProject]);
@@ -477,12 +469,7 @@ repos:
     language: go
   - name: frontend
     path: ./frontend
-    language: typescript
-
-budget:
-  max_per_run: 100
-  max_per_day: 200
-  alert_at: 80`}
+    language: typescript`}
           </pre>
         </div>
       </div>
@@ -709,36 +696,6 @@ budget:
             <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
               Go to <strong>Settings</strong> to add it.
             </span>
-          </div>
-        </div>
-      )}
-
-      {/* Budget indicator */}
-      {budget && (
-        <div style={{ width: '100%', marginBottom: 16 }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: 4,
-          }}>
-            <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
-              Today: ${budget.used.toFixed(2)} / ${budget.limit.toFixed(2)}
-            </span>
-          </div>
-          <div style={{
-            height: 3,
-            background: 'var(--bg-elevated-3)',
-            borderRadius: 'var(--radius-full)',
-            overflow: 'hidden',
-          }}>
-            <div style={{
-              height: '100%',
-              width: `${Math.min((budget.used / budget.limit) * 100, 100)}%`,
-              background: budget.used / budget.limit > 0.9 ? 'var(--color-error)' : budget.used / budget.limit > 0.7 ? 'var(--color-warning)' : 'var(--accent)',
-              borderRadius: 'var(--radius-full)',
-              transition: 'width var(--duration-slow) ease-out',
-            }} />
           </div>
         </div>
       )}
