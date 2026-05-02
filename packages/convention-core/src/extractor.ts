@@ -1,8 +1,8 @@
 // Convention extractor — Section D.7
 
 import { join } from 'node:path';
-import { mkdirSync, existsSync, writeFileSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { getFFDirs } from '../home.js';
+import { mkdirSync, existsSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
+import type { ConventionPaths } from './paths.js';
 import { detectFileNaming } from './detectors/file-naming.js';
 import { detectImportPatterns } from './detectors/import-patterns.js';
 import { detectTestPatterns } from './detectors/test-patterns.js';
@@ -48,8 +48,13 @@ function safeReadFile(path: string): string {
 /**
  * Extract conventions from a project's repos.
  * Orchestrates all detectors, aggregates, formats, writes output.
+ *
+ * Caller-supplied `paths.conventionsDir` is the canonical root
+ * (`~/.anvil/conventions`); the markdown lands at
+ * `<conventionsDir>/<project>/conventions.md`.
  */
 export function extractConventions(
+  paths: ConventionPaths,
   project: string,
   repoPaths: string[],
 ): string {
@@ -93,8 +98,7 @@ export function extractConventions(
   const markdown = formatConventions(aggregated);
 
   // Write to conventions dir
-  const dirs = getFFDirs();
-  const conventionsDir = join(dirs.conventions, project);
+  const conventionsDir = join(paths.conventionsDir, project);
   if (!existsSync(conventionsDir)) {
     mkdirSync(conventionsDir, { recursive: true });
   }

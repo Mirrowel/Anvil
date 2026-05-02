@@ -99,6 +99,7 @@ export interface PromptBuilderContext {
 
   // ── Cache getters (memoised at run scope by caller) ───────────────────
   getStableMemoryBlock: () => string;
+  getStableConventionsBlock: () => string;
   getStableProjectYamlSlice: (maxLen: number) => string;
   getStableKbBlock: (tier: KbTier, repoName?: string) => { content: string; sourceLabel: string };
   getStableManifestBlock: () => string;
@@ -286,7 +287,7 @@ export function buildProjectPrompt(
     const injected = injectTemplateVars(personaPrompt, {
       project_yaml: budgeted.projectYaml,
       task: `Feature: "${ctx.feature}"\nProject: ${ctx.project}\nRepositories: ${repoList}`,
-      conventions: '',
+      conventions: ctx.getStableConventionsBlock(),
       memories: budgeted.memory,
       knowledge_graph: budgeted.knowledgeBase,
       repo_context: `Project: ${ctx.project}\nRepositories: ${repoList}\nWorkspace: ${ctx.workspaceDir}`,
@@ -382,7 +383,7 @@ export function buildRepoProjectPrompt(
     const injected = injectTemplateVars(personaPrompt, {
       project_yaml: ctx.getStableProjectYamlSlice(4000),
       task: `Feature: "${ctx.feature}"\nProject: ${ctx.project}\nTarget repository: ${repoName}`,
-      conventions: '',
+      conventions: ctx.getStableConventionsBlock(),
       memories: memoryBlock,
       knowledge_graph: knowledgeGraph,
       repo_context: repoContext,

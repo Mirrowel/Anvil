@@ -2,7 +2,7 @@
 
 import { join } from 'node:path';
 import { readJSONL, appendJSONL } from '@anvil/memory-core/legacy/index.js';
-import { getFFDirs } from '../../home.js';
+import type { ConventionPaths } from '../paths.js';
 
 export interface ViolationRecord {
   error: string;
@@ -26,15 +26,14 @@ export function normalizeError(error: string): string {
     .toLowerCase();
 }
 
-function getViolationsPath(): string {
-  const dirs = getFFDirs();
-  return join(dirs.conventionRules, 'violations.jsonl');
+function getViolationsPath(paths: ConventionPaths): string {
+  return join(paths.rulesDir, 'violations.jsonl');
 }
 
 /**
  * Track a violation (error + fix pair).
  */
-export function trackViolation(error: string, fix: string, project: string): void {
+export function trackViolation(paths: ConventionPaths, error: string, fix: string, project: string): void {
   const record: ViolationRecord = {
     error,
     normalizedError: normalizeError(error),
@@ -42,21 +41,21 @@ export function trackViolation(error: string, fix: string, project: string): voi
     project,
     timestamp: new Date().toISOString(),
   };
-  appendJSONL(getViolationsPath(), record);
+  appendJSONL(getViolationsPath(paths), record);
 }
 
 /**
  * Get the count of a specific normalized error.
  */
-export function getViolationCount(error: string): number {
+export function getViolationCount(paths: ConventionPaths, error: string): number {
   const normalized = normalizeError(error);
-  const records = readJSONL<ViolationRecord>(getViolationsPath());
+  const records = readJSONL<ViolationRecord>(getViolationsPath(paths));
   return records.filter((r) => r.normalizedError === normalized).length;
 }
 
 /**
  * Get all violation records.
  */
-export function getViolations(): ViolationRecord[] {
-  return readJSONL<ViolationRecord>(getViolationsPath());
+export function getViolations(paths: ConventionPaths): ViolationRecord[] {
+  return readJSONL<ViolationRecord>(getViolationsPath(paths));
 }

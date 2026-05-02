@@ -3,15 +3,17 @@
 
 import { checkAndPromote } from './index.js';
 import type { PromotionResult } from './index.js';
+import type { ConventionPaths } from '../paths.js';
 
 /**
  * Hook called when a fix pattern is recorded.
  * Checks if the error has occurred enough times to be promoted to a rule.
  */
 export function onFixPatternRecorded(
+  paths: ConventionPaths,
   error: string,
   fix: string,
   project: string,
 ): PromotionResult {
-  return checkAndPromote(error, fix, project);
+  return checkAndPromote(paths, error, fix, project);
 }

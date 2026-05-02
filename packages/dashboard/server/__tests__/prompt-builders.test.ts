@@ -31,6 +31,7 @@ interface CtxOverrides {
   kbTier?: KbTier | 'none';
   manifestBlock?: string;
   memoryBlock?: string;
+  conventionsBlock?: string;
   hlReqs?: string;
   repoArtifacts?: { requirements: string; specs: string; tasks: string; build: string };
   failureContext?: string;
@@ -60,6 +61,7 @@ function makeCtx(overrides: CtxOverrides = {}): PromptBuilderContext {
       : null,
     repoPaths: { api: '/tmp/api', web: '/tmp/web' },
     getStableMemoryBlock: () => overrides.memoryBlock ?? '',
+    getStableConventionsBlock: () => overrides.conventionsBlock ?? '',
     getStableProjectYamlSlice: (n) => (overrides.projectYaml ?? 'project: demo').slice(0, n),
     getStableKbBlock: () => overrides.kb ?? { content: '', sourceLabel: 'none' },
     getStableManifestBlock: () => overrides.manifestBlock ?? '',

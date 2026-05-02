@@ -3,6 +3,7 @@
 import { trackViolation, getViolationCount } from './violation-tracker.js';
 import { generateRule } from './rule-generator.js';
 import type { ConventionRule } from '../rules/types.js';
+import type { ConventionPaths } from '../paths.js';
 
 export { trackViolation, getViolationCount, normalizeError, getViolations } from './violation-tracker.js';
 export type { ViolationRecord } from './violation-tracker.js';
@@ -22,12 +23,13 @@ export interface PromotionResult {
  * Tracks the violation and promotes at count >= 3.
  */
 export function checkAndPromote(
+  paths: ConventionPaths,
   error: string,
   fix: string,
   project: string,
 ): PromotionResult {
-  trackViolation(error, fix, project);
-  const count = getViolationCount(error);
+  trackViolation(paths, error, fix, project);
+  const count = getViolationCount(paths, error);
 
   if (count >= PROMOTION_THRESHOLD) {
     const rule = generateRule(error, fix, project);

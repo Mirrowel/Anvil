@@ -181,7 +181,7 @@ export function buildProjectPrompt(ctx, stage) {
         const injected = injectTemplateVars(personaPrompt, {
             project_yaml: budgeted.projectYaml,
             task: `Feature: "${ctx.feature}"\nProject: ${ctx.project}\nRepositories: ${repoList}`,
-            conventions: '',
+            conventions: ctx.getStableConventionsBlock(),
             memories: budgeted.memory,
             knowledge_graph: budgeted.knowledgeBase,
             repo_context: `Project: ${ctx.project}\nRepositories: ${repoList}\nWorkspace: ${ctx.workspaceDir}`,
@@ -263,7 +263,7 @@ export function buildRepoProjectPrompt(ctx, stage, repoName) {
         const injected = injectTemplateVars(personaPrompt, {
             project_yaml: ctx.getStableProjectYamlSlice(4000),
             task: `Feature: "${ctx.feature}"\nProject: ${ctx.project}\nTarget repository: ${repoName}`,
-            conventions: '',
+            conventions: ctx.getStableConventionsBlock(),
             memories: memoryBlock,
             knowledge_graph: knowledgeGraph,
             repo_context: repoContext,

@@ -128,7 +128,7 @@ import {
 import { discoverProviders, invalidateProviderCache } from './provider-registry.js';
 import { setDiscoveryResult } from './model-tier-resolver.js';
 import { autoLearn } from './pipeline-learner.js';
-import { generateConventions, saveConventionRules, loadConventionRules } from './convention-generator.js';
+import { extractConventions, loadRules } from '@anvil/convention-core';
 import {
   InMemoryEventBus,
   attachAuditLogHook,
@@ -148,6 +148,10 @@ import {
 // ── Paths ───────────────────────────────────────────────────────────────
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const ANVIL_HOME = process.env.ANVIL_HOME || process.env.FF_HOME || join(homedir(), '.anvil');
+const CONVENTION_PATHS = {
+  conventionsDir: join(ANVIL_HOME, 'conventions'),
+  rulesDir: join(ANVIL_HOME, 'conventions', 'rules'),
+};
 const SYSTEMS_DIR = join(ANVIL_HOME, 'projects');
 const RUNS_DIR = join(ANVIL_HOME, 'runs');
 const RUNS_INDEX = join(RUNS_DIR, 'index.jsonl');
@@ -3922,7 +3926,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
 
       case 'get-conventions': {
         try {
-          const rules = loadConventionRules(ANVIL_HOME, msg.project ?? '');
+          const rules = loadRules(CONVENTION_PATHS, msg.project ?? '');
           ws.send(JSON.stringify({ type: 'conventions', payload: { rules } }));
         } catch {
           ws.send(JSON.stringify({ type: 'conventions', payload: { rules: [] } }));
@@ -3942,16 +3946,19 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
           // Resolve workspace path
           const workspace = getWorkspaceFromConfig(project) || join(ANVIL_HOME, 'workspaces', project);
 
-          // Get repo names from project config
+          // Get repo paths from project config
           const projectConfig = projectLoader.getConfig(project);
-          const repoNames = projectConfig?.repos?.map((r: any) => r.name || r.path) ?? [];
+          const repoPaths = (projectConfig?.repos ?? []).map((r: { name?: string; path?: string }) => {
+            const rel = r.path ?? r.name ?? '';
+            return rel.startsWith('/') ? rel : join(workspace, rel);
+          });
 
-          // Generate conventions by scanning the workspace
-          const rules = generateConventions(workspace, repoNames);
+          // Generate conventions markdown — writes to <conventionsDir>/<project>/conventions.md
+          extractConventions(CONVENTION_PATHS, project, repoPaths);
 
-          // Persist to disk
-          saveConventionRules(ANVIL_HOME, project, rules);
-          console.log(`[dashboard] Generated ${rules.length} convention rules for "${project}"`);
+          // Re-read structured rules so the dashboard can show them
+          const rules = loadRules(CONVENTION_PATHS, project);
+          console.log(`[dashboard] Convention extraction complete for "${project}" (${rules.length} rules)`);
 
           ws.send(JSON.stringify({ type: 'conventions', payload: { rules } }));
         } catch (err: unknown) {
@@ -4850,8 +4857,12 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
       updatedAt: f.updatedAt,
     }));
 
-    // Conventions — empty for now, populated by ff learn
-    const conventions: string[] = [];
+    // Conventions — load from convention-core's rules.json; empty when
+    // the project has not been learned yet.
+    let conventions: string[] = [];
+    try {
+      conventions = loadRules(CONVENTION_PATHS, projectName).map((r) => r.description || r.name);
+    } catch { /* */ }
 
     // Knowledge base status
     let kbStatus: KBProjectStatus | null = null;
@@ -6596,8 +6607,8 @@ Findings array may be empty. No prose outside the JSON block.`;
     // project conventions (e.g. arguing for semicolons when the project doesn't use them).
     try {
       const { applyConventionFilter } = await import('./review-convention-filter.js');
-      const fingerprint = loadConventionRules(ANVIL_HOME, ctx.project);
-      if (fingerprint) {
+      const fingerprint = loadRules(CONVENTION_PATHS, ctx.project);
+      if (fingerprint && fingerprint.length > 0) {
         const report = applyConventionFilter(filteredFindings, fingerprint);
         const keptIds = new Set((report.kept as Array<{ id?: string }>).map((f) => f.id));
         const demotedIds = new Set((report.demoted as Array<{ id?: string }>).map((f) => f.id));

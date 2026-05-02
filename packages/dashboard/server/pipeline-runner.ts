@@ -16,6 +16,10 @@ import { homedir } from 'node:os';
 import { execSync, spawn as cpSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { AgentManager } from '@anvil/agent-core';
+import {
+  extractConventions as coreExtractConventions,
+  loadConventions as coreLoadConventions,
+} from '@anvil/convention-core';
 import { ProjectLoader } from './project-loader.js';
 import type { ProjectInfo } from './project-loader.js';
 import { FeatureStore } from './feature-store.js';
@@ -808,6 +812,7 @@ export class PipelineRunner extends EventEmitter {
   // to per-stage recomputation (rollback hatch documented in the plan).
   private envelopeDisabled = process.env.ANVIL_PROMPT_ENVELOPE_DISABLED === '1';
   private cachedMemoryBlock: string | null = null;
+  private cachedConventionsBlock: string | null = null;
   private cachedProjectYamlSlice: Map<number, string> = new Map();
   private cachedKbBlock: Map<string, string> = new Map();
   private lockedKbTierResolved: 'full' | 'repo-focused' | 'index-only' | null = null;
@@ -846,6 +851,68 @@ export class PipelineRunner extends EventEmitter {
     const raw = [projectMemory, userProfile].filter(Boolean).join('\n\n');
     this.cachedMemoryBlock = raw.length > 4000 ? raw.slice(0, 4000) + '\n... [memory truncated]' : raw;
     return this.cachedMemoryBlock;
+  }
+
+  /**
+   * Memoised conventions block. Loads `<conventionsDir>/global.md` and
+   * `<conventionsDir>/<project>/conventions.md` once per run via
+   * @anvil/convention-core. Returns empty string on error or when the
+   * project has no conventions extracted yet — auto-warm runs at pipeline
+   * start to populate the file before clarify.
+   */
+  private getStableConventionsBlock(): string {
+    if (this.cachedConventionsBlock !== null) return this.cachedConventionsBlock;
+    try {
+      // Synchronous read via require-style — convention-core's loadConventions
+      // is async (matches the cli loader's fs/promises shape) so we handle
+      // both. Since pipeline-runner pre-populates this cache via warmConventions
+      // before stages fire, the synchronous fallback below should rarely run.
+      const md = this.conventionsMarkdownSync ?? '';
+      this.cachedConventionsBlock = md.length > 8000 ? md.slice(0, 8000) + '\n... [conventions truncated]' : md;
+    } catch {
+      this.cachedConventionsBlock = '';
+    }
+    return this.cachedConventionsBlock;
+  }
+
+  private conventionsMarkdownSync: string | null = null;
+
+  /**
+   * Warm the conventions cache before stage 1. If `<conventionsDir>/<project>/conventions.md`
+   * is missing, extract it from the workspace; then load + cache the markdown.
+   * Non-fatal — empty block is fine if extraction fails.
+   */
+  private async warmConventions(): Promise<void> {
+    const anvilHome = process.env.ANVIL_HOME ?? process.env.FF_HOME ?? join(homedir(), '.anvil');
+    const paths = {
+      conventionsDir: join(anvilHome, 'conventions'),
+      rulesDir: join(anvilHome, 'conventions', 'rules'),
+    };
+    const projectMd = join(paths.conventionsDir, this.config.project, 'conventions.md');
+
+    if (!existsSync(projectMd)) {
+      // Auto-warm — extract once. Workspace may not exist yet for fresh
+      // projects; fail silently in that case.
+      try {
+        const repoPaths = Object.values(this.repoPaths);
+        if (repoPaths.length > 0 && repoPaths.every((p) => existsSync(p))) {
+          this.emit('project-event', {
+            source: 'conventions',
+            message: `Extracting conventions for "${this.config.project}" (first run)`,
+          });
+          coreExtractConventions(paths, this.config.project, repoPaths);
+        }
+      } catch (err) {
+        console.warn('[pipeline] convention extract failed:', err);
+      }
+    }
+
+    try {
+      const md = await coreLoadConventions(paths, this.config.project);
+      this.conventionsMarkdownSync = md;
+    } catch {
+      this.conventionsMarkdownSync = '';
+    }
   }
 
   /** Memoised project YAML slice — same maxLen returns same bytes. */
@@ -1361,6 +1428,7 @@ export class PipelineRunner extends EventEmitter {
       projectInfo: this.projectInfo,
       repoPaths: this.repoPaths,
       getStableMemoryBlock: () => this.getStableMemoryBlock(),
+      getStableConventionsBlock: () => this.getStableConventionsBlock(),
       getStableProjectYamlSlice: (n) => this.getStableProjectYamlSlice(n),
       getStableKbBlock: (tier, repoName) => this.getStableKbBlock(tier, repoName),
       getStableManifestBlock: () => this.getStableManifestBlock(),
@@ -1517,6 +1585,13 @@ export class PipelineRunner extends EventEmitter {
       // if any probe fails, the cache stays cold for that provider and
       // the walker treats it as alive (status quo).
       await this.prefetchProviderLiveness().catch(() => undefined);
+
+      // Pre-warm conventions block — extracts on first run if missing,
+      // then loads the markdown into the run-scoped cache so every
+      // stage prompt's {{conventions}} slot is populated identically.
+      await this.warmConventions().catch((err: unknown) => {
+        console.warn('[pipeline] convention warm failed:', err);
+      });
 
       // Create or resume feature record
       const isResume = this.config.resumeFromStage != null && this.config.featureSlug;

@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "@anvil/agent-core": "*",
+    "@anvil/convention-core": "*",
     "@anvil/core-pipeline": "*",
     "@anvil/knowledge-core": "*",
     "@anvil/memory-core": "*",

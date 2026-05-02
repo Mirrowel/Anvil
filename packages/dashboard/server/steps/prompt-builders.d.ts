@@ -74,6 +74,7 @@ export interface PromptBuilderContext {
     projectInfo: ProjectInfo | null;
     repoPaths: Record<string, string>;
     getStableMemoryBlock: () => string;
+    getStableConventionsBlock: () => string;
     getStableProjectYamlSlice: (maxLen: number) => string;
     getStableKbBlock: (tier: KbTier, repoName?: string) => {
         content: string;
