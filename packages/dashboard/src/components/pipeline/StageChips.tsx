@@ -23,7 +23,7 @@ export interface StageChipsProps {
 const stageDisplayNames: Record<string, string> = {
   clarify: 'Understanding',
   requirements: 'Requirements',
-  'project-requirements': 'Architecture',
+  'repo-requirements': 'Architecture',
   specs: 'Specification',
   tasks: 'Task Planning',
   build: 'Implementation',

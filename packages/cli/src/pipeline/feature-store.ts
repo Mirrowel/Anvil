@@ -14,8 +14,8 @@ import { join } from 'node:path';
 export interface PriorArtifacts {
   clarification?: string;
   highLevelRequirements?: string;
-  /** Per-repo project-requirements artifact, keyed by repo name. */
-  projectRequirements: Map<string, string>;
+  /** Per-repo requirements artifact (from the `repo-requirements` stage), keyed by repo name. */
+  repoRequirements: Map<string, string>;
   /** Per-repo specs artifact, keyed by repo name. */
   projectSpecs: Map<string, string>;
   /** Per-repo tasks artifact, keyed by repo name. */
@@ -38,7 +38,7 @@ export function loadPriorArtifacts(
   const featureDir = join(anvilHome(), 'features', project, featureSlug);
 
   const result: PriorArtifacts = {
-    projectRequirements: new Map(),
+    repoRequirements: new Map(),
     projectSpecs: new Map(),
     projectTasks: new Map(),
   };
@@ -57,7 +57,7 @@ export function loadPriorArtifacts(
 
   for (const repoName of repoNames) {
     const reqs = readArtifact(`repos/${repoName}/REQUIREMENTS.md`);
-    if (reqs) result.projectRequirements.set(repoName, reqs);
+    if (reqs) result.repoRequirements.set(repoName, reqs);
     const specs = readArtifact(`repos/${repoName}/SPECS.md`);
     if (specs) result.projectSpecs.set(repoName, specs);
     const tasks = readArtifact(`repos/${repoName}/TASKS.md`);

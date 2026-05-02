@@ -40,32 +40,13 @@ import { emitContent, emitResult, emitToolResult, emitToolUse } from './stream-f
 const DEFAULT_MAX_ITERATIONS = 32;
 
 /**
- * Thrown when an upstream HTTP call fails. Carries the status code so
- * the dashboard pipeline-runner can decide whether to retry / escalate
- * the chain (429 quota, 503 outage) vs surface to the user (400 bad
- * request, 401 auth).
+ * Re-export the shared `UpstreamError` so existing imports
+ * (`import { UpstreamError } from '@anvil/agent-core/openrouter-adapter'`)
+ * keep working. The class itself lives in `upstream-error.ts` and is
+ * shared by every adapter that talks to a remote provider.
  */
-export class UpstreamError extends Error {
-  readonly status: number;
-  readonly body: string;
-  /** True when the error class warrants chain-fallback (insufficient
-   *  quota, rate limited, upstream outage). 4xx auth / bad-request
-   *  errors are NOT retryable — they need a config fix. */
-  readonly retryable: boolean;
-  constructor(status: number, body: string) {
-    super(`OpenRouter API ${status}: ${body}`);
-    this.name = 'UpstreamError';
-    this.status = status;
-    this.body = body;
-    this.retryable =
-      status === 429 ||                    // rate limited / quota
-      status === 502 ||                    // bad gateway
-      status === 503 ||                    // service unavailable
-      status === 504 ||                    // gateway timeout
-      status === 0 ||                      // empty body / network
-      /insufficient_quota|rate.?limit/i.test(body);
-  }
-}
+export { UpstreamError } from './upstream-error.js';
+import { UpstreamError as _UpstreamError } from './upstream-error.js';
 
 // ───────────────────────────────────────────────────────────────────────
 // Pricing fallbacks for well-known OpenRouter slugs. OpenRouter itself
@@ -428,9 +409,9 @@ export class OpenRouterAdapter implements ModelAdapter {
 
     if (!response.ok) {
       const errBody = await response.text();
-      throw new UpstreamError(response.status, errBody);
+      throw new _UpstreamError(response.status, errBody, { provider: this.provider });
     }
-    if (!response.body) throw new UpstreamError(0, 'OpenRouter API returned no response body');
+    if (!response.body) throw new _UpstreamError(0, `${this.provider} returned no response body`, { provider: this.provider });
 
     return this.consumeSSE(response, output);
   }

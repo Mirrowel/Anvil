@@ -1,11 +1,21 @@
 /**
- * Loads stage-policy.yaml — the per-stage routing requirement map. The
- * yaml file ships with the cli package; consumers can override via
- * ANVIL_STAGE_POLICY (full path) or by placing a file at
- * <workspaceRoot>/.anvil/stage-policy.yaml.
+ * Loads stage-policy.yaml — the per-stage routing requirement map.
+ *
+ * Resolution order (first match wins) — mirrors `models.yaml` so end
+ * users have a single mental model for "where does my customisation
+ * live":
+ *
+ *   1. process.env.ANVIL_STAGE_POLICY (full path)
+ *   2. <workspaceRoot>/.anvil/stage-policy.yaml         — per-workspace
+ *   3. ${ANVIL_HOME or $HOME/.anvil}/stage-policy.yaml  — per-user
+ *   4. Bundled default shipped with @anvil/core-pipeline
+ *
+ * Step 3 is the canonical home for end-user routing customisation —
+ * the same directory that already holds `models.yaml`.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -46,20 +56,32 @@ const TIERS: readonly ModelTier[] = ['local', 'cheap', 'premium'];
 export interface LoadStagePolicyOptions {
   workspaceRoot?: string;
   env?: NodeJS.ProcessEnv;
+  /** Override $HOME — used by tests that want a clean filesystem. */
+  homeDir?: string;
 }
 
 /** Returns the path of the canonical stage-policy.yaml. */
 export function findStagePolicyPath(opts: LoadStagePolicyOptions = {}): string {
   const env = opts.env ?? process.env;
 
+  // 1. Explicit env override.
   if (env.ANVIL_STAGE_POLICY) return env.ANVIL_STAGE_POLICY;
 
+  // 2. Per-workspace override.
   if (opts.workspaceRoot) {
     const ws = join(opts.workspaceRoot, '.anvil', 'stage-policy.yaml');
     if (existsSync(ws)) return ws;
   }
 
-  // Bundled default: shipped alongside this module after build (the
+  // 3. Per-user override at ~/.anvil/stage-policy.yaml — canonical home
+  // for end-user routing customisation, mirrors how models.yaml is
+  // resolved.
+  const home = opts.homeDir ?? homedir();
+  const anvilHome = env.ANVIL_HOME ?? join(home, '.anvil');
+  const userOverride = join(anvilHome, 'stage-policy.yaml');
+  if (existsSync(userOverride)) return userOverride;
+
+  // 4. Bundled default: shipped alongside this module after build (the
   // core-pipeline build copies src/routing/*.yaml into dist/routing/).
   // Fall back to the source path during local dev.
   const here = dirname(fileURLToPath(import.meta.url));

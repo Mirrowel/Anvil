@@ -54,6 +54,11 @@ export function resolveProvider(modelId: string): ProviderName {
   // OpenRouter's slug format. Must come BEFORE the generic slash-check.
   if (id.startsWith('opencode/')) return 'opencode';
 
+  // Google ADK: explicit `adk:<model>` prefix (e.g. `adk:claude-sonnet-4-6`,
+  // `adk:gemini-2.5-flash`). The adapter strips the prefix before
+  // handing the bare model id to ADK's LLMRegistry.
+  if (id.startsWith('adk:')) return 'adk';
+
   // OpenRouter uses `org/model` format
   if (id.includes('/')) {
     return 'openrouter';

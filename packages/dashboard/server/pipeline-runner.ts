@@ -29,8 +29,9 @@ import {
   allowedToolsForStage,
   permissionClassesForStage,
 } from '@anvil/core-pipeline';
-import { pickAliveModelFromChainSync, prefetchLiveness } from './provider-liveness.js';
-import type { ProviderName } from '@anvil/agent-core';
+import { pickAliveModelFromChainSync, prefetchLiveness, setLivenessTtlMs } from './provider-liveness.js';
+import { loadModelRegistry, DEFAULT_WALKER_CONFIG } from '@anvil/agent-core';
+import type { ModelRegistry, ProviderName, WalkerConfig } from '@anvil/agent-core';
 import { parseTasks, bundleFiles } from './engineer-task-bundler.js';
 import type { ParsedTask } from './engineer-task-bundler.js';
 import { sliceSpecForRefs } from './engineer-spec-slicer.js';
@@ -523,6 +524,13 @@ export class PipelineRunner extends EventEmitter {
    * out of capacity. Reset only by starting a new run.
    */
   private runtimeBurnedModels = new Set<string>();
+  /**
+   * Walker tunables loaded from `~/.anvil/models.yaml`'s top-level
+   * `walker:` block (with compiled-in defaults for missing keys). Cached
+   * once at run start by `prefetchProviderLiveness` so chain-walking +
+   * retry policy don't re-read the yaml on every stage entry.
+   */
+  private walkerConfig: WalkerConfig = { ...DEFAULT_WALKER_CONFIG };
   private memoryStore: MemoryStore;
   private kbManager: KnowledgeBaseManager | null;
   private afterStageHook: AfterStageHook | null = null;
@@ -1232,7 +1240,26 @@ export class PipelineRunner extends EventEmitter {
    * in parallel; failures are non-fatal.
    */
   protected async prefetchProviderLiveness(): Promise<void> {
-    await prefetchLiveness(['ollama', 'claude', 'openai', 'openrouter', 'gemini', 'gemini-cli']);
+    // Load the walker block from ~/.anvil/models.yaml + apply its TTL
+    // override before any cache writes happen. Failures are non-fatal —
+    // if the registry can't be read we keep the compiled-in defaults.
+    let registry: ModelRegistry | null = null;
+    try {
+      registry = loadModelRegistry();
+      this.walkerConfig = registry.walker;
+      setLivenessTtlMs(this.walkerConfig.liveness_ttl_ms);
+    } catch (err) {
+      console.warn(`[pipeline] walker: registry load failed, using defaults: ${(err as Error).message}`);
+      this.walkerConfig = { ...DEFAULT_WALKER_CONFIG };
+    }
+
+    // Auto-derive the prefetch list from registry providers. Falls back
+    // to the canonical superset when the registry is empty so probes
+    // still light up for clean installs.
+    const providers = registry && registry.models.length > 0
+      ? Array.from(new Set(registry.models.map((m) => m.provider)))
+      : ['ollama', 'claude', 'openai', 'openrouter', 'gemini', 'gemini-cli', 'opencode', 'adk'] as ProviderName[];
+    await prefetchLiveness(providers);
   }
 
   /**
@@ -1251,7 +1278,10 @@ export class PipelineRunner extends EventEmitter {
     stageName: string,
     attempt: (model: string) => Promise<T>,
   ): Promise<T> {
-    const MAX_ATTEMPTS = 5;
+    // Read from the walker block in models.yaml (cached at run start by
+    // prefetchProviderLiveness). Falls back to compiled-in default when
+    // the registry didn't load cleanly.
+    const MAX_ATTEMPTS = this.walkerConfig.max_attempts;
     let lastErr: unknown;
     for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
       const model = this.resolveModelForStage(stageName);

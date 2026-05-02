@@ -193,7 +193,7 @@ export async function runPipeline(
     clarificationArtifact: prior?.clarification ?? '',
     highLevelReqsArtifact: prior?.highLevelRequirements ?? '',
     affectedProjects: [],
-    projectReqsMap: prior?.projectRequirements ?? new Map(),
+    repoReqsMap: prior?.repoRequirements ?? new Map(),
     projectSpecsMap: prior?.projectSpecs ?? new Map(),
     projectTasksMap: prior?.projectTasks ?? new Map(),
     validationArtifact: '',
@@ -357,7 +357,7 @@ export async function runPipeline(
 // ---------------------------------------------------------------------------
 
 const STAGE_STEP_IDS: ReadonlyArray<string> = [
-  'clarify', 'requirements', 'project-requirements', 'specs',
+  'clarify', 'requirements', 'repo-requirements', 'specs',
   'tasks', 'build', 'validate', 'ship',
 ];
 

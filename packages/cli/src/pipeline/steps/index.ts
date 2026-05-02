@@ -16,9 +16,9 @@ import {
   HIGH_LEVEL_REQUIREMENTS_ARTIFACT_ID,
 } from './high-level-requirements.step.js';
 import {
-  createProjectRequirementsStep,
-  PROJECT_REQUIREMENTS_STEP_ID,
-} from './project-requirements.step.js';
+  createRepoRequirementsStep,
+  REPO_REQUIREMENTS_STEP_ID,
+} from './repo-requirements.step.js';
 import { createProjectSpecsStep, PROJECT_SPECS_STEP_ID } from './project-specs.step.js';
 import { createProjectTasksStep, PROJECT_TASKS_STEP_ID } from './project-tasks.step.js';
 import { createBuildStep, BUILD_STEP_ID } from './build.step.js';
@@ -39,8 +39,8 @@ export {
   createHighLevelRequirementsStep,
   HIGH_LEVEL_REQUIREMENTS_STEP_ID,
   HIGH_LEVEL_REQUIREMENTS_ARTIFACT_ID,
-  createProjectRequirementsStep,
-  PROJECT_REQUIREMENTS_STEP_ID,
+  createRepoRequirementsStep,
+  REPO_REQUIREMENTS_STEP_ID,
   createProjectSpecsStep,
   PROJECT_SPECS_STEP_ID,
   createProjectTasksStep,
@@ -66,7 +66,7 @@ export function buildDefaultPipelineRegistry(): StepRegistry {
   const registry = new InMemoryStepRegistry();
   registry.register(createClarifyStep());
   registry.register(createHighLevelRequirementsStep());
-  registry.register(createProjectRequirementsStep());
+  registry.register(createRepoRequirementsStep());
   registry.register(createProjectSpecsStep());
   registry.register(createProjectTasksStep());
   registry.register(createBuildStep());

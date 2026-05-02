@@ -16,6 +16,7 @@ import type {
   ProviderName,
 } from './types.js';
 import type { ResultMessage } from './stream-format.js';
+import { UpstreamError, synthesizeStatusFromCli } from './upstream-error.js';
 
 // ---------------------------------------------------------------------------
 // Pricing table — [inputPer1M, outputPer1M]
@@ -149,8 +150,18 @@ export class ClaudeAdapter implements ModelAdapter {
     // End stdin immediately — prompt is passed via args
     child.stdin!.end();
 
-    // Forward stderr to process.stderr
-    child.stderr!.pipe(process.stderr);
+    // Forward stderr to process.stderr while ALSO buffering it so we
+    // can scan for retryable upstream conditions (rate-limit, quota,
+    // overload) on a non-zero exit. Capped to 16 KB to avoid blowing
+    // memory on a chatty failure.
+    let stderrBuf = '';
+    const STDERR_CAP = 16 * 1024;
+    child.stderr!.on('data', (chunk: Buffer) => {
+      process.stderr.write(chunk);
+      if (stderrBuf.length < STDERR_CAP) {
+        stderrBuf += chunk.toString('utf8').slice(0, STDERR_CAP - stderrBuf.length);
+      }
+    });
 
     // ---- Pipe stdout & capture result in parallel -------------------------
     let resultMsg: ResultMessage | null = null;
@@ -199,7 +210,19 @@ export class ClaudeAdapter implements ModelAdapter {
     const durationMs = Date.now() - startTime;
 
     if (exitCode !== 0 && !resultMsg) {
-      throw new Error(`Claude CLI exited with code ${exitCode}`);
+      // Try to classify the failure from stderr so the dashboard's
+      // chain-fallback can hop to another provider on a quota/rate-limit
+      // hit instead of dying. Anthropic's CLI surfaces these as
+      // "rate_limit_error", "overloaded_error", "Credit balance is too
+      // low", or HTTP-style status numbers in the stderr body.
+      const synth = synthesizeStatusFromCli(stderrBuf);
+      if (synth) {
+        throw new UpstreamError(synth.status, stderrBuf || `Claude CLI exited with code ${exitCode}`, {
+          provider: 'claude',
+          retryable: synth.retryable,
+        });
+      }
+      throw new Error(`Claude CLI exited with code ${exitCode}${stderrBuf ? `\n${stderrBuf.slice(0, 400)}` : ''}`);
     }
 
     // ---- Build result -----------------------------------------------------

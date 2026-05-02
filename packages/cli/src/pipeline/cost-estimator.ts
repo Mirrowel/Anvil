@@ -83,7 +83,7 @@ export function getModelPricing(model: string): [number, number] {
 const STAGE_TOKEN_ESTIMATES: Record<string, [number, number, boolean]> = {
   'clarify':              [2000, 1000, false],
   'requirements':         [5000, 3000, false],
-  'project-requirements':  [4000, 2500, true],
+  'repo-requirements':    [4000, 2500, true],
   'specs':                [6000, 4000, true],
   'tasks':                [4000, 2500, true],
   'build':                [10000, 8000, true],

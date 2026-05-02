@@ -17,7 +17,7 @@
 #
 # Routing intent (user vision):
 #   - ANALYSIS deeply by premium → tasks come out detailed.
-#     (requirements, project-requirements, specs, tasks, plan, review)
+#     (requirements, repo-requirements, specs, tasks, plan, review)
 #   - DOING by local where the model is good enough.
 #     (clarify, build, validate, ship, fix, fix-loop, research)
 #   - RESEARCH stays FREE — never escalate read-only investigation
@@ -35,10 +35,10 @@ stages:
     complexity: L                         # L (was M) — force premium-quality analysis
     prefer: [premium]                     # PREMIUM-ONLY — deep analysis → detailed tasks
 
-  project-requirements:
+  repo-requirements:
     capability: reasoning
-    complexity: L                         # L (was M) — same rationale
-    prefer: [premium]                     # PREMIUM-ONLY
+    complexity: L                         # L (was M) — premium-quality analysis
+    prefer: [premium]                     # PREMIUM-ONLY — per-repo decomposition
 
   specs:
     capability: reasoning
@@ -54,6 +54,15 @@ stages:
     capability: code
     complexity: M
     prefer: [local, cheap, premium]       # implementation — local first (qwen3:14b)
+
+  # Test-spec authoring stage (dashboard only — cli has no test stage).
+  # Generates test files; doesn't execute them (validate runs the suite).
+  # Code capability + M complexity — writing meaningful tests needs more
+  # judgment than a plain mechanical fix would.
+  test:
+    capability: code
+    complexity: M
+    prefer: [local, cheap, premium]
 
   validate:
     capability: code

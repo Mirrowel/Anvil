@@ -15,6 +15,7 @@ import {
   loadModelRegistry,
   parseModelRegistry,
   findModelsConfigPath,
+  DEFAULT_WALKER_CONFIG,
   ModelRegistryParseError,
   ModelRegistryValidationError,
 } from '../router/model-registry.js';
@@ -71,9 +72,10 @@ describe('parseModelRegistry — happy path', () => {
   });
 
   it('returns empty registry for null/undefined/empty top level', () => {
-    assert.deepEqual(parseModelRegistry(null), { models: [] });
-    assert.deepEqual(parseModelRegistry(undefined), { models: [] });
-    assert.deepEqual(parseModelRegistry({}), { models: [] });
+    const empty = { models: [], walker: { ...DEFAULT_WALKER_CONFIG } };
+    assert.deepEqual(parseModelRegistry(null), empty);
+    assert.deepEqual(parseModelRegistry(undefined), empty);
+    assert.deepEqual(parseModelRegistry({}), empty);
   });
 });
 
@@ -421,5 +423,80 @@ describe('loadModelRegistry — filesystem', () => {
       homeDir: '/nope',
     });
     assert.equal(path, undefined);
+  });
+});
+
+describe('parseModelRegistry — walker block', () => {
+  it('omits walker → defaults applied', () => {
+    const reg = parseModelRegistry({ models: [] });
+    assert.deepEqual(reg.walker, DEFAULT_WALKER_CONFIG);
+  });
+
+  it('partial walker → unspecified keys default-filled', () => {
+    const reg = parseModelRegistry({ models: [], walker: { liveness_ttl_ms: 60_000 } });
+    assert.equal(reg.walker.liveness_ttl_ms, 60_000);
+    assert.equal(reg.walker.max_attempts, DEFAULT_WALKER_CONFIG.max_attempts);
+  });
+
+  it('full walker → all keys honored', () => {
+    const reg = parseModelRegistry({
+      models: [],
+      walker: { liveness_ttl_ms: 5_000, max_attempts: 3 },
+    });
+    assert.equal(reg.walker.liveness_ttl_ms, 5_000);
+    assert.equal(reg.walker.max_attempts, 3);
+  });
+
+  it('walker.liveness_ttl_ms = 0 is allowed (disables caching)', () => {
+    const reg = parseModelRegistry({ models: [], walker: { liveness_ttl_ms: 0 } });
+    assert.equal(reg.walker.liveness_ttl_ms, 0);
+  });
+
+  it('rejects negative liveness_ttl_ms', () => {
+    assert.throws(
+      () => parseModelRegistry({ models: [], walker: { liveness_ttl_ms: -1 } }),
+      ModelRegistryValidationError,
+    );
+  });
+
+  it('rejects max_attempts < 1', () => {
+    assert.throws(
+      () => parseModelRegistry({ models: [], walker: { max_attempts: 0 } }),
+      ModelRegistryValidationError,
+    );
+  });
+
+  it('rejects non-integer max_attempts', () => {
+    assert.throws(
+      () => parseModelRegistry({ models: [], walker: { max_attempts: 2.5 } }),
+      ModelRegistryValidationError,
+    );
+  });
+
+  it('rejects unknown walker keys (typo guard)', () => {
+    assert.throws(
+      () => parseModelRegistry({ models: [], walker: { livenessTTL: 30_000 } }),
+      /unknown key.*Supported/,
+    );
+    assert.throws(
+      () => parseModelRegistry({ models: [], walker: { maxRetries: 5 } }),
+      /unknown key.*Supported/,
+    );
+  });
+
+  it('rejects non-object walker', () => {
+    assert.throws(
+      () => parseModelRegistry({ models: [], walker: 'bad' }),
+      ModelRegistryValidationError,
+    );
+    assert.throws(
+      () => parseModelRegistry({ models: [], walker: [] }),
+      ModelRegistryValidationError,
+    );
+  });
+
+  it('empty registry (no file) returns walker with defaults', () => {
+    const reg = parseModelRegistry(undefined);
+    assert.deepEqual(reg.walker, DEFAULT_WALKER_CONFIG);
   });
 });

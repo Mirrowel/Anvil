@@ -121,6 +121,118 @@ Other ids fall back to `unknown`.
 
 The original "≤300 LOC façade" target requires `Pipeline.run()` checkpoint/resume support that doesn't exist in `core-pipeline` yet — see ADR §6 row 4f.7 for the full discussion.
 
+### Per-stage tool permissions threading
+
+Every `spawnAndWait` site in `pipeline-runner.ts` threads
+`allowedTools: this.allowedToolsForCurrentStage(stageName)` into the
+spawn spec, which `LanguageModelBridge` uses to construct a
+properly-scoped `BuiltinToolExecutor`. The mapping comes from
+`@anvil/core-pipeline`'s `allowedToolsForStage` /
+`permissionClassesForStage`. Without this thread-through, non-Claude
+agentic adapters (Ollama / OpenRouter / OpenCode) silently lose
+file-edit / bash capability — the symptom is build stages that "run"
+but produce no diff. All five spawn sites (clarify, generic per-repo,
+per-repo build, single-stage, fix-loop) now pass `allowedTools`
+explicitly.
+
+### Chain-fallback on retryable upstream errors
+
+`runStageWithFallback<T>(stageName, attemptFn)` (max 5 attempts) wraps
+each spawn site. When the inner attempt throws an `UpstreamError`-shape
+(duck-typed: `name === 'UpstreamError' && retryable === true`), the
+runner adds the failed model to `runtimeBurnedModels` and re-resolves
+the stage's chain via `pickAliveModelFromChainSync(...,
+excludeModels=runtimeBurnedModels)`. The 429/quota burst on Alibaba
+upstream for `qwen3.5-plus` (an OpenCode → upstream provider quota
+issue, not the user's) is the canonical case this guards against.
+
+### Per-repo stage atomicity
+
+When a per-repo step fans out across N repos and any one repo fails,
+the stage halts (`if (failedRepos.length > 0) throw ...`). The earlier
+behavior — only halting when ALL repos failed — let pipelines silently
+advance with a half-written codebase. The repos that did succeed keep
+their work; subsequent stages see the failure and don't run.
+
+### PR URL extraction from `tool_result`
+
+When a build / ship step runs `gh pr create`, the URL appears in the
+agent's `tool_result` content, not in a top-level text block. The
+bridge's `handleUserBlocks` now emits a `kind:'text'` activity for
+each `tool_result` (capped at 4 KB) so the dashboard's
+`extractPRUrls(content)` scanner can pick it up. PR URLs end up in the
+run's `prUrls: Set<string>` and surface in the run-history detail
+view as soon as `gh pr create` returns.
+
+### Tool-naming convention in the Changes panel
+
+The Changes panel filter uses `Set` dispatch to accept both Claude-CLI
+PascalCase (`Edit`, `Write`, `file_path`) and `BuiltinToolExecutor`
+snake_case (`edit`, `write_file`, `path`):
+
+```ts
+const editTools  = new Set(['Edit', 'edit']);
+const writeTools = new Set(['Write', 'write_file']);
+const filePath   = input.file_path ?? input.path;
+```
+
+Without this, file changes from non-Claude adapters never reach the
+panel because the filter only matched the PascalCase shape.
+
+---
+
+## Provider matrix (dashboard Settings UI)
+
+`server/provider-registry.ts` declares each provider's display name,
+env-var key, and curated model list. Visibility is toggled by the
+presence of the env var; setup hints route the user to the right
+console.
+
+| Provider           | Env var                                 | Tier     | Notes |
+|---|---|---|---|
+| Claude (CLI)       | —                                       | agentic  | Detected via `claude --version`. Default. |
+| OpenAI             | `OPENAI_API_KEY`                        | function-calling | GPT-4 / GPT-4o / o1 family |
+| Gemini             | `GOOGLE_API_KEY` / `GEMINI_API_KEY`     | function-calling | HTTP API path |
+| Gemini CLI         | —                                       | agentic  | Detected via `gemini --version` |
+| OpenRouter         | `OPENROUTER_API_KEY`                    | agentic  | Slug ids `org/model`; SSE streaming |
+| Ollama             | —                                       | agentic  | Probes `localhost:11434`; embeddings + reranker |
+| **OpenCode Go**    | **`OPENCODE_API_KEY`**                  | agentic  | Replaces Ollama as cheap local-tier when subscribed; ids prefixed `opencode/` |
+
+OpenCode Go (https://opencode.ai/zen) is a $10/month subscription that
+hosts the open coding models (Qwen3.5/3.6, Kimi K2.5/K2.6, GLM-5/5.1,
+DeepSeek V4, MiMo, MiniMax) behind an OpenAI-compatible HTTPS proxy.
+From the dashboard it's just another agentic provider — same SSE
+format, same tool-call protocol, same `BuiltinToolExecutor` injection.
+Inherits the OpenRouter adapter's reasoning-mode `reasoning_details`
+echo-back so thinking-class models don't 400.
+
+### `ALLOWED_ENV_KEYS` (the WS env-write contract)
+
+The dashboard's `set-env-var` WS handler only writes keys present in
+`ALLOWED_ENV_KEYS` (`server/dashboard-server.ts`). Recently added:
+
+- `OPENCODE_API_KEY`, `OPENCODE_BASE_URL`
+- `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`,
+  `OTEL_RESOURCE_ATTRIBUTES`
+- `ANVIL_OTEL_CONSOLE`, `ANVIL_OTEL_DISABLED`,
+  `ANVIL_OTEL_RECORD_CONTENT`, `ANVIL_ENV`
+
+The `test-auth` handler has a dedicated branch for `opencode` that
+issues `GET /v1/models` with the Bearer token to validate the key.
+
+---
+
+## OTel auto-detection
+
+On startup the dashboard probes `localhost:4318/v1/traces` (HEAD
+request, ~500 ms). If the OTLP collector is up and the user hasn't
+explicitly set `OTEL_EXPORTER_OTLP_ENDPOINT`, the dashboard wires it
+automatically so the local Grafana / Tempo / Prometheus stack at
+`infra/observability/` picks up traces with zero config.
+
+`ANVIL_OTEL_DISABLED=1` short-circuits the probe;
+`ANVIL_OTEL_CONSOLE=1` dumps spans to stderr instead of OTLP.
+
 ---
 
 ## See also

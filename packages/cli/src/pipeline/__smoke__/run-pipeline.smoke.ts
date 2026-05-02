@@ -141,7 +141,7 @@ async function main(): Promise<void> {
     clarificationArtifact: '',
     highLevelReqsArtifact: '',
     affectedProjects: [],
-    projectReqsMap: new Map(),
+    repoReqsMap: new Map(),
     projectSpecsMap: new Map(),
     projectTasksMap: new Map(),
     validationArtifact: '',
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
     steps: () => fullRegistry.steps().filter((s) => s.id !== 'build' && s.id !== 'ship'),
   };
 
-  console.error('▶ Running smoke test (6 stages: clarify, requirements, project-requirements, specs, tasks, validate)...\n');
+  console.error('▶ Running smoke test (6 stages: clarify, requirements, repo-requirements, specs, tasks, validate)...\n');
 
   const pipeline = new Pipeline({
     registry: filteredRegistry,
@@ -201,7 +201,7 @@ async function main(): Promise<void> {
   // Assertions
   const errors: string[] = [];
   if (result.status !== 'success') errors.push(`status was '${result.status}', expected 'success'`);
-  const expectedSteps = ['clarify', 'requirements', 'project-requirements', 'specs', 'tasks', 'validate'];
+  const expectedSteps = ['clarify', 'requirements', 'repo-requirements', 'specs', 'tasks', 'validate'];
   for (const s of expectedSteps) {
     if (!stepCompleted.includes(s)) errors.push(`step '${s}' did not complete`);
   }

@@ -34,6 +34,7 @@ import type {
 } from './types.js';
 import { emitContent, emitResult, emitToolResult, emitToolUse } from './stream-format.js';
 import { LocalExecutor, localExecutor } from './router/local-executor.js';
+import { UpstreamError } from './upstream-error.js';
 
 const DEFAULT_MAX_ITERATIONS = 32;
 const DEFAULT_CONTEXT_WINDOW = 16_384;
@@ -332,9 +333,9 @@ export class OllamaAdapter implements ModelAdapter {
 
     if (!response.ok) {
       const errBody = await response.text();
-      throw new Error(`Ollama API ${response.status}: ${errBody}`);
+      throw new UpstreamError(response.status, errBody, { provider: 'ollama' });
     }
-    if (!response.body) throw new Error('Ollama API returned no response body');
+    if (!response.body) throw new UpstreamError(0, 'Ollama API returned no response body', { provider: 'ollama' });
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

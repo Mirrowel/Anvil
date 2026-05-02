@@ -12,6 +12,7 @@ import type {
   ProviderCapabilities,
 } from './types.js';
 import { emitContent, emitThinking, emitResult } from './stream-format.js';
+import { UpstreamError } from './upstream-error.js';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -123,11 +124,11 @@ export class GeminiAdapter implements ModelAdapter {
 
     if (!response.ok) {
       const errBody = await response.text();
-      throw new Error(`Gemini API ${response.status}: ${errBody}`);
+      throw new UpstreamError(response.status, errBody, { provider: 'gemini' });
     }
 
     if (!response.body) {
-      throw new Error('Gemini API returned no response body');
+      throw new UpstreamError(0, 'Gemini API returned no response body', { provider: 'gemini' });
     }
 
     // Read the SSE stream

@@ -1,271 +1,92 @@
 /**
- * OpenAI HTTP API adapter.
+ * OpenAI HTTP API adapter — agentic, inherits the OpenAI-compatible
+ * SSE loop from `OpenRouterAdapter`.
  *
- * Uses native fetch() (Node 18+) — no npm dependencies required.
- * Streams SSE responses and emits Anvil Stream Format NDJSON.
+ * OpenRouter / OpenCode Go / OpenAI all speak the same `/v1/chat/completions`
+ * protocol. We use OpenRouter as the canonical implementation (SSE
+ * `tool_calls` reassembly by `index`, `reasoning` + `reasoning_details`
+ * echo-back for o-series / thinking models, `UpstreamError` with
+ * retryable classification, per-call `AbortController` set, buffered
+ * emitContent). This adapter just overrides the config knobs:
+ *
+ *   - `provider` flips to `'openai'`
+ *   - API key reads from `OPENAI_API_KEY`
+ *   - Base URL defaults to `https://api.openai.com/v1` (override with
+ *     `OPENAI_BASE_URL` for proxies / Azure-OpenAI / etc.)
+ *   - Drops OpenRouter's attribution headers (`HTTP-Referer`, `X-Title`)
+ *   - Pricing fallback table maps the bare OpenAI ids
+ *
+ * Capability tier flips from `'function-calling'` → `'agentic'` because
+ * the inherited SSE consumer drives a real `BuiltinToolExecutor` loop.
+ * o1 / o3 / o4 reasoning models work out-of-the-box — the parent
+ * captures `delta.reasoning` / `delta.reasoning_details` and replays
+ * them on the next assistant turn (same protocol upstream uses).
  */
 
-import type {
-  ModelAdapter,
-  ModelAdapterConfig,
-  ModelAdapterResult,
-  ProviderCapabilities,
-  ProviderName,
-} from './types.js';
-import { emitContent, emitResult } from './stream-format.js';
+import type { ProviderName } from './types.js';
+import { OpenRouterAdapter } from './openrouter-adapter.js';
 
-// ---------------------------------------------------------------------------
-// Pricing table: [inputPer1MTokens, outputPer1MTokens]
-// ---------------------------------------------------------------------------
-
-const PRICING: Record<string, [number, number]> = {
-  'gpt-4o':        [2.5, 10.0],
-  'gpt-4o-mini':   [0.15, 0.6],
-  'gpt-4-turbo':   [10.0, 30.0],
-  'o1':            [15.0, 60.0],
-  'o3':            [10.0, 40.0],
-  'o3-mini':       [1.1, 4.4],
-  'o4-mini':       [1.1, 4.4],
+/**
+ * Pricing fallbacks for known bare OpenAI ids.
+ * `[inputPer1MTokens, outputPer1MTokens]`. The chat-completions response
+ * doesn't echo `usage.cost`, so the inherited base class falls back to
+ * this table when computing per-call cost.
+ */
+const OPENAI_PRICING: Record<string, [number, number]> = {
+  // Current generation
+  'gpt-4o':                 [2.5, 10.0],
+  'gpt-4o-mini':            [0.15, 0.60],
+  'gpt-4-turbo':            [10.0, 30.0],
+  'gpt-4':                  [30.0, 60.0],
+  'chatgpt-4o-latest':      [5.0, 15.0],
+  // o-series reasoning models
+  'o1':                     [15.0, 60.0],
+  'o1-mini':                [3.0, 12.0],
+  'o1-preview':             [15.0, 60.0],
+  'o3':                     [10.0, 40.0],
+  'o3-mini':                [1.1, 4.4],
+  'o4-mini':                [1.1, 4.4],
 };
 
-// ---------------------------------------------------------------------------
-// Adapter
-// ---------------------------------------------------------------------------
+export class OpenAIAdapter extends OpenRouterAdapter {
+  override readonly provider: ProviderName = 'openai';
 
-export class OpenAIAdapter implements ModelAdapter {
-  readonly provider: ProviderName = 'openai';
+  // -- Configuration overrides ----------------------------------------------
 
-  readonly capabilities: ProviderCapabilities = {
-    tier: 'function-calling',
-    streaming: true,
-    toolUse: true,
-    fileSystem: false,
-    shellExecution: false,
-    sessionResume: false,
-    promptCaching: true,
-    cache: 'auto',
-    cacheTtlSeconds: 600,
-    structuredOutput: 'strict',
-    maxOutputTokens: true,
-  };
-
-  /** Active AbortController — allows kill() to cancel an in-flight request. */
-  protected abortController: AbortController | null = null;
-
-  // -- Configuration helpers (overridden by subclasses) ---------------------
-
-  protected getApiKey(): string | undefined {
+  protected override getApiKey(): string | undefined {
     return process.env.OPENAI_API_KEY;
   }
 
-  protected getBaseUrl(): string {
-    return process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
+  protected override getBaseUrl(): string {
+    // Default to api.openai.com. `OPENAI_BASE_URL` overrides for proxies,
+    // Azure-OpenAI, or self-hosted OpenAI-compatible endpoints (vLLM,
+    // LocalAI, etc.).
+    return (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/+$/, '');
   }
 
-  protected getExtraHeaders(): Record<string, string> {
+  protected override getExtraHeaders(): Record<string, string> {
+    // OpenAI's API doesn't use the OpenRouter attribution headers.
     return {};
   }
 
-  // -- Interface implementation ---------------------------------------------
+  // -- Model id handling ----------------------------------------------------
 
-  supportsModel(modelId: string): boolean {
-    return /^(gpt-|o1|o3|o4|chatgpt-)/.test(modelId);
+  override supportsModel(modelId: string): boolean {
+    // Match bare OpenAI ids — `gpt-*`, `chatgpt-*`, and the o-series.
+    // OpenRouter slugs (`openai/gpt-4o`) deliberately fall through to
+    // OpenRouterAdapter via the slash-routing in default-adapter-factory.
+    return /^(gpt-|chatgpt-|o[134](-|$))/.test(modelId);
   }
 
-  getModelPricing(modelId: string): [number, number] | null {
-    return PRICING[modelId] ?? null;
+  override getModelPricing(modelId: string): [number, number] | null {
+    return OPENAI_PRICING[modelId] ?? null;
   }
 
-  async checkAvailability(): Promise<{ available: boolean; version?: string; error?: string }> {
+  // -- Availability ---------------------------------------------------------
+
+  override async checkAvailability(): Promise<{ available: boolean; version?: string; error?: string }> {
     const key = this.getApiKey();
-    if (!key) {
-      return { available: false, error: `${this.provider.toUpperCase()}_API_KEY is not set` };
-    }
+    if (!key) return { available: false, error: 'OPENAI_API_KEY is not set' };
     return { available: true };
-  }
-
-  async run(config: ModelAdapterConfig, output: NodeJS.WritableStream): Promise<ModelAdapterResult> {
-    const apiKey = this.getApiKey();
-    if (!apiKey) {
-      throw new Error(`${this.provider.toUpperCase()}_API_KEY is not set`);
-    }
-
-    const startMs = Date.now();
-    this.abortController = new AbortController();
-
-    // Apply timeout if configured
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    if (config.timeout && config.timeout > 0) {
-      timeoutId = setTimeout(() => this.abortController?.abort(), config.timeout);
-    }
-
-    try {
-      const body = this.buildRequestBody(config);
-      const url = `${this.getBaseUrl()}/chat/completions`;
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-          ...this.getExtraHeaders(),
-        },
-        body: JSON.stringify(body),
-        signal: this.abortController.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`OpenAI API error ${response.status}: ${errorText}`);
-      }
-
-      // Parse the SSE stream
-      const {
-        fullText,
-        inputTokens,
-        outputTokens,
-        cacheReadTokens,
-        reasoningTokens,
-        finishReason,
-      } = await this.consumeSSE(response, output);
-
-      const durationMs = Date.now() - startMs;
-      const pricing = this.getModelPricing(config.model);
-      const costUsd = pricing
-        ? (inputTokens / 1_000_000) * pricing[0] + (outputTokens / 1_000_000) * pricing[1]
-        : 0;
-
-      emitResult(output, {
-        text: fullText,
-        costUsd,
-        inputTokens,
-        outputTokens,
-        durationMs,
-      });
-
-      // OpenAI / OpenRouter / Gemini-API report 'length' when the max-tokens
-      // ceiling was hit. Normalize to the provider-agnostic 'max_tokens' so
-      // downstream truncation telemetry is uniform.
-      const stopReason = finishReason === 'length' ? 'max_tokens' : finishReason;
-
-      return {
-        output: fullText,
-        inputTokens,
-        outputTokens,
-        costUsd,
-        durationMs,
-        provider: this.provider,
-        model: config.model,
-        cacheReadTokens,
-        reasoningTokens,
-        stopReason,
-      };
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-      this.abortController = null;
-    }
-  }
-
-  kill(): void {
-    this.abortController?.abort();
-  }
-
-  // -- Internal helpers -----------------------------------------------------
-
-  protected buildRequestBody(config: ModelAdapterConfig): Record<string, unknown> {
-    const messages: Array<{ role: string; content: string }> = [];
-
-    if (config.projectPrompt) {
-      messages.push({ role: 'project', content: config.projectPrompt });
-    }
-    messages.push({ role: 'user', content: config.userPrompt });
-
-    const body: Record<string, unknown> = {
-      model: config.model,
-      messages,
-      stream: true,
-      stream_options: { include_usage: true },
-    };
-    if (typeof config.maxOutputTokens === 'number' && config.maxOutputTokens > 0) {
-      body.max_tokens = config.maxOutputTokens;
-    }
-    return body;
-  }
-
-  protected async consumeSSE(
-    response: Response,
-    output: NodeJS.WritableStream,
-  ): Promise<{
-    fullText: string;
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    reasoningTokens: number;
-    finishReason: string | undefined;
-  }> {
-    let fullText = '';
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let cacheReadTokens = 0;
-    let reasoningTokens = 0;
-    let finishReason: string | undefined;
-
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('Response body is not readable');
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // Process complete lines
-      const lines = buffer.split('\n');
-      // Keep the last (possibly incomplete) line in the buffer
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) continue; // empty or SSE comment
-
-        if (!trimmed.startsWith('data: ')) continue;
-        const payload = trimmed.slice(6); // strip "data: "
-
-        if (payload === '[DONE]') continue;
-
-        try {
-          const chunk = JSON.parse(payload);
-
-          // Extract content delta
-          const delta = chunk.choices?.[0]?.delta;
-          if (delta?.content) {
-            fullText += delta.content;
-            emitContent(output, delta.content);
-          }
-
-          // Capture finish_reason from the terminating chunk so callers can
-          // detect truncation (`length` / `max_tokens`). Only the last chunk
-          // in a stream populates this field.
-          const fr = chunk.choices?.[0]?.finish_reason;
-          if (typeof fr === 'string') finishReason = fr;
-
-          // Extract usage from the final chunk
-          if (chunk.usage) {
-            inputTokens = chunk.usage.prompt_tokens ?? 0;
-            outputTokens = chunk.usage.completion_tokens ?? 0;
-            cacheReadTokens = chunk.usage.prompt_tokens_details?.cached_tokens ?? 0;
-            reasoningTokens =
-              chunk.usage.completion_tokens_details?.reasoning_tokens ?? 0;
-          }
-        } catch {
-          // Skip malformed JSON lines
-        }
-      }
-    }
-
-    return { fullText, inputTokens, outputTokens, cacheReadTokens, reasoningTokens, finishReason };
   }
 }

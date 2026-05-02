@@ -16,6 +16,7 @@ import type {
   ProviderName,
 } from './types.js';
 import { emitContent, emitResult } from './stream-format.js';
+import { UpstreamError, synthesizeStatusFromCli } from './upstream-error.js';
 
 // ---------------------------------------------------------------------------
 // Pricing table — [inputPer1M, outputPer1M]
@@ -120,8 +121,17 @@ export class GeminiCliAdapter implements ModelAdapter {
     // End stdin immediately — prompt is passed via args
     child.stdin!.end();
 
-    // Forward stderr to process.stderr
-    child.stderr!.pipe(process.stderr);
+    // Forward stderr to process.stderr while ALSO buffering it so we
+    // can scan for retryable upstream conditions (RESOURCE_EXHAUSTED,
+    // quota exceeded, rate limit) on a non-zero exit. Capped to 16 KB.
+    let stderrBuf = '';
+    const STDERR_CAP = 16 * 1024;
+    child.stderr!.on('data', (chunk: Buffer) => {
+      process.stderr.write(chunk);
+      if (stderrBuf.length < STDERR_CAP) {
+        stderrBuf += chunk.toString('utf8').slice(0, STDERR_CAP - stderrBuf.length);
+      }
+    });
 
     // ---- Accumulate stdout -------------------------------------------------
     const chunks: Buffer[] = [];
@@ -140,7 +150,18 @@ export class GeminiCliAdapter implements ModelAdapter {
     const fullText = Buffer.concat(chunks).toString('utf-8');
 
     if (exitCode !== 0 && !fullText.trim()) {
-      throw new Error(`Gemini CLI exited with code ${exitCode}`);
+      // Classify from stderr so the dashboard's chain-fallback can hop
+      // to another provider on quota / rate-limit / outage. Gemini CLI
+      // surfaces these as "RESOURCE_EXHAUSTED", "Quota exceeded",
+      // "rate limit exceeded", "429" in the stderr body.
+      const synth = synthesizeStatusFromCli(stderrBuf);
+      if (synth) {
+        throw new UpstreamError(synth.status, stderrBuf || `Gemini CLI exited with code ${exitCode}`, {
+          provider: 'gemini-cli',
+          retryable: synth.retryable,
+        });
+      }
+      throw new Error(`Gemini CLI exited with code ${exitCode}${stderrBuf ? `\n${stderrBuf.slice(0, 400)}` : ''}`);
     }
 
     // ---- Emit Anvil Stream Format ------------------------------------------

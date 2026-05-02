@@ -53,8 +53,44 @@ export interface ModelEntry {
   endpoint?: string;
 }
 
+/**
+ * Walker tunables — controls how the dashboard's chain walker behaves.
+ *
+ * Lives at the top level of `models.yaml` so end users can adjust the
+ * routing/fallback policy in the same place they manage models. All
+ * fields are optional; missing values fall back to compiled-in defaults.
+ *
+ * ```yaml
+ * walker:
+ *   liveness_ttl_ms: 30000   # provider-liveness cache TTL (ms)
+ *   max_attempts: 5          # max chain-fallback attempts per stage
+ * ```
+ */
+export interface WalkerConfig {
+  /**
+   * How long a per-provider liveness verdict is cached. Default 30000.
+   * Lower values catch a recovering provider faster but cost more
+   * probes per run. Set to 0 to disable caching entirely.
+   */
+  liveness_ttl_ms: number;
+  /**
+   * Max chain-fallback attempts per stage entry. Default 5. After this
+   * many UpstreamError(retryable) burns the runner gives up and bubbles
+   * the last error to the user.
+   */
+  max_attempts: number;
+}
+
+/** Compiled-in defaults — used when models.yaml omits the walker block. */
+export const DEFAULT_WALKER_CONFIG: Readonly<WalkerConfig> = Object.freeze({
+  liveness_ttl_ms: 30_000,
+  max_attempts: 5,
+});
+
 export interface ModelRegistry {
   models: ModelEntry[];
+  /** Walker tunables — always populated; defaults applied at load time. */
+  walker: WalkerConfig;
   /** Live availability annotation; populated by Phase 5 discovery, never by the loader. */
   availability?: Map<string, ModelAvailability>;
 }
@@ -107,7 +143,7 @@ export function findModelsConfigPath(opts: LoadModelRegistryOptions = {}): strin
  */
 export function loadModelRegistry(opts: LoadModelRegistryOptions = {}): ModelRegistry {
   const path = findModelsConfigPath(opts);
-  if (!path) return { models: [] };
+  if (!path) return { models: [], walker: { ...DEFAULT_WALKER_CONFIG } };
 
   let raw: unknown;
   try {
@@ -124,14 +160,16 @@ export function loadModelRegistry(opts: LoadModelRegistryOptions = {}): ModelReg
  * can feed in-memory yaml strings without touching the filesystem.
  */
 export function parseModelRegistry(raw: unknown, sourcePath = '<inline>'): ModelRegistry {
-  if (raw === null || raw === undefined) return { models: [] };
+  if (raw === null || raw === undefined) return { models: [], walker: { ...DEFAULT_WALKER_CONFIG } };
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     throw new ModelRegistryValidationError(`expected top-level object, got ${describe(raw)} (${sourcePath})`);
   }
 
   const top = raw as Record<string, unknown>;
+  const walker = parseWalkerConfig(top.walker);
+
   const modelsRaw = top.models;
-  if (modelsRaw === undefined) return { models: [] };
+  if (modelsRaw === undefined) return { models: [], walker };
   if (!Array.isArray(modelsRaw)) {
     throw new ModelRegistryValidationError(`'models' must be an array, got ${describe(modelsRaw)}`);
   }
@@ -149,7 +187,40 @@ export function parseModelRegistry(raw: unknown, sourcePath = '<inline>'): Model
     models.push(entry);
   }
 
-  return { models };
+  return { models, walker };
+}
+
+/**
+ * Parse the optional `walker:` block. Missing block → defaults; partial
+ * block → defaults filled in for unspecified keys. Unknown keys throw
+ * (catches typos like `livenessTTL` or `maxRetries` early).
+ */
+function parseWalkerConfig(raw: unknown): WalkerConfig {
+  if (raw === undefined || raw === null) return { ...DEFAULT_WALKER_CONFIG };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ModelRegistryValidationError(`'walker' must be an object, got ${describe(raw)}`);
+  }
+  const w = raw as Record<string, unknown>;
+  const allowed = new Set<string>(['liveness_ttl_ms', 'max_attempts']);
+  for (const k of Object.keys(w)) {
+    if (!allowed.has(k)) {
+      throw new ModelRegistryValidationError(
+        `walker.${k}: unknown key. Supported: [${[...allowed].join(', ')}]`,
+      );
+    }
+  }
+  const out: WalkerConfig = { ...DEFAULT_WALKER_CONFIG };
+  if (w.liveness_ttl_ms !== undefined) {
+    out.liveness_ttl_ms = requireNumber(w.liveness_ttl_ms, 'walker.liveness_ttl_ms', { min: 0 });
+  }
+  if (w.max_attempts !== undefined) {
+    const n = requireNumber(w.max_attempts, 'walker.max_attempts', { min: 1 });
+    if (!Number.isInteger(n)) {
+      throw new ModelRegistryValidationError(`walker.max_attempts: expected integer, got ${n}`);
+    }
+    out.max_attempts = n;
+  }
+  return out;
 }
 
 /**

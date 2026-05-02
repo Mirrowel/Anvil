@@ -181,7 +181,20 @@ Entries whose prompt file is missing are skipped with a warning (mirrors today's
 
 - **`@anvil/agent-core`** — `LlmHandles` plumbing on `StepContext.llm` so Steps can dispatch through the LLM router (tag-based routing, retry, spend ledger).
 - **`@anvil/memory-core`** — `MemoryHandles` plumbing on `StepContext.memory`. Phase 9 hook `attachLearnersHook` is the wire-point for cli's previously-dead `autoLearnHook`.
-- **cli** — `cli/src/pipeline/steps/index.ts` exports `buildDefaultPipelineRegistry()` (8 stages: clarify → requirements → project-requirements → specs → tasks → build → validate → ship) and `isNewPipelineEnabled()` for the strangler-fig flag.
+- **cli** — `cli/src/pipeline/steps/index.ts` exports `buildDefaultPipelineRegistry()` (8 stages: clarify → requirements → repo-requirements → specs → tasks → build → validate → ship) and `isNewPipelineEnabled()` for the strangler-fig flag.
+
+### Stage permissions (`routing/stage-permissions.ts`)
+
+`allowedToolsForStage(stage)` and `permissionClassesForStage(stage)`
+declare the per-stage tool surface (clarify gets read-only,
+build/validate get write+exec, ship gets shell + write, etc.). Both
+the cli step adapters and the dashboard's `pipeline-runner.ts`
+spawn sites thread the result into the spawn spec as `allowedTools`,
+which `LanguageModelBridge` uses to construct a properly-scoped
+`BuiltinToolExecutor` for non-Claude agentic adapters (Ollama,
+OpenRouter, OpenCode). Without this thread-through, those adapters
+silently drop file-edit / bash capability — the symptom was qwen-class
+build stages that "ran" but produced no diff.
 
 ---
 

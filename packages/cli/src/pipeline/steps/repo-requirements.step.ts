@@ -1,23 +1,28 @@
 /**
- * Project Requirements step — Phase 6 per-stage adapter.
+ * Repo Requirements step — Phase 6 per-stage adapter.
  * Lifts orchestrator.ts:Stage-2 logic with manual per-project fanout.
+ *
+ * Renamed from `project-requirements` (2026-05) to match the dashboard's
+ * stage vocabulary. The iteration unit is a project entry that carries
+ * its own list of repos; the artifact produced is a per-repo-shaped
+ * REQUIREMENTS.md per project.
  */
 
 import type { Step, StepContext } from '@anvil/core-pipeline';
 import { APPROVAL_GATE_CHANNEL } from '@anvil/core-pipeline';
-import { runProjectRequirementsStage } from '../stages/index.js';
+import { runRepoRequirementsStage } from '../stages/index.js';
 import type { StageContext } from '../stages/types.js';
 import { detectAffectedProjects } from '../affected-projects.js';
 import { updatePipelineStage, updateStageCost, updatePipelineCost } from '../state-file.js';
 import { estimateAgentCallCost } from '../cost-estimator.js';
 import type { CliPipelineState } from '../cli-state.js';
 
-export const PROJECT_REQUIREMENTS_STEP_ID = 'project-requirements' as const;
+export const REPO_REQUIREMENTS_STEP_ID = 'repo-requirements' as const;
 
-export function createProjectRequirementsStep(): Step<unknown, unknown> {
+export function createRepoRequirementsStep(): Step<unknown, unknown> {
   return {
-    id: PROJECT_REQUIREMENTS_STEP_ID,
-    name: 'Per-project requirements (parallel)',
+    id: REPO_REQUIREMENTS_STEP_ID,
+    name: 'Per-repo requirements (parallel)',
     parallelism: 'serial',
     run: async (ctx: StepContext<unknown>) => {
       const state = ctx.shared as unknown as CliPipelineState;
@@ -50,7 +55,7 @@ export function createProjectRequirementsStep(): Step<unknown, unknown> {
       };
 
       const results = await Promise.allSettled(
-        affected.map((sys) => runProjectRequirementsStage(stageCtx, state.highLevelReqsArtifact, {
+        affected.map((sys) => runRepoRequirementsStage(stageCtx, state.highLevelReqsArtifact, {
           name: sys.name, repos: sys.repos,
         })),
       );
@@ -60,12 +65,12 @@ export function createProjectRequirementsStep(): Step<unknown, unknown> {
       for (let i = 0; i < affected.length; i++) {
         const r = results[i];
         if (r.status === 'fulfilled') {
-          state.projectReqsMap.set(affected[i].name, r.value.artifact);
+          state.repoReqsMap.set(affected[i].name, r.value.artifact);
           totalTokens += r.value.tokenEstimate;
           anySuccess = true;
         }
       }
-      if (!anySuccess) throw new Error('All project requirements stages failed');
+      if (!anySuccess) throw new Error('All repo-requirements stages failed');
 
       const { inputTokens, outputTokens, costUsd } = estimateAgentCallCost(totalTokens, state.model);
       state.stageCosts.set(2, { inputTokens, outputTokens, estimatedCost: costUsd });
@@ -76,12 +81,12 @@ export function createProjectRequirementsStep(): Step<unknown, unknown> {
       if (state.approvalRequired) {
         const decision = await ctx.bus.request<unknown, 'approved' | 'rejected'>(
           APPROVAL_GATE_CHANNEL,
-          { stepId: PROJECT_REQUIREMENTS_STEP_ID, stageIndex: 2 },
+          { stepId: REPO_REQUIREMENTS_STEP_ID, stageIndex: 2 },
         );
         if (decision === 'rejected') throw new Error('Stage 2 rejected by user');
       }
 
-      return Object.fromEntries(state.projectReqsMap);
+      return Object.fromEntries(state.repoReqsMap);
     },
   };
 }

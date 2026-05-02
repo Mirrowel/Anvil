@@ -16,8 +16,25 @@ interface LivenessRecord {
   checkedAt: number;
 }
 
-const TTL_MS = 30_000;
+const DEFAULT_TTL_MS = 30_000;
+let TTL_MS = DEFAULT_TTL_MS;
 const cache = new Map<ProviderName, LivenessRecord>();
+
+/**
+ * Override the liveness-cache TTL at runtime. Read from
+ * `walker.liveness_ttl_ms` in `~/.anvil/models.yaml` by the dashboard
+ * server at startup. Callers passing 0 disable caching entirely (every
+ * `isProviderAlive` issues a fresh probe).
+ */
+export function setLivenessTtlMs(ttlMs: number): void {
+  if (!Number.isFinite(ttlMs) || ttlMs < 0) return;
+  TTL_MS = ttlMs;
+}
+
+/** Returns the current TTL — exposed for diagnostic logging. */
+export function getLivenessTtlMs(): number {
+  return TTL_MS;
+}
 
 /**
  * Returns true if the provider is currently believed to be reachable.
@@ -120,9 +137,10 @@ export async function prefetchLiveness(providers: ProviderName[]): Promise<void>
   await Promise.all(providers.map((p) => isProviderAlive(p)));
 }
 
-/** Test-only — clear the cache between cases. */
+/** Test-only — clear the cache between cases and reset TTL to default. */
 export function _resetLivenessCache(): void {
   cache.clear();
+  TTL_MS = DEFAULT_TTL_MS;
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -131,14 +149,25 @@ export function _resetLivenessCache(): void {
 
 async function probe(provider: ProviderName): Promise<boolean> {
   switch (provider) {
-    case 'ollama': return probeOllama();
-    case 'claude': return Boolean(process.env.ANTHROPIC_API_KEY);
-    case 'openai': return Boolean(process.env.OPENAI_API_KEY);
+    case 'ollama':     return probeOllama();
+    case 'claude':     return Boolean(process.env.ANTHROPIC_API_KEY);
+    case 'openai':     return Boolean(process.env.OPENAI_API_KEY);
     case 'openrouter': return Boolean(process.env.OPENROUTER_API_KEY);
     case 'gemini':
-    case 'gemini-cli': return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-    case 'adk': return true;          // adk runs in-process; no remote dep
-    default: return true;
+    case 'gemini-cli': return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY || process.env.GOOGLE_API_KEY);
+    // OpenCode Go subscription proxy — needs OPENCODE_API_KEY.
+    case 'opencode':   return Boolean(process.env.OPENCODE_API_KEY);
+    // ADK is a dispatch layer — `adk:claude-*` needs ANTHROPIC_API_KEY,
+    // `adk:gemini-*` needs Gemini auth. Mark alive when EITHER is set;
+    // the adapter surfaces a clearer error if the specific model id
+    // hits the missing one.
+    case 'adk':        return Boolean(
+      process.env.ANTHROPIC_API_KEY ||
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_GENAI_API_KEY ||
+      process.env.GOOGLE_API_KEY,
+    );
+    default:           return true;
   }
 }
 

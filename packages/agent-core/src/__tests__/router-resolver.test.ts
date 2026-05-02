@@ -11,6 +11,7 @@ import {
   resolveModel,
   ModelResolutionError,
 } from '../router/resolver.js';
+import { DEFAULT_WALKER_CONFIG } from '../router/model-registry.js';
 import type { ModelRegistry, ModelEntry } from '../router/model-registry.js';
 
 function entry(over: Partial<ModelEntry>): ModelEntry {
@@ -27,7 +28,7 @@ function entry(over: Partial<ModelEntry>): ModelEntry {
 }
 
 function reg(...models: ModelEntry[]): ModelRegistry {
-  return { models };
+  return { models, walker: { ...DEFAULT_WALKER_CONFIG } };
 }
 
 describe('resolveModel — happy path', () => {

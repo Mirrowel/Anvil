@@ -34,7 +34,7 @@ export function createProjectSpecsStep(): Step<unknown, unknown> {
 
       const results = await Promise.allSettled(
         state.affectedProjects.map((sys) => {
-          const sysReqs = state.projectReqsMap.get(sys.name) ?? '';
+          const sysReqs = state.repoReqsMap.get(sys.name) ?? '';
           return runProjectSpecsStage(stageCtx, sysReqs, {
             name: sys.name, repos: sys.repos,
           });

@@ -22,7 +22,7 @@ describe('STAGE_TOOL_PERMISSIONS — canonical pipeline stages', () => {
   });
   it('analysis stages (requirements/specs/tasks) are read-only', () => {
     assert.deepEqual(STAGE_TOOL_PERMISSIONS.requirements, ['read']);
-    assert.deepEqual(STAGE_TOOL_PERMISSIONS['project-requirements'], ['read']);
+    assert.deepEqual(STAGE_TOOL_PERMISSIONS['repo-requirements'], ['read']);
     assert.deepEqual(STAGE_TOOL_PERMISSIONS.specs, ['read']);
     assert.deepEqual(STAGE_TOOL_PERMISSIONS.tasks, ['read']);
   });

@@ -1,13 +1,19 @@
-// Stage 2: Project Requirements (parallel per project)
+// Stage 2: Repo Requirements (per-repo decomposition, parallel per project)
+//
+// Splits the project's high-level requirements into per-repo slices.
+// Despite the historical "project" framing, the iteration unit is a
+// project entry that carries its own list of repos — the artifact
+// produced is REQUIREMENTS.md per project, with the model expected to
+// drill into each named repo.
 
 import { checkpointStage } from '../../checkpoint/checkpoint-writer.js';
 import type { StageContext, StageOutput } from './types.js';
 
 const STAGE_ID = 2;
-const STAGE_NAME = 'project-requirements';
+const STAGE_NAME = 'repo-requirements';
 const ARTIFACT_NAME = 'REQUIREMENTS.md';
 
-export async function runProjectRequirementsStage(
+export async function runRepoRequirementsStage(
   ctx: StageContext,
   highLevelReqs: string,
   project: { name: string; repos: string[] },
@@ -21,7 +27,7 @@ export async function runProjectRequirementsStage(
   const result = await ctx.agentRunner.run({
     persona: 'analyst',
     projectPrompt:
-      `You are a requirements analyst. Produce project-specific requirements for the "${project.name}" project ` +
+      `You are a requirements analyst. Produce per-repo requirements for the "${project.name}" project ` +
       `based on the high-level requirements. Focus on the repos: ${project.repos.join(', ')}.`,
     userPrompt,
     workingDir: ctx.workspaceDir ?? ctx.runDir,

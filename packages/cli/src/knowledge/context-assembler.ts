@@ -91,7 +91,7 @@ export function getContextLayerForStage(stageIndex: number): ContextLayer {
   switch (stageIndex) {
     case 0: return 'minimal';     // clarify
     case 1: return 'moderate';    // requirements
-    case 2: return 'moderate';    // project-requirements
+    case 2: return 'moderate';    // repo-requirements
     case 3: return 'moderate';    // specs
     case 4: return 'moderate';    // tasks
     case 5: return 'full';        // build

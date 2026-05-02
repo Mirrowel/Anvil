@@ -55,6 +55,7 @@ export {
   loadModelRegistry,
   parseModelRegistry,
   findModelsConfigPath,
+  DEFAULT_WALKER_CONFIG,
   ModelRegistryParseError,
   ModelRegistryValidationError,
 } from './model-registry.js';
@@ -66,6 +67,7 @@ export type {
   ModelComplexity,
   ModelTier,
   ModelConsumer,
+  WalkerConfig,
   LoadModelRegistryOptions,
 } from './model-registry.js';
 export { resolveModel, ModelResolutionError } from './resolver.js';

@@ -104,7 +104,12 @@ describe('OpenAIAdapter — output-token ceiling', () => {
     assert.equal(result.stopReason, 'max_tokens');
   });
 
-  it("preserves natural finish_reason 'stop' as-is", async () => {
+  it("normalizes natural finish_reason 'stop' → stopReason 'end_turn'", async () => {
+    // Cross-provider normalization inherited from OpenRouterAdapter:
+    // a tool-loop that ends with no further tool_calls reports
+    // `stopReason: 'end_turn'` (Anthropic-style) regardless of which
+    // upstream provider sent the raw `finish_reason: 'stop'`. This
+    // gives downstream telemetry a single stop-reason vocabulary.
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () =>
       ssePayload(
@@ -135,7 +140,7 @@ describe('OpenAIAdapter — output-token ceiling', () => {
       else process.env.OPENAI_API_KEY = previousKey;
     }
 
-    assert.equal(result.stopReason, 'stop');
+    assert.equal(result.stopReason, 'end_turn');
   });
 
   it('declares capabilities.maxOutputTokens=true and capabilities.cache=auto', () => {

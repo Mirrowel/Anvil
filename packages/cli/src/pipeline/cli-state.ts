@@ -51,7 +51,7 @@ export interface CliPipelineState {
   clarificationArtifact: string;
   highLevelReqsArtifact: string;
   affectedProjects: AffectedProject[];
-  projectReqsMap: Map<string, string>;
+  repoReqsMap: Map<string, string>;
   projectSpecsMap: Map<string, string>;
   projectTasksMap: Map<string, string>;
   validationArtifact: string;

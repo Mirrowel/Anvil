@@ -32,11 +32,15 @@ export const STAGE_TOOL_PERMISSIONS: Readonly<Record<string, readonly ToolClass[
   clarify:                ['read'],
   // Analysis stages: read code, write artifacts via session not tools.
   requirements:           ['read'],
-  'project-requirements': ['read'],
+  // Per-repo analysis stage (replaces the legacy `project-requirements`).
+  'repo-requirements':    ['read'],
   specs:                  ['read'],
   tasks:                  ['read'],
   // Implementation stages: full agentic — read/write/exec inside cwd.
   build:                  ['read', 'write', 'exec'],
+  // Dashboard test-spec stage: writes test files; validate runs them.
+  // Read + write only — tests should not need shell access at this stage.
+  test:                   ['read', 'write'],
   validate:               ['read', 'write', 'exec'],
   ship:                   ['read', 'write', 'exec'],
 

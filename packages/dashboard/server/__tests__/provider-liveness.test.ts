@@ -9,6 +9,8 @@ import {
   pickAliveModelFromChain,
   pickAliveModelFromChainSync,
   isProviderAlive,
+  setLivenessTtlMs,
+  getLivenessTtlMs,
   _resetLivenessCache,
 } from '../provider-liveness.js';
 import type { ResolvedChain } from '@anvil/agent-core';
@@ -61,6 +63,40 @@ describe('isProviderAlive — probes + caching', () => {
     _resetLivenessCache();
     process.env.ANTHROPIC_API_KEY = 'sk-test';
     assert.equal(await isProviderAlive('claude'), true);
+  });
+
+  it('opencode alive iff OPENCODE_API_KEY is set', async () => {
+    delete process.env.OPENCODE_API_KEY;
+    assert.equal(await isProviderAlive('opencode'), false);
+    _resetLivenessCache();
+    process.env.OPENCODE_API_KEY = 'sk-test';
+    assert.equal(await isProviderAlive('opencode'), true);
+  });
+
+  it('adk alive iff ANY of ANTHROPIC/GEMINI/GOOGLE_GENAI/GOOGLE keys is set', async () => {
+    for (const k of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY']) {
+      delete process.env[k];
+    }
+    assert.equal(await isProviderAlive('adk'), false, 'no auth env → dead');
+
+    for (const k of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY']) {
+      _resetLivenessCache();
+      for (const k2 of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY']) {
+        delete process.env[k2];
+      }
+      process.env[k] = 'sk-test';
+      assert.equal(await isProviderAlive('adk'), true, `${k} alone should mark adk alive`);
+    }
+  });
+
+  it('gemini alive on GOOGLE_GENAI_API_KEY (legacy googly key name)', async () => {
+    for (const k of ['GEMINI_API_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY']) {
+      delete process.env[k];
+    }
+    assert.equal(await isProviderAlive('gemini'), false);
+    _resetLivenessCache();
+    process.env.GOOGLE_GENAI_API_KEY = 'sk-test';
+    assert.equal(await isProviderAlive('gemini'), true);
   });
 });
 
@@ -122,5 +158,40 @@ describe('pickAliveModelFromChainSync — excludeModels (burned set)', () => {
     // Adapter surfaces the real error; we don't fabricate a "no-providers"
     // shell. Primary returned even though it's burned.
     assert.equal(r.model, 'qwen3:14b');
+  });
+});
+
+describe('setLivenessTtlMs — walker config integration', () => {
+  it('default TTL is 30s', () => {
+    _resetLivenessCache();
+    assert.equal(getLivenessTtlMs(), 30_000);
+  });
+
+  it('honors a custom TTL', () => {
+    setLivenessTtlMs(5_000);
+    assert.equal(getLivenessTtlMs(), 5_000);
+  });
+
+  it('TTL=0 is accepted (disables caching)', () => {
+    setLivenessTtlMs(0);
+    assert.equal(getLivenessTtlMs(), 0);
+  });
+
+  it('rejects negative / non-finite values silently (defensive)', () => {
+    setLivenessTtlMs(15_000);
+    setLivenessTtlMs(-1);
+    assert.equal(getLivenessTtlMs(), 15_000, 'negative ignored');
+    setLivenessTtlMs(NaN);
+    assert.equal(getLivenessTtlMs(), 15_000, 'NaN ignored');
+  });
+
+  it('TTL=0 issues a fresh probe every call (no cache hit)', async () => {
+    setLivenessTtlMs(0);
+    let calls = 0;
+    globalThis.fetch = (async () => { calls++; return new Response('{}', { status: 200 }); }) as typeof fetch;
+    await isProviderAlive('ollama');
+    await isProviderAlive('ollama');
+    await isProviderAlive('ollama');
+    assert.equal(calls, 3, 'every call hits the network when TTL=0');
   });
 });

@@ -8,17 +8,53 @@ belong in ADRs, not here.
 ## What this package owns
 
 - Two type surfaces: `LanguageModel` (forward-looking) and `ModelAdapter`
-  (legacy; what the seven adapters actually implement today). Source:
+  (legacy; what the eight adapters actually implement today). Source:
   `src/types.ts`.
-- Seven `ModelAdapter` implementations: `claude`, `openai`, `gemini`,
-  `openrouter`, `ollama`, `gemini-cli`, `adk`. One file each at the package
-  root. Plus a meta-adapter `FallbackAdapter` (deprecated; superseded by
-  `LlmRouter`). Two adapters drive a true agentic loop:
+- Eight `ModelAdapter` implementations: `claude`, `openai`, `gemini`,
+  `openrouter`, `ollama`, `gemini-cli`, `adk`, `opencode`. One file each at
+  the package root. Plus a meta-adapter `FallbackAdapter` (deprecated;
+  superseded by `LlmRouter`). Six adapters drive a true agentic loop:
     - `claude` — Claude CLI subprocess; ships its own tool runtime.
     - `ollama` — multi-turn `tools:[...]` loop hitting `/api/chat`,
       pairs each call to a `BuiltinToolExecutor` (see `src/tools/`)
       that this package ships for non-Claude paths.
-- `ProviderRegistry` singleton — auto-registers all 7 adapters via static
+    - `openrouter` — OpenAI-compat SSE consumer with delta `tool_calls`
+      reassembled by `index`. Reasoning-mode models (DeepSeek V4, Kimi
+      K2.x, GLM thinking) require `reasoning` + `reasoning_details`
+      echoed back on the next assistant turn or upstream rejects with
+      "reasoning_content is missing in assistant tool call" — the SSE
+      consumer captures both fields and replays them. Throws
+      `UpstreamError` (with `.retryable=true` for 429 / 5xx /
+      quota-pattern bodies) so callers can chain-fallback.
+    - `opencode` — extends `OpenRouterAdapter` against OpenCode Go's
+      OpenAI-compatible proxy at `https://opencode.ai/zen/go/v1`.
+      Registry uses `opencode/<model>` ids (e.g. `opencode/kimi-k2.6`)
+      to disambiguate from OpenRouter's `org/model` slug format. Strips
+      the prefix before the upstream POST. Keys off `OPENCODE_API_KEY`.
+      Replaces Ollama as the cheap local-tier provider when the user
+      has a Go subscription — same agentic loop, zero local VRAM cost.
+    - `openai` — also extends `OpenRouterAdapter` (since OpenAI's
+      `/v1/chat/completions` is the canonical OpenAI-compatible API).
+      Inherits the agentic loop, `UpstreamError` chain-fallback,
+      per-call `AbortController`, buffered `emitContent`, and
+      `reasoning_details` echo-back for o-series reasoning models.
+      Overrides config knobs only: API key (`OPENAI_API_KEY`), base URL
+      (`OPENAI_BASE_URL`, defaults `https://api.openai.com/v1`), drops
+      OpenRouter's `HTTP-Referer`/`X-Title` attribution headers.
+    - `adk` — Google Agent Development Kit (`@google/adk` ≥ 1.1.0).
+      Runs the user's prompt through `LlmAgent` + `Runner` +
+      `InMemorySessionService`, translating each emitted `Event` into
+      Anvil Stream Format. Registry uses `adk:<model>` (e.g.
+      `adk:claude-sonnet-4-6`, `adk:gemini-2.5-flash`); the prefix is
+      stripped before being handed to ADK's `LLMRegistry`. Claude
+      models route through a custom `AnthropicLlm` (lives in
+      `adk-anthropic-llm.ts`, registered idempotently on first run);
+      Gemini models route through ADK's built-in `Gemini` Llm. Keys
+      off `ANTHROPIC_API_KEY` (Claude path) and `GEMINI_API_KEY` /
+      `GOOGLE_GENAI_API_KEY` / `GOOGLE_API_KEY` (Gemini path —
+      `GOOGLE_API_KEY` is bridged to `GEMINI_API_KEY` automatically).
+      Manual smoke test: `node packages/agent-core/scripts/smoke-adk.mjs`.
+- `ProviderRegistry` singleton — auto-registers all 8 adapters via static
   ESM imports (`src/registry.ts`). Wraps every adapter with
   `instrumentModelAdapter` at registration time.
 - Single-shot runner: `runLLM` / `runClaude` / `runGemini` (`src/single-shot.ts`).
@@ -60,6 +96,16 @@ belong in ADRs, not here.
 - Cost table (`src/cost.ts`) — vendored LiteLLM snapshot at
   `src/data/model-prices.json` (Apache-2.0). Refresh via
   `npm -w @anvil/agent-core run refresh-cost-table`.
+- Model registry loader (`src/router/model-registry.ts`) —
+  parses `~/.anvil/models.yaml` into a `ModelRegistry { models, walker }`.
+  The `walker:` block is a top-level optional section that controls the
+  dashboard's chain-walker behavior — `liveness_ttl_ms` (default 30000,
+  ms) and `max_attempts` (default 5). Defaults are exported as
+  `DEFAULT_WALKER_CONFIG`. Unknown walker keys are rejected at parse
+  time so typos like `livenessTTL` get caught early. Resolution path
+  for the yaml file: `ANVIL_MODELS_CONFIG` env →
+  `<workspace>/.anvil/models.yaml` → `~/.anvil/models.yaml` (canonical) →
+  empty.
 
 Public barrel: `src/index.ts` re-exports everything.
 
@@ -90,6 +136,29 @@ cost loader resolves the JSON via `fileURLToPath(import.meta.url)`.
 - Set `capabilities.tier`. Only `tier === 'agentic'` is allowed for
   pipeline stages `build`/`validate`/`ship` — `ProviderRegistry.resolveForStage`
   enforces this and falls back to `claude` with a warning.
+- **Concurrency safety: per-call `AbortController`.** Adapters are
+  registered once as singletons (the registry shares one instance across
+  every spawn). Storing an instance-level `abortController` gets
+  trampled by concurrent calls (e.g. per-repo backend + frontend running
+  in parallel). The `ollama` and `openrouter` adapters keep a
+  `Set<AbortController>`; each `run()` creates its own controller, adds
+  it to the set, and removes it in `finally`. `kill()` iterates the set.
+- **Buffered `emitContent`.** OpenAI-compat SSE streams emit one token
+  per chunk. Calling `emitContent` per delta produces one-word activity
+  rows in the dashboard. The shared pattern is to buffer until '\n'
+  OR ~80 chars before flushing, so the activity log reads like prose.
+- **`UpstreamError` for chain-fallback.** Adapters that hit the network
+  throw `UpstreamError(status, body, { provider, retryable? })` with
+  `.retryable=true` when the upstream returns 429 / 502 / 503 / 504 or
+  a quota-pattern body. The class lives in `src/upstream-error.ts` and
+  is shared by every adapter (`openrouter` re-exports for back-compat).
+  The dashboard's `runStageWithFallback` duck-types
+  `name === 'UpstreamError' && retryable === true` and picks the next
+  model in the chain. CLI subprocess adapters (`claude`, `gemini-cli`)
+  buffer stderr and pass it to `synthesizeStatusFromCli` to map vendor
+  patterns (`rate_limit_error`, `RESOURCE_EXHAUSTED`, `Credit balance
+  is too low`) to a synthetic HTTP status — so quota/rate-limit failures
+  trigger the same chain-fallback path as HTTP-shaped failures.
 
 ### Telemetry
 
@@ -115,6 +184,12 @@ cost loader resolves the JSON via `fileURLToPath(import.meta.url)`.
 `FF_AGENT_CMD`, etc.) are honored with a one-time stderr deprecation
 warning. Resolution path lives in `single-shot.ts:readAliased`.
 
+OpenCode adapter:
+- `OPENCODE_API_KEY` — required. Subscribe at https://opencode.ai/zen.
+- `OPENCODE_BASE_URL` — optional override (default
+  `https://opencode.ai/zen/go/v1`). Useful for region pinning or testing
+  against a local `opencode serve`.
+
 ### Cost calculation
 
 - `getModelPricing(modelId)` returns `[inputPer1M, outputPer1M]` or
@@ -133,9 +208,12 @@ when a new flagship rev ships.
 
 ## Things that don't exist in this package (intentionally)
 
-- No vendor SDKs — adapters use `child_process` (CLI providers) or
-  hand-rolled `fetch()` (HTTP providers). Adopting `@anthropic-ai/sdk`
-  would localize lock-in to one ~150-LOC adapter file.
+- No first-party LLM SDKs — adapters use `child_process` (CLI
+  providers) or hand-rolled `fetch()` (HTTP providers). The one
+  exception is `@google/adk` + `@google/genai`, listed in
+  `optionalDependencies` and consumed by the `adk` adapter only.
+  Adopting `@anthropic-ai/sdk` would localize lock-in to one
+  ~150-LOC adapter file but isn't done yet.
 - No abstraction framework — no Vercel AI SDK, LiteLLM proxy, Mastra,
   LangChain.
 - No native `LanguageModel.invoke()` impl on any adapter yet — every
@@ -143,10 +221,11 @@ when a new flagship rev ships.
   `ModelAdapter` → `LanguageModel` is follow-up work
   (see ADR §9 Phase 5 deviation). `runAgent` and `LlmRouter` callers
   must inject their own `LanguageModel`.
-- No tier-promotion — `OllamaAdapter` is `tier:'agentic'` because it
-  drives a real tool loop, not because it auto-upgrades any underlying
-  model. The agentic capability comes from the loop in the adapter +
-  the `BuiltinToolExecutor` injected by `LanguageModelBridge`.
+- No tier-promotion — `OllamaAdapter`, `OpenRouterAdapter`, and
+  `OpenCodeAdapter` are all `tier:'agentic'` because they drive a real
+  tool loop, not because they auto-upgrade any underlying model. The
+  agentic capability comes from the loop in the adapter + the
+  `BuiltinToolExecutor` injected by `LanguageModelBridge`.
 - No deprecated `agent/agent-manager.ts` single-shot runner — it was
   deleted; the canonical surface is `agent/session/`.
 
@@ -160,7 +239,9 @@ when a new flagship rev ships.
   → `cost.ts:calculateCostBreakdown`.
 - Provider auto-detect? `registry.ts:resolveFromModelId` + the
   override in `agent/session/default-adapter-factory.ts:resolveProvider`
-  (which adds Ollama / Gemini-CLI heuristics on top).
+  (which adds Ollama / Gemini-CLI / OpenCode-prefix heuristics on top —
+  `opencode/` is matched BEFORE the generic slash-check so OpenRouter
+  doesn't claim those ids).
 - Yaml config format? `router/config-loader.ts:defaultRouterConfig`
   is the compiled-in default — that's the canonical schema example.
 

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 
 import { discoverAvailability } from '../router/discovery.js';
 import type { DiscoveryAdapter, DiscoveryDeps } from '../router/discovery.js';
+import { DEFAULT_WALKER_CONFIG } from '../router/model-registry.js';
 import type { ModelRegistry, ModelEntry } from '../router/model-registry.js';
 
 function entry(over: Partial<ModelEntry>): ModelEntry {
@@ -23,7 +24,7 @@ function entry(over: Partial<ModelEntry>): ModelEntry {
 }
 
 function reg(...models: ModelEntry[]): ModelRegistry {
-  return { models };
+  return { models, walker: { ...DEFAULT_WALKER_CONFIG } };
 }
 
 function fakeAdapter(result: { available: boolean; error?: string } | (() => Promise<never>)): DiscoveryAdapter {
@@ -138,7 +139,7 @@ describe('discoverAvailability', () => {
   });
 
   it('returns immediately on an empty registry', async () => {
-    const r: ModelRegistry = { models: [] };
+    const r: ModelRegistry = { models: [], walker: { ...DEFAULT_WALKER_CONFIG } };
     const deps: DiscoveryDeps = { getAdapter: () => undefined };
     await discoverAvailability(r, deps);
     assert.equal(r.availability?.size, 0);

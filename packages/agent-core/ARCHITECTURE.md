@@ -37,12 +37,12 @@ today.
         │   wraps every adapter via instrumentModelAdapter at register │
         └──────────────────────────────────────────────────────────────┘
                                           │
-       ┌──────────┬──────────┬───────────┼───────────┬──────────┬──────┐
-       ▼          ▼          ▼           ▼           ▼          ▼      ▼
-  Claude     OpenAI     Gemini    OpenRouter     Ollama   Gemini-   ADK
-  Adapter    Adapter    Adapter   Adapter        Adapter  CLI       Adapter
-  (claude    (openai    (gemini   (openrouter    (ollama  Adapter   (adk
-  CLI)       HTTP)      HTTP)     HTTP)          local)   (CLI)     SDK)
+    ┌────────┬────────┬────────┬───────────┬────────┬─────────┬─────┬──────────┐
+    ▼        ▼        ▼        ▼           ▼        ▼         ▼     ▼
+  Claude  OpenAI   Gemini  OpenRouter   Ollama   Gemini-    ADK   OpenCode
+  Adapter Adapter  Adapter Adapter      Adapter  CLI        Ad.   Adapter
+  (claude (openai  (gemini (openrouter  (ollama  Adapter    (adk  (opencode.ai
+  CLI)    HTTP)    HTTP)   HTTP/SSE)    local)   (CLI)      SDK)  Go HTTP/SSE)
 
        Cross-cutting:
          • src/telemetry/    — OTel spans + metrics + exporters
@@ -74,7 +74,7 @@ interface LanguageModel {
 ```
 
 Status today: **interface defined, no native adapter implementation.** All
-seven concrete adapters implement `ModelAdapter` only. `runAgent` and
+eight concrete adapters implement `ModelAdapter` only. `runAgent` and
 `LlmRouter` accept a `LanguageModel` from the caller.
 
 ### 2.2 `ModelAdapter` (legacy; current adapters)
@@ -97,7 +97,7 @@ interface ModelAdapter {
 
 ### 2.3 `ProviderName`
 
-Closed union: `'claude' | 'openai' | 'gemini' | 'openrouter' | 'ollama' | 'gemini-cli' | 'adk'`.
+Closed union: `'claude' | 'openai' | 'gemini' | 'openrouter' | 'ollama' | 'gemini-cli' | 'adk' | 'opencode'`.
 
 ### 2.4 `ProviderCapabilities`
 
@@ -108,7 +108,7 @@ TTL, `maxOutputTokens` honoring, and structured-output level
 
 ## 3. `ProviderRegistry` (`src/registry.ts`)
 
-Singleton. Auto-registers all 7 adapters via static ESM imports during
+Singleton. Auto-registers all 8 adapters via static ESM imports during
 `getInstance()`.
 
 ```
@@ -119,7 +119,8 @@ ProviderRegistry.getInstance()
   ├─ register(new OpenRouterAdapter())
   ├─ register(new OllamaAdapter())
   ├─ register(new GeminiCliAdapter())
-  └─ register(new AdkAdapter())
+  ├─ register(new AdkAdapter())
+  └─ register(new OpenCodeAdapter())
 ```
 
 Resolution helpers:
@@ -132,8 +133,10 @@ Resolution helpers:
 
 A separate, richer resolver lives at
 `src/agent/session/default-adapter-factory.ts:resolveProvider` — adds
-`ollama:` prefix detection, `gemini-cli` binary probe, and the
-`<family>:<size>` heuristic for local Ollama tags.
+`ollama:` prefix detection, `gemini-cli` binary probe, the
+`<family>:<size>` heuristic for local Ollama tags, and the `opencode/`
+prefix check (evaluated **before** the generic slash-check so OpenCode
+ids don't get claimed by OpenRouter).
 
 ## 4. Agent lifecycle layer (`src/agent/session/`)
 
@@ -212,9 +215,10 @@ Provider heuristics layered on top of the registry's:
 1. `ollama:` prefix → `ollama`
 2. `gemini-*` → `gemini-cli` (if binary on PATH) else `gemini`
 3. `gpt-*` / `o1*` / `o3*` / `o4*` / `chatgpt-*` → `openai`
-4. contains `/` → `openrouter`
-5. `<family>:<size>` and not `claude` → `ollama`
-6. default → `claude`
+4. `opencode/` prefix → `opencode`  ← **before** rule 5
+5. contains `/` → `openrouter`
+6. `<family>:<size>` and not `claude` → `ollama`
+7. default → `claude`
 
 ### 4.5 `runWithAgent` (`run-with-agent.ts`)
 
@@ -473,6 +477,99 @@ Line shapes:
 
 Helpers: `emitContent`, `emitToolUse`, `emitThinking`, `emitResult`.
 
+### 13.1 Buffered `emitContent` for OpenAI-compat SSE
+
+OpenAI-compatible providers (OpenRouter, OpenCode Go) stream one token
+per SSE chunk. Calling `emitContent` per delta produces one-word
+activity rows in the dashboard. Both `OpenRouterAdapter` and
+`OllamaAdapter` buffer until '\n' OR ~80 chars before flushing — the
+activity log then reads like prose, not vertical tokens.
+
+### 13.2 Thinking-mode `reasoning_details` protocol
+
+Thinking-class models exposed through OpenRouter / OpenCode (DeepSeek
+V4, Kimi K2.x, GLM-5/5.1 thinking variants) require their reasoning
+trace to be echoed back on the next assistant turn. Without it the
+upstream rejects the request with `400 reasoning_content is missing
+in assistant tool call message`.
+
+The SSE consumer in `OpenRouterAdapter` accumulates two parallel
+fields off each delta:
+- `delta.reasoning` — flat string (legacy form).
+- `delta.reasoning_details` — structured array (`type`, `text`, etc.).
+
+Both are stored on the assistant turn and replayed in the next
+request body alongside the `tool_calls`. `OpenCodeAdapter` inherits
+this behavior unchanged — the proxy speaks the same protocol.
+
+### 13.3 `UpstreamError` for chain-fallback
+
+Lives in `src/upstream-error.ts` and is shared by every adapter (HTTP +
+CLI). `openrouter-adapter.ts` re-exports it for back-compat with older
+imports.
+
+```ts
+class UpstreamError extends Error {
+  status: number;
+  body: string;
+  retryable: boolean;
+}
+```
+
+**Thrown by:**
+- HTTP adapters (`openrouter`, `opencode`, `openai`, `gemini`, `ollama`,
+  `adk-anthropic-llm`) when the upstream returns 429 / 502 / 503 / 504,
+  or the body matches a quota/rate-limit pattern (handled by
+  `bodyLooksRetryable`).
+- CLI subprocess adapters (`claude`, `gemini-cli`) when their stderr
+  matches a known transient-condition phrase. The mapping helper is
+  `synthesizeStatusFromCli(stderr)`, which maps:
+  - `rate_limit_error` / `overloaded_error` / `Credit balance is too low`
+    / `429` / `RESOURCE_EXHAUSTED` / `Quota exceeded` → synthetic 429
+    (retryable).
+  - `Internal Server Error` / `503` / `Service Unavailable` /
+    `Gateway timeout` → synthetic 503 (retryable).
+  - `Invalid API key` / `Unauthorized` / `permission denied` →
+    synthetic 401 (NOT retryable — auth needs a config fix).
+
+**Consumed by:** the dashboard's `runStageWithFallback` duck-types the
+shape — `name === 'UpstreamError' && retryable === true` — and picks
+the next model in the chain, marking the failed model as runtime-burned
+for the remainder of the run. Terminal classes (auth, content-policy)
+leave `retryable=false` and break out of the chain.
+
+The classifier helpers are exported standalone:
+
+- `isRetryableStatus(status)` — true for `0`/`408`/`425`/`429`/`502`/`503`/`504`.
+- `bodyLooksRetryable(body)` — true on `insufficient_quota`,
+  `rate-limit`, `overloaded_error`, `resource_exhausted`,
+  `quota_exceeded`, `server is busy`, `temporarily unavailable`,
+  `temporarily rate-limited`, `too many requests`.
+- `synthesizeStatusFromCli(stderr)` — see CLI patterns above.
+
+### 13.4 Walker config in `models.yaml`
+
+`ModelRegistry` carries a `walker: WalkerConfig` block alongside `models`:
+
+```ts
+interface WalkerConfig {
+  liveness_ttl_ms: number;  // default 30000
+  max_attempts: number;     // default 5
+}
+```
+
+End users configure both knobs in `~/.anvil/models.yaml`'s top-level
+`walker:` block — same file as the model catalog. The dashboard's
+`PipelineRunner` reads the block once at run start (in
+`prefetchProviderLiveness`), applies `liveness_ttl_ms` via
+`setLivenessTtlMs`, and uses `max_attempts` inside `runStageWithFallback`.
+Auto-derives the prefetch provider list from the `models:` array's
+distinct providers — no manual list to maintain.
+
+`DEFAULT_WALKER_CONFIG` is exported and can be spread into custom
+registries. Unknown walker keys throw `ModelRegistryValidationError`
+at parse time (typo guard).
+
 ## 14. File layout
 
 ```
@@ -494,13 +591,16 @@ packages/agent-core/
     ├── registry.ts                  ← ProviderRegistry singleton
     ├── single-shot.ts               ← runLLM / runClaude / runGemini
     ├── cost.ts                      ← LiteLLM-backed pricing
-    ├── claude-adapter.ts
-    ├── openai-adapter.ts
-    ├── gemini-adapter.ts
-    ├── openrouter-adapter.ts
-    ├── ollama-adapter.ts
-    ├── gemini-cli-adapter.ts
-    ├── adk-adapter.ts
+    ├── claude-adapter.ts            ← CLI subprocess; stderr → UpstreamError mapping
+    ├── openai-adapter.ts            ← extends OpenRouterAdapter; gpt-* / o-series ids
+    ├── gemini-adapter.ts            ← HTTP API; UpstreamError on 4xx/5xx
+    ├── openrouter-adapter.ts        ← agentic SSE; UpstreamError + reasoning_details echo-back
+    ├── ollama-adapter.ts            ← agentic /api/chat loop; per-call AbortController
+    ├── gemini-cli-adapter.ts        ← CLI subprocess; stderr → UpstreamError mapping
+    ├── adk-adapter.ts               ← agentic ADK Runner+LlmAgent; adk:<model> ids
+    ├── adk-anthropic-llm.ts         ← custom BaseLlm subclass for Claude inside ADK
+    ├── opencode-adapter.ts          ← extends OpenRouterAdapter; opencode/<model> ids
+    ├── upstream-error.ts            ← shared UpstreamError + classifiers (status, body, CLI stderr)
     ├── fallback-adapter.ts          ← @deprecated; kept for compat
     ├── agent/
     │   ├── index.ts                 ← re-exports session/
@@ -579,7 +679,9 @@ From `package.json`:
 - `better-sqlite3` — synchronous SQLite for the spend ledger.
 - `yaml` — `llm-router.yaml` parsing.
 
-No vendor LLM SDK (`@anthropic-ai/sdk`, `openai`, `@google/genai`).
+No first-party LLM SDK (`@anthropic-ai/sdk`, `openai`). The one
+exception is `@google/adk` + `@google/genai`, listed in
+`optionalDependencies` and consumed exclusively by the `adk` adapter.
 No `langchain`, `mastra`, Vercel AI SDK, or LiteLLM-as-proxy.
 
 ## 16. Tests
