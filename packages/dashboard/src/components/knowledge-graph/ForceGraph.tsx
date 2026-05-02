@@ -144,7 +144,7 @@ export function ForceGraph({
       const r = Math.max(2, size / (globalScale > 2 ? 1 : 2));
       ctx.beginPath();
       ctx.arc(x, y, r, 0, 2 * Math.PI);
-      ctx.fillStyle = isSearchMatch ? '#fbbf24' : isHovered || isSelected ? lightenColor(color, 0.3) : color;
+      ctx.fillStyle = isSearchMatch ? '#D4A24A' : isHovered || isSelected ? lightenColor(color, 0.3) : color;
       ctx.fill();
 
       if (isHovered || isSelected) {
@@ -159,7 +159,7 @@ export function ForceGraph({
         ctx.font = `${fontSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillStyle = isSearchMatch ? '#fbbf24' : 'rgba(255,255,255,0.85)';
+        ctx.fillStyle = isSearchMatch ? '#D4A24A' : 'rgba(255,255,255,0.85)';
         ctx.fillText(label, x, y + r + 2 / globalScale);
       }
     }

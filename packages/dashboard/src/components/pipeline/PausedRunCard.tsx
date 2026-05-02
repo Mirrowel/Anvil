@@ -11,9 +11,9 @@ export interface PausedRunCardProps {
 }
 
 const tierColors: Record<RiskTier, { color: string; bg: string; label: string }> = {
-  low:  { color: 'var(--color-success)', bg: 'rgba(52, 211, 153, 0.12)',  label: 'Low' },
-  med:  { color: 'var(--color-warning)', bg: 'rgba(251, 191, 36, 0.12)',  label: 'Med' },
-  high: { color: 'var(--color-error)',   bg: 'rgba(248, 113, 113, 0.12)', label: 'High' },
+  low:  { color: 'var(--color-success)', bg: 'rgba(111, 175, 138, 0.12)', label: 'Low' },
+  med:  { color: 'var(--color-warning)', bg: 'rgba(212, 162, 74, 0.12)',  label: 'Med' },
+  high: { color: 'var(--color-error)',   bg: 'rgba(201, 115, 115, 0.12)', label: 'High' },
 };
 
 function remainingText(iso?: string): string | null {
@@ -56,8 +56,8 @@ export function PausedRunCard({ data, onOpenReview }: PausedRunCardProps) {
     <>
       <style>{`
         @keyframes anvil-pulse-paused-border {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.0); }
-          50%      { box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.30); }
+          0%, 100% { box-shadow: 0 0 0 0 rgba(212, 162, 74, 0.0); }
+          50%      { box-shadow: 0 0 0 2px rgba(212, 162, 74, 0.30); }
         }
         @keyframes anvil-pulse-paused-dot {
           0%, 100% { opacity: 1;   transform: scale(1); }

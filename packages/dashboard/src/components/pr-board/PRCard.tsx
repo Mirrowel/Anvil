@@ -8,11 +8,11 @@ export interface PRCardProps {
 }
 
 const LABEL_COLORS: Record<string, { bg: string; fg: string }> = {
-  bug: { bg: 'rgba(248,81,73,0.15)', fg: '#f85149' },
-  enhancement: { bg: 'rgba(52,211,153,0.15)', fg: '#34d399' },
+  bug: { bg: 'rgba(201,115,115,0.15)', fg: 'var(--color-error)' },
+  enhancement: { bg: 'var(--accent-muted)', fg: 'var(--accent)' },
   anvil: { bg: 'rgba(136,85,255,0.15)', fg: '#8855ff' },
-  spike: { bg: 'rgba(251,191,36,0.15)', fg: '#fbbf24' },
-  review: { bg: 'rgba(96,165,250,0.15)', fg: '#60a5fa' },
+  spike: { bg: 'rgba(212,162,74,0.15)', fg: 'var(--color-warning)' },
+  review: { bg: 'rgba(107,138,171,0.15)', fg: 'var(--color-info)' },
 };
 
 function labelColor(label: string): { bg: string; fg: string } {

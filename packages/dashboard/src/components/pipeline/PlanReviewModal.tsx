@@ -460,7 +460,7 @@ export function PlanReviewModal({
                 aria-label="Pause timeout countdown"
                 style={{
                   padding: '8px 12px',
-                  background: remaining.expired ? 'rgba(248, 113, 113, 0.10)' : 'var(--bg-elevated-2)',
+                  background: remaining.expired ? 'rgba(201, 115, 115, 0.10)' : 'var(--bg-elevated-2)',
                   border: `1px solid ${remaining.expired ? 'var(--color-error)' : 'var(--separator)'}`,
                   borderRadius: 'var(--radius-md)',
                   display: 'flex', alignItems: 'center', gap: 8,
@@ -798,7 +798,7 @@ export function PlanReviewModal({
                   style={{
                     ...inlinePanelStyle(),
                     borderColor: 'var(--color-error)',
-                    background: 'rgba(248, 113, 113, 0.06)',
+                    background: 'rgba(201, 115, 115, 0.06)',
                   }}
                 >
                   <div style={{
@@ -936,7 +936,7 @@ function actionBtnStyle(
     ...base,
     background: 'transparent',
     color: 'var(--color-error)',
-    border: '1px solid rgba(248, 113, 113, 0.4)',
+    border: '1px solid rgba(201, 115, 115, 0.4)',
   };
   return {
     ...base,

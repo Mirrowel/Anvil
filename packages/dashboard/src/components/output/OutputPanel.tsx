@@ -304,7 +304,7 @@ export function OutputPanel({
                                     <tr key={li}>
                                       <td colSpan={3} style={{
                                         padding: '4px 12px',
-                                        background: 'rgba(96,165,250,0.06)',
+                                        background: 'rgba(107,138,171,0.06)',
                                         color: 'var(--color-info)',
                                         fontSize: 11,
                                         borderTop: li > 0 ? '1px solid var(--separator)' : undefined,
@@ -325,8 +325,8 @@ export function OutputPanel({
                                 const isDel = line.startsWith('-');
                                 const content = (isAdd || isDel) ? line.slice(1) : line.startsWith(' ') ? line.slice(1) : line;
 
-                                const bg = isAdd ? 'rgba(52,211,153,0.08)'
-                                  : isDel ? 'rgba(248,113,113,0.08)'
+                                const bg = isAdd ? 'rgba(111,175,138,0.08)'
+                                  : isDel ? 'rgba(201,115,115,0.08)'
                                   : 'transparent';
                                 const textColor = isAdd ? 'var(--color-success)'
                                   : isDel ? 'var(--color-error)'

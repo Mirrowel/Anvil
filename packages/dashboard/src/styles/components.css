@@ -1,4 +1,4 @@
-/* Component classes — Claude-inspired Anvil Dashboard */
+/* Component classes — Anvil Dashboard (terminal-forge) */
 
 /* Cards */
 .card {
@@ -165,7 +165,7 @@
   color: var(--text-secondary);
 }
 .badge-info {
-  background: rgba(96, 165, 250, 0.16);
+  background: rgba(107, 138, 171, 0.16);
   color: var(--color-info);
 }
 

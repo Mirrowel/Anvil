@@ -105,13 +105,13 @@ const statusConfig: Record<
   approved: {
     label: 'approved',
     color: 'var(--color-success)',
-    bg: 'rgba(52, 211, 153, 0.12)',
+    bg: 'rgba(111, 175, 138, 0.12)',
     Icon: CheckCircle2,
   },
   rejected: {
     label: 'rejected',
     color: 'var(--color-error)',
-    bg: 'rgba(248, 113, 113, 0.12)',
+    bg: 'rgba(201, 115, 115, 0.12)',
     Icon: XCircle,
   },
 };

@@ -44,8 +44,8 @@ export function PausedBanner({ data, onReview, onCancel }: PausedBannerProps) {
     <>
       <style>{`
         @keyframes anvil-banner-pulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.0); }
-          50%      { box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.25); }
+          0%, 100% { box-shadow: 0 0 0 0 rgba(212, 162, 74, 0.0); }
+          50%      { box-shadow: 0 0 0 2px rgba(212, 162, 74, 0.25); }
         }
       `}</style>
       <div
@@ -55,7 +55,7 @@ export function PausedBanner({ data, onReview, onCancel }: PausedBannerProps) {
           display: 'flex', alignItems: 'center', gap: 12,
           padding: '10px 16px',
           margin: '8px 16px',
-          background: 'rgba(251, 191, 36, 0.08)',
+          background: 'rgba(212, 162, 74, 0.08)',
           border: '1px solid var(--color-warning)',
           borderRadius: 'var(--radius-md)',
           fontFamily: 'var(--font-sans)',

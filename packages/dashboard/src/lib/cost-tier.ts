@@ -37,12 +37,12 @@ export function tierColorVar(tier: CostTier): string {
 export function tierBgVar(tier: CostTier): string {
   switch (tier) {
     case 'safe':
-      return 'rgba(34,197,94,0.12)';
+      return 'rgba(111,175,138,0.12)';   // eucalyptus, matches --color-success
     case 'warning':
-      return 'rgba(251,191,36,0.12)';
+      return 'rgba(212,162,74,0.12)';    // mustard, matches --color-warning
     case 'danger':
     case 'breach':
-      return 'rgba(239,68,68,0.12)';
+      return 'rgba(201,115,115,0.12)';   // rust, matches --color-error
   }
 }
 

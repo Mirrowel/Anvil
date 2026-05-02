@@ -1042,7 +1042,7 @@ function App() {
                 <span style={{
                   fontSize: 11, fontWeight: 500, padding: '2px 8px',
                   borderRadius: 'var(--radius-xs)',
-                  background: 'rgba(52,211,153,0.12)', color: 'var(--color-success)',
+                  background: 'rgba(111,175,138,0.12)', color: 'var(--color-success)',
                   flexShrink: 0,
                 }}>
                   build
@@ -1094,7 +1094,7 @@ function App() {
                   <span style={{
                     fontSize: 11, fontWeight: 500, padding: '2px 8px',
                     borderRadius: 'var(--radius-xs)',
-                    background: r.type === 'build' ? 'rgba(52,211,153,0.12)' : r.type === 'fix' ? 'rgba(251,191,36,0.12)' : 'rgba(96,165,250,0.12)',
+                    background: r.type === 'build' ? 'rgba(111,175,138,0.12)' : r.type === 'fix' ? 'rgba(212,162,74,0.12)' : 'rgba(107,138,171,0.12)',
                     color: r.type === 'build' ? 'var(--color-success)' : r.type === 'fix' ? 'var(--color-warning)' : 'var(--color-info)',
                     flexShrink: 0,
                   }}>
@@ -1389,8 +1389,8 @@ function App() {
           }}
           className="btn btn-sm"
           style={{
-            background: 'rgba(52,211,153,0.1)', color: 'var(--accent)',
-            border: '1px solid rgba(52,211,153,0.2)', gap: 4,
+            background: 'var(--accent-muted)', color: 'var(--accent)',
+            border: '1px solid var(--accent-muted)', gap: 4,
           }}
         >
           {runs.find((r) => r.id === urlRunId)?.status === 'failed' ? (

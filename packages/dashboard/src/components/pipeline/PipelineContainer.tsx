@@ -336,8 +336,8 @@ export function PipelineContainer({
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6,
                     padding: '6px 12px', fontSize: 12, fontWeight: 500,
-                    background: 'rgba(52,211,153,0.1)', color: 'var(--accent)',
-                    border: '1px solid rgba(52,211,153,0.2)',
+                    background: 'var(--accent-muted)', color: 'var(--accent)',
+                    border: '1px solid var(--accent-muted)',
                     borderRadius: 'var(--radius-sm)', cursor: 'pointer',
                     fontFamily: 'var(--font-sans)',
                   }}

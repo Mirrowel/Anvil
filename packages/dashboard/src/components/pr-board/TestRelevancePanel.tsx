@@ -22,17 +22,17 @@ export interface TestRelevancePanelProps {
 
 function distanceStyle(d: number): { bg: string; fg: string; label: string } {
   if (d <= 1) return {
-    bg: 'rgba(248, 113, 113, 0.15)',
+    bg: 'rgba(201, 115, 115, 0.15)',
     fg: 'var(--color-error)',
     label: `d${d}`,
   };
   if (d === 2) return {
-    bg: 'rgba(251, 191, 36, 0.15)',
+    bg: 'rgba(212, 162, 74, 0.15)',
     fg: 'var(--color-warning)',
     label: `d${d}`,
   };
   return {
-    bg: 'rgba(52, 211, 153, 0.15)',
+    bg: 'rgba(111, 175, 138, 0.15)',
     fg: 'var(--color-success)',
     label: `d${d}`,
   };
@@ -86,9 +86,9 @@ function Summary({ result }: { result: RelevanceResult }): React.ReactElement {
           padding: '2px 8px',
           borderRadius: 'var(--radius-full)',
           background: saved > 50
-            ? 'rgba(52, 211, 153, 0.15)'
-            : 'rgba(96, 165, 250, 0.15)',
-          color: saved > 50 ? 'var(--color-success)' : 'var(--color-info, #60a5fa)',
+            ? 'rgba(111, 175, 138, 0.15)'
+            : 'rgba(107, 138, 171, 0.15)',
+          color: saved > 50 ? 'var(--color-success)' : 'var(--color-info)',
         }}
       >
         {saved}% saved

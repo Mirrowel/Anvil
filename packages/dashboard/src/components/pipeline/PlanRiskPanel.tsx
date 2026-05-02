@@ -13,19 +13,19 @@ const tierConfig: Record<RiskTier, { label: string; color: string; bg: string; b
   low: {
     label: 'Low risk',
     color: 'var(--color-success)',
-    bg: 'rgba(52, 211, 153, 0.10)',
+    bg: 'rgba(111, 175, 138, 0.10)',
     border: 'var(--color-success)',
   },
   med: {
     label: 'Medium risk',
     color: 'var(--color-warning)',
-    bg: 'rgba(251, 191, 36, 0.10)',
+    bg: 'rgba(212, 162, 74, 0.10)',
     border: 'var(--color-warning)',
   },
   high: {
     label: 'High risk',
     color: 'var(--color-error)',
-    bg: 'rgba(248, 113, 113, 0.10)',
+    bg: 'rgba(201, 115, 115, 0.10)',
     border: 'var(--color-error)',
   },
 };
@@ -40,17 +40,17 @@ function weightLabel(weight: number): { label: string; color: string; bg: string
   if (weight < 0.3) return {
     label: 'low',
     color: 'var(--color-success)',
-    bg: 'rgba(52, 211, 153, 0.12)',
+    bg: 'rgba(111, 175, 138, 0.12)',
   };
   if (weight < 0.65) return {
     label: 'med',
     color: 'var(--color-warning)',
-    bg: 'rgba(251, 191, 36, 0.12)',
+    bg: 'rgba(212, 162, 74, 0.12)',
   };
   return {
     label: 'high',
     color: 'var(--color-error)',
-    bg: 'rgba(248, 113, 113, 0.12)',
+    bg: 'rgba(201, 115, 115, 0.12)',
   };
 }
 

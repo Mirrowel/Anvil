@@ -105,7 +105,7 @@ export function PatchApplier({
           {colorizeDiff(proposedPatch)}
         </div>
         {error && (
-          <div style={{ padding: '8px 16px', background: 'rgba(248,113,113,0.12)', color: 'var(--color-error)', fontSize: 12 }}>
+          <div style={{ padding: '8px 16px', background: 'rgba(201,115,115,0.12)', color: 'var(--color-error)', fontSize: 12 }}>
             {error}
           </div>
         )}
