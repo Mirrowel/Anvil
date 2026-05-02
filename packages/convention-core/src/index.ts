@@ -45,5 +45,6 @@ export {
   normalizeError,
   generateRule,
   checkAndPromote,
+  persistRule,
 } from './promotion/index.js';
 export type { ViolationRecord, PromotionResult } from './promotion/index.js';

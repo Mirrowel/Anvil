@@ -1,5 +1,7 @@
 // Auto-promotion — Section F.3
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { trackViolation, getViolationCount } from './violation-tracker.js';
 import { generateRule } from './rule-generator.js';
 import type { ConventionRule } from '../rules/types.js';
@@ -20,7 +22,9 @@ export interface PromotionResult {
 
 /**
  * Check if an error/fix pair should be promoted to a convention rule.
- * Tracks the violation and promotes at count >= 3.
+ * Tracks the violation, promotes at count >= 3, and persists the rule
+ * to `<conventionsDir>/<project>/rules.json` so future runs surface it
+ * via `loadRules`.
  */
 export function checkAndPromote(
   paths: ConventionPaths,
@@ -33,8 +37,37 @@ export function checkAndPromote(
 
   if (count >= PROMOTION_THRESHOLD) {
     const rule = generateRule(error, fix, project);
+    persistRule(paths, project, rule);
     return { promoted: true, count, rule };
   }
 
   return { promoted: false, count };
+}
+
+/**
+ * Append a rule to `<conventionsDir>/<project>/rules.json`. De-duplicates
+ * by `id` — the same generated rule on a later run is a no-op. The file
+ * is created if missing.
+ */
+export function persistRule(
+  paths: ConventionPaths,
+  project: string,
+  rule: ConventionRule,
+): void {
+  const path = join(paths.conventionsDir, project, 'rules.json');
+  mkdirSync(dirname(path), { recursive: true });
+
+  let existing: ConventionRule[] = [];
+  if (existsSync(path)) {
+    try {
+      const raw = JSON.parse(readFileSync(path, 'utf-8')) as { rules?: ConventionRule[] };
+      existing = Array.isArray(raw.rules) ? raw.rules : [];
+    } catch {
+      existing = [];
+    }
+  }
+
+  if (existing.some((r) => r.id === rule.id)) return;
+  existing.push(rule);
+  writeFileSync(path, JSON.stringify({ rules: existing }, null, 2), 'utf-8');
 }

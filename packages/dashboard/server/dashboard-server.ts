@@ -378,6 +378,32 @@ export interface ClientMessage {
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 /** Read workspace path from factory.yaml / project.yaml for a project. */
+/**
+ * Parse the string content of a `semantic:fix-pattern` proposal back into
+ * `error` (failure signal) and `fix` (resolution). Reflection's mapper
+ * formats failures as `Failure: …\nRoot cause: …\nFix: …\nFile: …`.
+ * If the content was already structured ({error,fix}), use that directly.
+ */
+function parseFixPatternContent(content: unknown): { error: string; fix: string } {
+  if (content && typeof content === 'object') {
+    const c = content as { error?: unknown; fix?: unknown };
+    if (typeof c.error === 'string' && typeof c.fix === 'string') {
+      return { error: c.error, fix: c.fix };
+    }
+  }
+  if (typeof content !== 'string') return { error: '', fix: '' };
+  const failure = /Failure:\s*(.+)/.exec(content);
+  const root = /Root cause:\s*(.+)/.exec(content);
+  const fix = /Fix:\s*(.+)/.exec(content);
+  const errorParts: string[] = [];
+  if (failure) errorParts.push(failure[1].trim());
+  if (root) errorParts.push(root[1].trim());
+  return {
+    error: errorParts.join(' — '),
+    fix: fix ? fix[1].trim() : '',
+  };
+}
+
 function getWorkspaceFromConfig(project: string): string | null {
   const anvilHome = process.env.ANVIL_HOME || process.env.FF_HOME || join(homedir(), '.anvil');
   const candidates = [
@@ -7020,6 +7046,13 @@ Findings array may be empty. No prose outside the JSON block.`;
   // reflectOnRun) every N ms and ratifies them via memory-core's
   // defaultDecide (hash-dedupe → MERGE-INTO else ADD). Cancellable.
   // ANVIL_SLEEPTIME_INTERVAL_MS=0 disables; default 30 minutes.
+  //
+  // Wrapped decideFn: when a `semantic:fix-pattern` proposal ratifies
+  // (add or merge-into), parse the failure into error/fix and call
+  // convention-core's `checkAndPromote`. Three occurrences of the
+  // same normalized error promote to a rule in
+  // `<conventionsDir>/<project>/rules.json`, closing the
+  // lesson → convention loop.
   const sleeptimeIntervalMs = (() => {
     const raw = process.env.ANVIL_SLEEPTIME_INTERVAL_MS;
     if (raw === undefined) return 30 * 60_000;
@@ -7030,13 +7063,46 @@ Findings array may be empty. No prose outside the JSON block.`;
   if (sleeptimeIntervalMs > 0) {
     const runSleeptime = async () => {
       try {
-        const { consolidate, ProposalQueue } = await import('@anvil/memory-core');
+        const { consolidate, defaultDecide, ProposalQueue } = await import('@anvil/memory-core');
+        const { checkAndPromote } = await import('@anvil/convention-core');
         const projects = await projectLoader.listProjects().catch(() => []);
         const store = memoryStore.unwrap();
         const queue = new ProposalQueue(store.sqlite);
         let total = 0;
         for (const sys of projects) {
-          const result = await consolidate(store, queue, { scope: 'project', projectId: sys.name });
+          const decideFn = async (
+            s: typeof store,
+            proposal: Parameters<typeof defaultDecide>[1],
+          ) => {
+            const decision = defaultDecide(s, proposal);
+            try {
+              const cand = proposal.candidate;
+              if (
+                cand.kind === 'semantic' &&
+                cand.subtype === 'fix-pattern' &&
+                (decision.kind === 'add' || decision.kind === 'merge-into')
+              ) {
+                const { error, fix } = parseFixPatternContent(cand.content);
+                if (error && fix) {
+                  const promoted = checkAndPromote(CONVENTION_PATHS, error, fix, sys.name);
+                  if (promoted.promoted && promoted.rule) {
+                    console.log(
+                      `[sleeptime] promoted convention rule for "${sys.name}": ${promoted.rule.id}`,
+                    );
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn('[sleeptime] promotion hook failed:', err);
+            }
+            return decision;
+          };
+          const result = await consolidate(
+            store,
+            queue,
+            { scope: 'project', projectId: sys.name },
+            { decideFn },
+          );
           total += result.ratified + result.merged;
         }
         if (total > 0) console.log(`[sleeptime] consolidated ${total} proposal(s) across ${projects.length} project(s)`);
