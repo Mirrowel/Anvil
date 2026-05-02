@@ -40,6 +40,12 @@ interface MemoryPayload {
   proposals: Proposal[];
 }
 
+interface MemoryConfig {
+  reflectionEnabled: boolean;
+  sleeptimeIntervalMs: number;
+  mode: string;
+}
+
 const kindColor: Record<string, string> = {
   semantic: 'var(--accent)',
   episodic: 'var(--color-info)',
@@ -59,6 +65,7 @@ function formatContent(content: unknown): string {
 
 export function MemoryPage({ project, ws }: MemoryPageProps) {
   const [payload, setPayload] = useState<MemoryPayload | null>(null);
+  const [config, setConfig] = useState<MemoryConfig | null>(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'items' | 'proposals'>('items');
@@ -68,6 +75,11 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
     ws.send(JSON.stringify({ action: 'list-memories', project, search: search.trim() || undefined, limit: 100 }));
   }, [ws, project, search]);
 
+  const fetchConfig = useCallback(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ action: 'get-memory-config' }));
+  }, [ws]);
+
   useEffect(() => {
     if (!ws) return;
     const handler = (evt: MessageEvent) => {
@@ -76,6 +88,9 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
         if (msg.type === 'memories' && msg.payload) {
           setPayload(msg.payload as MemoryPayload);
           setError(null);
+        }
+        if (msg.type === 'memory-config' && msg.payload) {
+          setConfig(msg.payload as MemoryConfig);
         }
         if (msg.type === 'proposal-ratified' || msg.type === 'proposal-rejected') {
           // Refresh after a mutation
@@ -91,8 +106,9 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
     };
     ws.addEventListener('message', handler);
     fetchMemories();
+    fetchConfig();
     return () => ws.removeEventListener('message', handler);
-  }, [ws, project, fetchMemories]);
+  }, [ws, project, fetchMemories, fetchConfig]);
 
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -134,7 +150,7 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
       {/* Stats bar */}
       {payload?.stats && Object.keys(payload.stats.byKind).length > 0 && (
         <div style={{
-          display: 'flex', gap: 8, marginBottom: 16,
+          display: 'flex', gap: 8, marginBottom: 8,
           padding: '10px 14px',
           background: 'var(--bg-elevated-2)',
           border: '1px solid var(--separator)',
@@ -146,6 +162,21 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
               <span style={{ color: kindColor[kind] ?? 'var(--text-tertiary)' }}>●</span> {kind}: {count}
             </span>
           ))}
+        </div>
+      )}
+
+      {/* Config badge */}
+      {config && (
+        <div style={{
+          marginBottom: 16, fontSize: 11,
+          color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)',
+        }}>
+          <span style={{ color: config.reflectionEnabled ? 'var(--accent)' : 'var(--text-tertiary)' }}>●</span>{' '}
+          Reflection: {config.reflectionEnabled ? 'on' : 'off'}
+          {config.reflectionEnabled
+            ? ` (set ANVIL_REFLECTION=off to disable${config.mode === 'on-success' ? '; mode=on-success' : ''})`
+            : ' (set ANVIL_REFLECTION=always to enable)'}
+          {' · '}Sleeptime: every {Math.round(config.sleeptimeIntervalMs / 60000)}m
         </div>
       )}
 
@@ -231,7 +262,7 @@ export function MemoryPage({ project, ws }: MemoryPageProps) {
               borderRadius: 'var(--radius-md)',
               fontSize: 13, color: 'var(--text-tertiary)',
             }}>
-              No memories yet. Reflection runs at end of pipeline (set <code style={{ fontFamily: 'var(--font-mono)' }}>ANVIL_REFLECTION=1</code> to enable).
+              No memories yet. Reflection runs at end of every pipeline by default (set <code style={{ fontFamily: 'var(--font-mono)' }}>ANVIL_REFLECTION=off</code> to disable).
             </div>
           )}
           {payload?.items.map((m) => (

@@ -3932,6 +3932,18 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
       }
 
       // ── Memory inspector (PR 4) — list / pin / delete / proposals ───
+      case 'get-memory-config': {
+        const m = (process.env.ANVIL_REFLECTION ?? 'always').toLowerCase();
+        const reflectionEnabled = !['off', '0', 'false', 'no'].includes(m);
+        const sleeptimeIntervalMs = Number(
+          process.env.ANVIL_SLEEPTIME_INTERVAL_MS ?? 30 * 60_000,
+        );
+        ws.send(JSON.stringify({
+          type: 'memory-config',
+          payload: { reflectionEnabled, sleeptimeIntervalMs, mode: m },
+        }));
+        break;
+      }
       case 'list-memories': {
         try {
           const { MemoryInspector } = await import('@anvil/memory-core');
@@ -4875,14 +4887,13 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
     }
 
     // 4b. Reflect-on-run — extract typed lessons from the run trace.
-    // Gated behind ANVIL_REFLECTION env knob (default off) so the
-    // tuned prompt can iterate without firing on every run. Set
-    // ANVIL_REFLECTION=1 (or 'always') to enable; ANVIL_REFLECTION=on-success
-    // restricts to completed runs only.
-    const reflectionMode = process.env.ANVIL_REFLECTION ?? 'off';
-    const shouldReflect =
-      reflectionMode === '1' || reflectionMode === 'always' ||
-      (reflectionMode === 'on-success' && state.status === 'completed');
+    // Runs by default at end of every pipeline run. Set
+    // ANVIL_REFLECTION=off|0|false|no to disable, or
+    // ANVIL_REFLECTION=on-success to restrict to completed runs only.
+    const reflectionMode = (process.env.ANVIL_REFLECTION ?? 'always').toLowerCase();
+    const reflectionDisabled = ['off', '0', 'false', 'no'].includes(reflectionMode);
+    const shouldReflect = !reflectionDisabled &&
+      (reflectionMode !== 'on-success' || state.status === 'completed');
     if (shouldReflect) {
       try {
         const { reflectOnRun, ProposalQueue } = await import('@anvil/memory-core');
