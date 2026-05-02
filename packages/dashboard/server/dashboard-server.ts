@@ -38,6 +38,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { AgentManager, type AgentState } from '@anvil/agent-core';
 import { PipelineRunner } from './pipeline-runner.js';
 import { disallowedToolsForPersona } from './steps/per-repo-stage.step.js';
+import { runFixFlow, type FixFlowStageEvent } from './fix-flow.js';
 import type { PipelineRunState } from './pipeline-runner.js';
 import { ProjectLoader } from './project-loader.js';
 import type { ProjectRepo } from './project-loader.js';
@@ -1148,6 +1149,15 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
   let activePipelineRunner: PipelineRunner | null = null;
 
   // ── Active runs tracker (multi-run support) ────────────────────────
+  interface ActiveRunStage {
+    name: 'fix' | 'validate' | 'fix-loop';
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    attempt?: number;
+    error?: string;
+    cost?: number;
+    startedAt?: string;
+    completedAt?: string;
+  }
   interface ActiveRun {
     id: string;
     type: 'build' | 'fix' | 'spike' | 'plan';
@@ -1159,6 +1169,14 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
     agentId?: string;            // for quick actions
     activities: typeof outputBuffer;  // per-run output
     prUrls: Set<string>;         // PRs created by this specific run
+    /** Per-stage progress for multi-stage flows (fix flow, build flow). */
+    stages?: ActiveRunStage[];
+    /** Final error when status === 'failed'. */
+    error?: string;
+    /** Completion timestamp once the run lands in a terminal state. */
+    completedAt?: number;
+    /** Total cost summed across stages (fix-flow runs). */
+    totalCost?: number;
   }
 
   const activeRuns = new Map<string, ActiveRun>();
@@ -1279,7 +1297,11 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
       model: r.model,
       status: r.status,
       startedAt: r.startedAt,
+      completedAt: r.completedAt,
       activityCount: r.activities.length,
+      stages: r.stages,
+      error: r.error,
+      totalCost: r.totalCost,
     }));
     broadcast({ type: 'active-runs', payload: list });
   }
@@ -5799,6 +5821,94 @@ You have ${repoNames.length} repos: ${repoNames.join(', ')}. Stay within these d
       }
     })();
 
+    if (actionType === 'run-fix') {
+      // Multi-stage Fix flow: fix → validate → fix-loop (with attempt cap).
+      const initialStages: ActiveRunStage[] = [
+        { name: 'fix', status: 'pending' },
+        { name: 'validate', status: 'pending' },
+        { name: 'fix-loop', status: 'pending' },
+      ];
+      activeRuns.set(runId, {
+        id: runId,
+        type: 'fix',
+        project,
+        description,
+        model: resolvedModel,
+        status: 'running',
+        startedAt: Date.now(),
+        activities: [],
+        prUrls: new Set(),
+        stages: initialStages,
+        totalCost: 0,
+      });
+      broadcastActiveRuns();
+
+      const stageStarted: Partial<Record<'fix' | 'validate' | 'fix-loop', string>> = {};
+      const onStage = (event: FixFlowStageEvent) => {
+        const run = activeRuns.get(runId);
+        if (!run || !run.stages) return;
+        const stage = run.stages.find((s) => s.name === event.name);
+        if (!stage) return;
+        if (event.status === 'running') {
+          stage.status = 'running';
+          stage.startedAt = event.startedAt ?? new Date().toISOString();
+          stage.attempt = event.attempt;
+          stageStarted[event.name] = stage.startedAt;
+        } else {
+          stage.status = event.status;
+          stage.completedAt = event.completedAt ?? new Date().toISOString();
+          stage.error = event.error;
+          if (event.cost) {
+            stage.cost = (stage.cost ?? 0) + event.cost;
+            run.totalCost = (run.totalCost ?? 0) + event.cost;
+          }
+        }
+        broadcastActiveRuns();
+      };
+
+      // Run async — don't block the WS handler
+      runFixFlow({
+        agentManager,
+        project,
+        description,
+        model: resolvedModel,
+        workspaceDir: cwd,
+        repoNames,
+        repoPaths: repoInfo,
+        buildProjectPrompt: () => projectPrompt,
+        buildRepoProjectPrompt: () => projectPrompt,
+        isCancelled: () => activeRuns.get(runId)?.status !== 'running',
+        allowedToolsForStage: (s) => allowedToolsForStage(s),
+        onStage,
+        onSpawn: (stage, _repo, agentId) => {
+          agentToRunId.set(agentId, runId);
+          broadcast({ type: 'agent-spawned', payload: { id: agentId, runId, stage } });
+        },
+      })
+        .then((result) => {
+          const run = activeRuns.get(runId);
+          if (!run) return;
+          run.status = result.resolved ? 'completed' : 'failed';
+          run.completedAt = Date.now();
+          if (!result.resolved) {
+            run.error = `validation still failing after ${result.attempts} attempts`;
+          }
+          broadcastActiveRuns();
+        })
+        .catch((err) => {
+          const run = activeRuns.get(runId);
+          if (!run) return;
+          run.status = 'failed';
+          run.completedAt = Date.now();
+          run.error = err instanceof Error ? err.message : String(err);
+          broadcastActiveRuns();
+          console.warn(`[run-fix] flow failed for ${runId}:`, err);
+        });
+
+      return;
+    }
+
+    // Legacy single-agent path for spike / review.
     const agent = agentManager.spawn({
       name: `${actionType.replace('run-', '')}-${project}`,
       persona: spikePersona,

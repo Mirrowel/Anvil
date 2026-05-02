@@ -292,6 +292,18 @@ function App() {
   const [activeRunsList, setActiveRunsList] = useState<Array<{
     id: string; type: string; project: string; description: string;
     model: string; status: string; startedAt: number; activityCount: number;
+    completedAt?: number;
+    stages?: Array<{
+      name: 'fix' | 'validate' | 'fix-loop';
+      status: 'pending' | 'running' | 'completed' | 'failed';
+      attempt?: number;
+      error?: string;
+      cost?: number;
+      startedAt?: string;
+      completedAt?: string;
+    }>;
+    error?: string;
+    totalCost?: number;
   }>>([]);
   const [pendingBreach, setPendingBreach] = useState<(CostBreachModalBreach & { runId: string; project: string }) | null>(null);
   const [breachModalOpen, setBreachModalOpen] = useState<boolean>(false);
@@ -1082,54 +1094,96 @@ function App() {
                   }}
                   className="card"
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                    display: 'flex', flexDirection: 'column', gap: 8, width: '100%',
                     cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)',
                   }}
                 >
-                  <span style={{
-                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                    background: r.status === 'running' ? 'var(--color-success)' : r.status === 'completed' ? 'var(--color-success)' : 'var(--color-error)',
-                    ...(r.status === 'running' ? { animation: 'pulse 2s ease-in-out infinite' } : {}),
-                  }} />
-                  <span style={{
-                    fontSize: 11, fontWeight: 500, padding: '2px 8px',
-                    borderRadius: 'var(--radius-xs)',
-                    background: r.type === 'build' ? 'rgba(111,175,138,0.12)' : r.type === 'fix' ? 'rgba(212,162,74,0.12)' : 'rgba(107,138,171,0.12)',
-                    color: r.type === 'build' ? 'var(--color-success)' : r.type === 'fix' ? 'var(--color-warning)' : 'var(--color-info)',
-                    flexShrink: 0,
-                  }}>
-                    {r.type === 'spike' ? 'research' : r.type}
-                  </span>
-                  <span
-                    title={r.description}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      fontSize: 13, fontWeight: 500,
-                      color: 'var(--text-primary)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >{r.description}</span>
-                  <span style={{
-                    fontSize: 11, color: 'var(--text-tertiary)',
-                    fontFamily: 'var(--font-mono)',
-                    padding: '1px 6px', borderRadius: 'var(--radius-xs)',
-                    background: 'var(--bg-elevated-3)',
-                  }}>{r.project}</span>
-                  {r.status === 'running' && (
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        sendWs({ action: 'cancel-pipeline' });
-                        sendWs({ action: 'stop-run', runId: r.id });
-                      }}
-                      className="btn btn-danger btn-sm"
-                      style={{ flexShrink: 0 }}
-                    >
-                      Stop
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+                    <span style={{
+                      width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                      background: r.status === 'running' ? 'var(--color-success)' : r.status === 'completed' ? 'var(--color-success)' : 'var(--color-error)',
+                      ...(r.status === 'running' ? { animation: 'pulse 2s ease-in-out infinite' } : {}),
+                    }} />
+                    <span style={{
+                      fontSize: 11, fontWeight: 500, padding: '2px 8px',
+                      borderRadius: 'var(--radius-xs)',
+                      background: r.type === 'build' ? 'rgba(111,175,138,0.12)' : r.type === 'fix' ? 'rgba(212,162,74,0.12)' : 'rgba(107,138,171,0.12)',
+                      color: r.type === 'build' ? 'var(--color-success)' : r.type === 'fix' ? 'var(--color-warning)' : 'var(--color-info)',
+                      flexShrink: 0,
+                    }}>
+                      {r.type === 'spike' ? 'research' : r.type}
                     </span>
+                    <span
+                      title={r.description}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontSize: 13, fontWeight: 500,
+                        color: 'var(--text-primary)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >{r.description}</span>
+                    <span style={{
+                      fontSize: 11, color: 'var(--text-tertiary)',
+                      fontFamily: 'var(--font-mono)',
+                      padding: '1px 6px', borderRadius: 'var(--radius-xs)',
+                      background: 'var(--bg-elevated-3)',
+                    }}>{r.project}</span>
+                    {r.status === 'running' && (
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          sendWs({ action: 'cancel-pipeline' });
+                          sendWs({ action: 'stop-run', runId: r.id });
+                        }}
+                        className="btn btn-danger btn-sm"
+                        style={{ flexShrink: 0 }}
+                      >
+                        Stop
+                      </span>
+                    )}
+                  </div>
+                  {r.stages && r.stages.length > 0 && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      paddingLeft: 20,
+                      fontSize: 11, fontFamily: 'var(--font-mono)',
+                      color: 'var(--text-tertiary)',
+                    }}>
+                      {r.stages.map((s, i) => {
+                        const dotColor =
+                          s.status === 'completed' ? 'var(--color-success)' :
+                          s.status === 'failed' ? 'var(--color-error)' :
+                          s.status === 'running' ? 'var(--accent)' :
+                          'var(--text-quaternary)';
+                        const labelColor =
+                          s.status === 'running' ? 'var(--text-primary)' :
+                          s.status === 'completed' ? 'var(--text-secondary)' :
+                          s.status === 'failed' ? 'var(--color-error)' :
+                          'var(--text-tertiary)';
+                        return (
+                          <React.Fragment key={`${s.name}-${i}`}>
+                            {i > 0 && <span style={{ color: 'var(--text-quaternary)' }}>→</span>}
+                            <span
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                color: labelColor,
+                              }}
+                              title={s.error ?? `${s.name} ${s.status}${s.attempt ? ` (attempt ${s.attempt})` : ''}`}
+                            >
+                              <span style={{
+                                width: 6, height: 6, borderRadius: '50%',
+                                background: dotColor,
+                                ...(s.status === 'running' ? { animation: 'pulse 2s ease-in-out infinite' } : {}),
+                              }} />
+                              {s.name}{s.attempt && s.attempt > 1 ? `·${s.attempt}` : ''}
+                            </span>
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
                   )}
                 </button>
               ))}
