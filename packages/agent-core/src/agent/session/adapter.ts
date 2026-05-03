@@ -76,6 +76,15 @@ export interface AdapterRequest {
    *  mapping when the resolved model has `exclusive_slot:true` in
    *  `~/.anvil/models.yaml`. */
   exclusiveSlot?: boolean;
+  /** Workspace root forwarded from `SpawnConfig.workspaceDir`. Used by
+   *  `defaultAdapterFactory` to discover skills + MCP. Per AGENT-PROCESS-
+   *  CONSOLIDATION-ADR §C4. */
+  workspaceDir?: string;
+  /** Internal — populated by `defaultAdapterFactory` for the Claude path
+   *  when an `mcp.json` is discovered under `workspaceDir`. The bridge
+   *  forwards it to `ModelAdapterConfig.mcpConfigPath` so claude-cli
+   *  reads it via `--mcp-config <path>`. Not user-facing. */
+  claudeMcpConfigPath?: string;
 }
 
 /**
@@ -114,5 +123,6 @@ export function buildAdapterRequest(
     persona: spec.persona,
     project: spec.project,
     runId: spec.runId,
+    workspaceDir: spec.workspaceDir,
   };
 }

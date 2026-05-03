@@ -210,6 +210,15 @@ export interface ModelAdapterConfig {
    * this knob ignore the field.
    */
   contextWindow?: number;
+  /**
+   * Path to an `mcp.json` config the adapter should forward to its
+   * underlying tool runtime. Today only the Claude CLI path consumes
+   * this (passes `--mcp-config <path>`); other adapters ignore it.
+   * Populated by `defaultAdapterFactory` when a `workspaceDir` is set
+   * and an MCP config is discovered. Per AGENT-PROCESS-CONSOLIDATION-
+   * ADR §C5.
+   */
+  mcpConfigPath?: string;
 }
 
 // `toolExecutor` is structurally typed here to keep `types.ts` free of

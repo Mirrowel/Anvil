@@ -23,6 +23,8 @@ import type {
   AgentAdapterFactory,
 } from './adapter.js';
 import { LanguageModelBridge } from './language-model-bridge.js';
+import { composeSkillContext } from '../../skills/index.js';
+import { findMcpConfigPath } from '../../mcp/index.js';
 
 // ── Provider resolution ──────────────────────────────────────────────────
 
@@ -103,7 +105,52 @@ export function defaultAdapterFactory(request: AdapterRequest): AgentAdapter {
   const registry = ProviderRegistry.getInstance();
   const provider = resolveProvider(request.model);
   const resolved = resolveAdapterOrFallback(registry, provider);
-  return new LanguageModelBridge(request, resolved.adapter, resolved.provider);
+  const enriched = enrichRequestWithWorkspace(request, resolved.provider);
+  return new LanguageModelBridge(enriched, resolved.adapter, resolved.provider);
+}
+
+/**
+ * When `request.workspaceDir` is set, enrich the request with workspace-
+ * rooted artefacts:
+ *   - Non-Claude paths: compose skill context (system prompt + allowed-
+ *     tools narrowing) into the request's `projectPrompt` / `allowedTools`.
+ *   - Claude path: resolve the canonical `mcp.json` path so the adapter
+ *     can pass `--mcp-config <path>` to claude-cli.
+ *
+ * Skills are NOT injected into the system prompt for the Claude path
+ * because claude-cli auto-loads `.claude/skills/` itself; double-loading
+ * would duplicate the bullet list. Per AGENT-PROCESS-CONSOLIDATION-ADR
+ * §C5.
+ *
+ * Pure: returns a new `AdapterRequest` (or the original when no enrichment
+ * applies).
+ */
+export function enrichRequestWithWorkspace(
+  request: AdapterRequest,
+  provider: ProviderName,
+): AdapterRequest {
+  if (!request.workspaceDir) return request;
+
+  if (provider === 'claude') {
+    const mcpPath = findMcpConfigPath({ workspaceRoot: request.workspaceDir });
+    if (!mcpPath) return request;
+    return { ...request, claudeMcpConfigPath: mcpPath };
+  }
+
+  // Non-Claude path: inject skill block into projectPrompt + reconcile
+  // allowed-tools. composeSkillContext is a no-op when no skills exist.
+  const ctx = composeSkillContext(request.projectPrompt ?? '', {
+    workspaceRoot: request.workspaceDir,
+    allowedTools: request.allowedTools,
+  });
+  if (ctx.activated.skills.length === 0 && !ctx.toolsConstrained) {
+    return request;
+  }
+  return {
+    ...request,
+    projectPrompt: ctx.systemPrompt || undefined,
+    allowedTools: ctx.allowedTools,
+  };
 }
 
 /** Type alias matching `AgentAdapterFactory` — exported for explicit typing. */

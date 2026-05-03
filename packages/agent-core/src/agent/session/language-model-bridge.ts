@@ -222,6 +222,11 @@ export class LanguageModelBridge extends EventEmitter implements AgentAdapter {
       if (executor) config.toolExecutor = executor;
       const ctx = lookupContextWindow(this.request.model);
       if (ctx !== undefined) config.contextWindow = ctx;
+    } else if (this.request.claudeMcpConfigPath) {
+      // Claude path: forward the resolved mcp.json so claude-cli reads
+      // its MCP servers via --mcp-config. Populated by
+      // defaultAdapterFactory when workspaceDir is set.
+      config.mcpConfigPath = this.request.claudeMcpConfigPath;
     }
 
     if (this.request.exclusiveSlot) {

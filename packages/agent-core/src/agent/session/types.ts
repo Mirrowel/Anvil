@@ -130,6 +130,15 @@ export interface SpawnConfig {
   binaryPath?: string;
   /** Escape hatch for arbitrary CLI args. cli uses; dashboard never sets. */
   args?: string[];
+  /**
+   * Workspace root for skills + MCP discovery. Distinct from `cwd` (the
+   * subprocess working directory) so tests can run with cwd === '/tmp'
+   * while loading skills from the repo root. When undefined, skills + MCP
+   * are skipped (back-compat with existing spawn sites).
+   *
+   * Per AGENT-PROCESS-CONSOLIDATION-ADR §C4.
+   */
+  workspaceDir?: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

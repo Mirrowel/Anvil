@@ -139,6 +139,12 @@ export class ClaudeAdapter implements ModelAdapter {
     if (config.disallowedTools?.length) {
       args.push('--disallowedTools', config.disallowedTools.join(','));
     }
+    if (config.mcpConfigPath) {
+      // Claude CLI: --mcp-config points at an mcp.json that claude-cli
+      // reads to bootstrap MCP server connections. defaultAdapterFactory
+      // resolves the path from the spawn's workspaceDir.
+      args.push('--mcp-config', config.mcpConfigPath);
+    }
 
     // ---- Spawn ------------------------------------------------------------
     const child = spawn(bin, args, {
