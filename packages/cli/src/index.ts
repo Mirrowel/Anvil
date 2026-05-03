@@ -16,6 +16,7 @@ import { checkpointsCommand } from './commands/checkpoints.js';
 import { contractsCommand } from './commands/contracts.js';
 import { testsRankCommand } from './commands/tests-rank.js';
 import { triageCommand } from './commands/triage.js';
+import { runCommand } from './commands/run.js';
 
 const program = new Command();
 
@@ -40,6 +41,7 @@ program.addCommand(checkpointsCommand);
 program.addCommand(contractsCommand);
 program.addCommand(testsRankCommand);
 program.addCommand(triageCommand);
+program.addCommand(runCommand);
 
 // ── Future CLI commands (disabled for MVP 1) ─────────────────────────
 const comingSoon = (name: string, desc: string) => {
@@ -53,7 +55,6 @@ const comingSoon = (name: string, desc: string) => {
   return cmd;
 };
 
-program.addCommand(comingSoon('run', 'Run a feature pipeline'));
 program.addCommand(comingSoon('fix', 'Fix a bug'));
 program.addCommand(comingSoon('resume', 'Resume a pipeline'));
 program.addCommand(comingSoon('status', 'Show pipeline status'));
