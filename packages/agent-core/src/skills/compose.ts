@@ -1,7 +1,7 @@
 /**
- * `composeSkillContext` — high-level entry point that callers (Phase 4's
- * `runAgent`, future single-shot wrappers) use to thread skills into the
- * system prompt + tool policy in one call.
+ * `composeSkillContext` — high-level entry point used by
+ * `defaultAdapterFactory` (and future single-shot wrappers) to thread
+ * skills into the system prompt + tool policy in one call.
  *
  * Steps:
  *   1. Resolve skills directory per ADR §8 search order.

@@ -18,20 +18,20 @@ today.
               │                │                  │                │
               ▼                ▼                  ▼                ▼
    ┌──────────────────┐ ┌──────────────────┐ ┌────────────┐ ┌──────────────┐
-   │ Headless         │ │ Agent lifecycle  │ │ Router     │ │ Single-shot  │
-   │ runAgent         │ │ AgentProcess +   │ │ LlmRouter  │ │ runLLM /     │
+   │ Eval trajectory  │ │ Agent lifecycle  │ │ Router     │ │ Single-shot  │
+   │ collectTrajectory│─│ AgentProcess +   │ │ LlmRouter  │ │ runLLM /     │
    │ (Inspect-AI)     │ │ AgentManager     │ │            │ │ runClaude /  │
-   │ src/headless/    │ │ src/agent/       │ │ src/router │ │ runGemini    │
-   └──────────────────┘ │   session/       │ │            │ │ src/single-  │
-              │         └──────────────────┘ └────────────┘ │   shot.ts    │
-              │                  │                  │       └──────────────┘
-              │                  ▼                  │              │
-              │     ┌────────────────────────┐      │              │
-              │     │ LanguageModelBridge    │      │              │
-              │     │ + defaultAdapterFactory│      │              │
-              │     └────────────────────────┘      │              │
-              │                  │                  │              │
-              ▼                  ▼                  ▼              ▼
+   │ src/agent/       │ │ src/agent/       │ │ src/router │ │ runGemini    │
+   │   session/       │ │   session/       │ │            │ │ src/single-  │
+   └──────────────────┘ └──────────────────┘ └────────────┘ │   shot.ts    │
+                                │                  │       └──────────────┘
+                                ▼                  │              │
+                  ┌────────────────────────┐       │              │
+                  │ LanguageModelBridge    │       │              │
+                  │ + defaultAdapterFactory│       │              │
+                  └────────────────────────┘       │              │
+                                │                  │              │
+                                ▼                  ▼              ▼
         ┌──────────────────────────────────────────────────────────────┐
         │ ProviderRegistry (singleton, src/registry.ts)                │
         │   wraps every adapter via instrumentModelAdapter at register │
@@ -74,8 +74,10 @@ interface LanguageModel {
 ```
 
 Status today: **interface defined, no native adapter implementation.** All
-eight concrete adapters implement `ModelAdapter` only. `runAgent` and
-`LlmRouter` accept a `LanguageModel` from the caller.
+eight concrete adapters implement `ModelAdapter` only. `LlmRouter` accepts
+a `LanguageModel` from the caller; the eval path (`collectTrajectory`)
+goes through `AgentProcess` + `defaultAdapterFactory` and does not need a
+native `LanguageModel` impl.
 
 ### 2.2 `ModelAdapter` (legacy; current adapters)
 
@@ -302,32 +304,32 @@ Terminal classes (`auth`, `content_policy`, `invalid_request`) never
 trigger fallback. `content_policy` specifically never crosses providers
 — security default.
 
-## 7. Headless `runAgent` (`src/headless/runner.ts`)
+## 7. Eval trajectory collector (`src/agent/session/collect-trajectory.ts`)
 
-Inspect-AI-compatible external-agent contract. Caller-injected
-`LanguageModel` drives a tool-call loop bounded by
-`maxToolLoopIterations` (default 25) and wall-clock `timeoutMs`
-(default 600 000).
+Inspect-AI-compatible external-agent contract. Wraps an `AgentProcess`
+spawn (the same execution path the dashboard and cli use) and resolves
+with an aggregated `AgentTrajectory`. No separate inference loop or
+`LanguageModel` injection: the production stack (`ProviderRegistry` →
+`defaultAdapterFactory` → `LanguageModelBridge`) handles model
+resolution, skill + MCP discovery (via `workspace.rootDir`), and tool
+dispatch.
 
 ```
-runAgent(task, workspace, options)
-  ├─ composeSkillContext(task.systemPrompt, ...)
-  │   └─ resolveSkillsDir + loadSkills + activateSkills (32 KB) + render
-  ├─ loadMcpServers(workspaceRoot)
-  ├─ mcpClients = servers.map(s => new McpAgentClient(s))
-  ├─ buildAgentToolset(builtIn, mcpClients) → { tools, mcpDispatch }
-  ├─ loop until end / length / error:
-  │    ├─ options.model.invoke({ model, messages, tools, ... })
-  │    ├─ aggregate usage + cost
-  │    ├─ if no toolCalls → finalAnswer = text; break
-  │    └─ for each call:
-  │         ├─ mcpDispatch.get(name) → mcpClient.callTool
-  │         └─ else builtInDispatch(name, args, workspace)
-  └─ finally: close all mcpClients
+collectTrajectory(task, workspace, opts?)
+  ├─ taskToSpawnConfig(task, workspace)
+  ├─ new AgentProcess(spec, { adapterFactory: defaultAdapterFactory })
+  ├─ attach listeners (content / activity / result / error-output / exit)
+  ├─ proc.start()
+  └─ on exit:
+       ├─ usage + costUsd ← from result event
+       ├─ finalAnswer ← assistant chunks
+       ├─ toolCalls ← activity tool_use events
+       └─ finishReason ← derived from exit + result presence
 ```
 
 Returns `AgentTrajectory` (messages + toolCalls + usage + cost +
-finalAnswer + finishReason + durationMs).
+finalAnswer + finishReason + durationMs). Honors `AbortSignal` and
+`timeoutMs` (default 600 000ms).
 
 ## 8. Skills (`src/skills/`)
 
@@ -626,10 +628,6 @@ packages/agent-core/
     │   ├── router.ts                ← LlmRouter
     │   ├── config-loader.ts         ← yaml + ${env:VAR}
     │   └── telemetry.ts             ← invokeWithSpans
-    ├── headless/
-    │   ├── index.ts
-    │   ├── types.ts                 ← AgentTrajectory (Inspect-AI shape)
-    │   └── runner.ts                ← runAgent loop
     ├── skills/
     │   ├── index.ts
     │   ├── types.ts
@@ -688,8 +686,8 @@ No `langchain`, `mastra`, Vercel AI SDK, or LiteLLM-as-proxy.
 
 `node --test` runs every compiled `*.test.js` under:
 
-- `dist/__tests__/` — cross-cutting (cost, telemetry, runAgent, mcp,
-  router-*, single-shot, skills*, openai-adapter-output, adapter-enrichment).
+- `dist/__tests__/` — cross-cutting (cost, telemetry, mcp, router-*,
+  single-shot, skills*, openai-adapter-output, adapter-enrichment).
 - `dist/agent/session/__tests__/` — process + manager + adapter +
   run-with-agent.
 - `dist/checkpoint/__tests__/` — store + runner + blob-store + key.

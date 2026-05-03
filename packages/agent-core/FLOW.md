@@ -205,66 +205,52 @@ trigger fallback. `content_policy` specifically never crosses providers.
 LanguageModel impls) become grandchildren of `anvil.router.invoke`
 through the OTel context preserved by `runWithRetry`.
 
-## 4. Headless `runAgent` (Inspect-AI contract)
+## 4. `collectTrajectory` (Inspect-AI contract over AgentProcess)
 
 ```
-runAgent(task, workspace, options)             ← src/headless/runner.ts
+collectTrajectory(task, workspace, opts?)      ← src/agent/session/collect-trajectory.ts
   │
-  ├─ if !options.model: throw  ← caller MUST inject a LanguageModel
+  ├─ spec = taskToSpawnConfig(task, workspace)
+  │     ├─ cwd ← workspace.rootDir
+  │     └─ workspaceDir ← workspace.rootDir  (drives skill + MCP discovery)
   │
-  ├─ skillContext = composeSkillContext(task.systemPrompt, {
-  │       workspaceRoot, allowedTools: task.allowedTools
-  │    })
-  │     │
-  │     ▼ src/skills/compose.ts
-  │       resolveSkillsDir → loadSkills → activateSkills(maxBytes=32 KB)
-  │       → renderSkillsForPrompt → applyToolPolicy
+  ├─ proc = new AgentProcess(spec, {
+  │           adapterFactory: defaultAdapterFactory,   ← Phase 1: enriches with
+  │         })                                         ←   skills + MCP automatically
   │
-  ├─ mcpServers = loadMcpServers({ workspaceRoot })   ← src/mcp/config-loader.ts
-  ├─ mcpClients = mcpServers.map(c => new McpAgentClient(c))
-  ├─ { tools, mcpDispatch } = await buildAgentToolset(builtIn, mcpClients)
-  │
-  ├─ messages.push({ role:'system', content: systemPrompt })
+  ├─ messages.push({ role:'system', content: task.systemPrompt }) (when set)
   ├─ messages.push({ role:'user',   content: task.prompt })
   │
-  ├─ loop until iterations >= maxToolLoopIterations (default 25):
+  ├─ attach listeners (BEFORE start, listener-first ordering):
   │    │
-  │    ├─ Date.now() > deadline? finishReason='error' break
-  │    │
-  │    ├─ result = await options.model.invoke({
-  │    │     model, messages, tools, maxTokens, temperature
-  │    │   })
-  │    │
-  │    ├─ usage += result.usage; costUsd += result.costUsd
-  │    ├─ messages.push({ role:'assistant', content: result.text })
-  │    │
-  │    ├─ result.toolCalls.length === 0?
-  │    │     finalAnswer = result.text
-  │    │     finishReason = result.finishReason==='length' ? 'length' : 'end'
-  │    │     break
-  │    │
-  │    └─ for each call in result.toolCalls:
-  │         ├─ deadline check
-  │         ├─ callRecord = await dispatchToolCall(call, mcpDispatch, builtInDispatch, workspace)
-  │         │     │
-  │         │     ├─ mcpDispatch.get(call.name)? → mcpClient.callTool(name, args)
-  │         │     ├─ else builtInDispatch?       → builtInDispatch(name, args, workspace)
-  │         │     └─ else                        → error: "No dispatcher for tool ..."
-  │         │
-  │         ├─ toolCalls.push(callRecord)
-  │         └─ messages.push({ role:'tool', name, toolCallId, content: JSON.stringify(...) })
+  │    ├─ proc.on('content', chunk => assistantBuffer += chunk)
+  │    ├─ proc.on('activity', a => if (a.kind==='tool_use'):
+  │    │       flushAssistantBuffer
+  │    │       toolCalls.push({ callId:a.id, name:a.tool, arguments:JSON.parse(a.content) })
+  │    │       messages.push({ role:'tool', name, toolCallId:a.id })
+  │    │    )
+  │    ├─ proc.on('result', d => { cost = d.cost; finalAnswer = d.result })
+  │    ├─ proc.on('error-output', t => errorText += t)
+  │    └─ proc.on('exit', code => finish(...))
   │
-  ├─ if iterations >= max && finishReason==='tool-use':
-  │       finishReason = 'length'
-  │       error = 'tool-loop iterations exhausted'
+  ├─ AbortSignal? on abort → proc.kill(); finish('error', 'aborted')
+  ├─ timeout (default 600 000ms)? proc.kill(); finish('error', 'timeout')
   │
-  └─ finally: Promise.all(mcpClients.map(c => c.close().catch(noop)))
+  └─ proc.start()                ← AgentProcess takes over (see Flow §2)
+                                   The bridge handles model resolution,
+                                   tool dispatch, telemetry, cost agg.
 
 returns AgentTrajectory {
   messages, toolCalls, model, usage, costUsd,
   finalAnswer, finishReason, error?, durationMs
 }
 ```
+
+The trajectory is materialised post-hoc from the streaming events
+`AgentProcess` already emits — there's no separate inference loop.
+Skill + MCP discovery happens inside `defaultAdapterFactory` during
+the spawn (per AGENT-PROCESS-CONSOLIDATION-ADR §C3) so eval runs see
+exactly the same code path as the dashboard and cli.
 
 ## 5. `runWithCheckpoint` — cache-aware agent call
 

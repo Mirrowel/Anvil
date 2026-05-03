@@ -529,13 +529,15 @@ packages/agent-core/
         └── single-shot.test.ts (9 tests)
 ```
 
-## Agent harness — skills, MCP, headless `runAgent`
+## Agent harness — skills, MCP, eval trajectories
 
 Three independent-but-related capabilities exported from this package, all
 designed against open standards (Anthropic-OpenAI SKILL.md, Model Context
 Protocol, Inspect AI external-agent contract). See
-[`AGENT-HARNESS-ADR.md`](../../AGENT-HARNESS-ADR.md) at the repo root for the
-locked schemas.
+[`AGENT-HARNESS-ADR.md`](../../AGENT-HARNESS-ADR.md) for the original locked
+schemas and [`AGENT-PROCESS-CONSOLIDATION-ADR.md`](../../AGENT-PROCESS-CONSOLIDATION-ADR.md)
+for the consolidation that retired the `runAgent` headless entry in favor of
+`collectTrajectory` over `AgentProcess`.
 
 ### Skills (Anthropic-OpenAI SKILL.md)
 
@@ -589,12 +591,12 @@ const { tools, mcpDispatch } = await buildAgentToolset(builtIn, clients);
 Tool names are namespaced as `<server>/<tool>` so collisions across servers
 become visible.
 
-### Headless `runAgent` (Inspect-AI-compatible)
+### Eval trajectories (`collectTrajectory`, Inspect-AI-compatible)
 
 ```ts
-import { runAgent } from '@anvil/agent-core';
+import { collectTrajectory } from '@anvil/agent-core';
 
-const trajectory = await runAgent(
+const trajectory = await collectTrajectory(
   {
     prompt: 'List the files in the workspace.',
     model: 'claude-sonnet-4-6',
@@ -602,48 +604,44 @@ const trajectory = await runAgent(
   },
   { rootDir: process.cwd() },
   {
-    model: myLanguageModel,           // required: caller injects LanguageModel
-    builtInTools: [/* … */],          // optional: built-in ToolSchema[]
-    builtInDispatch: async (...) => …, // optional: router for non-MCP tools
-    maxToolLoopIterations: 25,        // hard cap (default 25)
-    timeoutMs: 600_000,               // wall-clock cap (default 10 min)
+    timeoutMs: 600_000,    // wall-clock cap (default 10 min)
+    signal: ac.signal,     // optional AbortController integration
   },
 );
 // trajectory: { messages, toolCalls, model, usage, costUsd,
 //               finalAnswer, finishReason, error?, durationMs }
 ```
 
-The trajectory format follows Inspect AI's external-agent contract: messages
-+ tool calls + aggregated usage + cost + final answer. External eval
-harnesses ingest it without conversion.
+`collectTrajectory` spawns an `AgentProcess` (the same execution path the
+dashboard and cli use for live runs), listens to its 5-event surface
+(`content` / `activity` / `result` / `error-output` / `exit`), and resolves
+with an Inspect-AI-shaped trajectory. No separate `LanguageModel` injection
+is required — the production model resolution stack (`ProviderRegistry` →
+`defaultAdapterFactory` → `LanguageModelBridge`) handles it.
 
-> **Note (2026-04-29):** No agent-core adapter implements `LanguageModel`
-> natively yet — see observability ADR §3.4. Callers must inject one via
-> `options.model`. The bridge from `ModelAdapter` to `LanguageModel` is
-> follow-up work; tests use a `ScriptedLanguageModel` mock.
+For one-shot usage from a shell, see `anvil run --task "<prompt>" --json`,
+which wraps `collectTrajectory` and writes the trajectory to stdout.
 
 ### Inspect AI smoke recipe
 
 [Inspect AI](https://github.com/UKGovernmentBEIS/inspect_ai) (UK AISI) is the
-reference external-agent eval framework. Anvil's `runAgent` returns
+reference external-agent eval framework. Anvil's `collectTrajectory` returns
 trajectories in the shape Inspect AI ingests as `inspect eval --solver
 external`.
 
 ```sh
 pip install inspect-ai
 
-# Wrap runAgent as an Inspect AI solver in a small Python ↔ Node bridge.
-# The exact wiring depends on the Inspect AI version at the time of use;
-# the contract on the Anvil side is the AgentTrajectory shape exported
-# from `@anvil/agent-core/headless`.
+# Wrap collectTrajectory as an Inspect AI solver in a small Python ↔ Node
+# bridge — or call `anvil run --task "<prompt>" --json` directly and ingest
+# the JSON. The contract on the Anvil side is the AgentTrajectory shape
+# exported from `@anvil/agent-core`.
 
-inspect eval my_task.py --solver external --model anvil/runAgent
+inspect eval my_task.py --solver external --model anvil/collectTrajectory
 ```
 
-`runAgent` is callable; usage is bounded by your eval framework's harness
-conventions, not by anything Anvil-specific. If Inspect AI's contract
-drifts in a future version, write a ~30-LOC adapter — don't refactor
-`AgentTrajectory`.
+If Inspect AI's contract drifts in a future version, write a ~30-LOC adapter
+— don't refactor `AgentTrajectory`.
 
 ## Lock-in surface
 

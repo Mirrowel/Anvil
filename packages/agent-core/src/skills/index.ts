@@ -3,7 +3,8 @@
  *
  * Phase 1: parser + loader + activator.
  * Phase 2: render + resolve-dir + tool-policy + composeSkillContext.
- * Phase 4 will wire `composeSkillContext` into the headless `runAgent` entry.
+ * Consumed by `defaultAdapterFactory` per AGENT-PROCESS-CONSOLIDATION-ADR §C3,
+ * which wires skills into every `AgentProcess` spawn for non-Claude paths.
  */
 
 export type { Skill, SkillFrontmatter, SkillLoadOptions } from './types.js';

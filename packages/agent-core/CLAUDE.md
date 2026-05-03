@@ -88,9 +88,13 @@ belong in ADRs, not here.
   per spawn for non-Claude providers and threads it through
   `ModelAdapterConfig.toolExecutor`. Path-guard rejects every escape
   vector tested adversarially.
-- Headless `runAgent` (`src/headless/runner.ts`) — Inspect-AI-compatible
-  external-agent contract. Returns `AgentTrajectory`. Caller injects a
-  `LanguageModel`; no agent-core adapter natively implements one yet.
+- Eval trajectory collector (`src/agent/session/collect-trajectory.ts`) —
+  spawns an `AgentProcess` via `defaultAdapterFactory`, listens to the
+  5-event surface, and resolves with an Inspect-AI-shaped
+  `AgentTrajectory`. Replaces the deleted `runAgent` headless entry per
+  AGENT-PROCESS-CONSOLIDATION-ADR §C1; eval consumers call
+  `collectTrajectory(task, workspace)` and the production stack
+  (registry → adapter factory → bridge) handles model resolution.
 - Telemetry (`src/telemetry/`) — OTel spans with GenAI semantic conventions,
   metrics export, OTLP HTTP exporter. Default = no-op.
 - Cost table (`src/cost.ts`) — vendored LiteLLM snapshot at
@@ -218,9 +222,10 @@ when a new flagship rev ships.
   LangChain.
 - No native `LanguageModel.invoke()` impl on any adapter yet — every
   adapter implements `ModelAdapter.run()` only. The bridge from
-  `ModelAdapter` → `LanguageModel` is follow-up work
-  (see ADR §9 Phase 5 deviation). `runAgent` and `LlmRouter` callers
-  must inject their own `LanguageModel`.
+  `ModelAdapter` → `LanguageModel` is follow-up work for `LlmRouter`
+  callers, who must inject their own `LanguageModel`. The eval path
+  (`collectTrajectory`) does NOT need this bridge — it routes through
+  `AgentProcess` + `defaultAdapterFactory` like every other spawn.
 - No tier-promotion — `OllamaAdapter`, `OpenRouterAdapter`, and
   `OpenCodeAdapter` are all `tier:'agentic'` because they drive a real
   tool loop, not because they auto-upgrade any underlying model. The
@@ -249,4 +254,4 @@ when a new flagship rev ships.
 
 - `ARCHITECTURE.md` — module map, layering, type surface, public exports.
 - `FLOW.md` — sequence diagrams for the core paths (single-shot,
-  streaming agent, router invoke, runAgent loop, checkpoint cache).
+  streaming agent, router invoke, collectTrajectory loop, checkpoint cache).
