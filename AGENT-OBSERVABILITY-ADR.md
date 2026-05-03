@@ -30,7 +30,7 @@ The 14 decisions below are normative. Any deviation must be documented in §9.
 | O1 | Telemetry standard | **OpenTelemetry** only | Vendor-neutral, industry standard, supported by every backend. |
 | O2 | Span attribute conventions | **OpenTelemetry GenAI semantic conventions** (`gen_ai.*`) | Every LLM-aware backend reads these natively. |
 | O3 | Default exporter | **No-op** (silent) | Zero-config users see zero behavior change. |
-| O4 | Configurable exporters | **Console** + **OTLP HTTP** via `@opentelemetry/exporter-trace-otlp-http` | Bare OTLP HTTP covers Langfuse, Phoenix, Honeycomb, Datadog, Jaeger, Tempo, Splunk. No vendor SDK in the tree. |
+| ~~O4~~ | ~~Configurable exporters~~ | ~~**Console** + **OTLP HTTP** via `@opentelemetry/exporter-trace-otlp-http`~~ | ~~Bare OTLP HTTP covers Langfuse, Phoenix, Honeycomb, Datadog, Jaeger, Tempo, Splunk. No vendor SDK in the tree.~~ **Superseded 2026-05-03** by [`OBSERVABILITY-LANGFUSE-CONSOLIDATION-ADR.md`](./OBSERVABILITY-LANGFUSE-CONSOLIDATION-ADR.md) §2 — the supported backend is now Langfuse only. OTel SDK + OTLP HTTP wire are unchanged; advanced operators can still point at any other OTLP target, just unsupported. |
 | O5 | Prompt content recording | **Off by default**, opt-in via `ANVIL_OTEL_RECORD_CONTENT=1` | Avoid leaking secrets / API keys / PII into traces. |
 | O6 | Cost annotation | **Computed in agent-core, attached as `gen_ai.usage.cost_usd`** | One source of truth (the cost table from `@anvil/agent-core`'s `cost.ts`). |
 | O7 | Cache metrics | Provider-specific extraction → normalized `gen_ai.usage.cache_read_tokens` / `gen_ai.usage.cache_write_tokens` | Anthropic / OpenAI / Gemini all report cache differently; we normalize. |
@@ -314,3 +314,32 @@ Filled in after each phase commit. Use this section to record deviations, surpri
 ## 10. Open questions
 
 None at Phase 0. The single question that surfaced during audit (how to handle `LanguageModel.invoke` not being implemented) is answered in §3.4.
+
+---
+
+## 11. Amendment — Langfuse consolidation (2026-05-03)
+
+**Status:** Decision **O4** is superseded. See [`OBSERVABILITY-LANGFUSE-CONSOLIDATION-ADR.md`](./OBSERVABILITY-LANGFUSE-CONSOLIDATION-ADR.md) for the full rationale, locked decisions L1–L8, deletion plan, and acceptance gates.
+
+### Why
+
+Operating two observability backends — one for agent data we look at (Langfuse) and one for generic infra spans we don't (Grafana/Tempo/Prometheus/Loki at `infra/observability/`) — was dead weight for an agent product. The LGTM stack rendered LLM traces as flat attribute soup; Langfuse renders the same data as the trees + cost rollups that match how operators actually read a run. The consolidation ADR captures this directionally, removes the LGTM stack, and promotes the prior smoke-test docker-compose to canonical at `infra/observability/docker-compose.yml`.
+
+### What changed
+
+| Surface | Before | After |
+|---|---|---|
+| Local dev stack | `infra/observability/docker-compose.yml` (otel-collector + Tempo + Prometheus + Loki + Grafana) | `infra/observability/docker-compose.yml` (Langfuse + Postgres + ClickHouse + Redis + MinIO) |
+| Dashboard auto-detect probe | `localhost:4318/v1/traces` (OTLP collector) | `localhost:3000/` → sets endpoint to `/api/public/otel/v1/traces` (Langfuse) |
+| Supported backend recipes in agent-core README | 6 (Langfuse cloud, Langfuse self-hosted, Phoenix, Honeycomb, Datadog, Tempo/Jaeger) | 2 (Langfuse cloud, Langfuse self-hosted) + 1-paragraph "any other OTLP backend" pointer |
+
+### What did not change
+
+Decisions O1–O3, O5–O14 are preserved. The in-process OTel tracer at `packages/agent-core/src/telemetry/` is unchanged. All 25 telemetry tests pass. `gen_ai.*` semantic-convention attributes, cost annotation (O6), cache-token normalization (O7), reasoning + tool-call attributes (O8, O9), privacy posture (O5), W3C Trace Context propagation (O13), resource attributes (O14) — all identical. The OTLP HTTP wire is the contract; rolling back to a different OTLP backend is a one-line `OTEL_EXPORTER_OTLP_ENDPOINT` change.
+
+### Files changed during the consolidation
+
+- **Added:** `OBSERVABILITY-LANGFUSE-CONSOLIDATION-ADR.md`
+- **Replaced:** `infra/observability/docker-compose.yml` (LGTM → Langfuse, with `LANGFUSE_PORT` host-port override)
+- **Modified:** `packages/agent-core/README.md` (recipes section), `packages/dashboard/server/dashboard-server.ts` (auto-detect probe), `packages/dashboard/CLAUDE.md`, `packages/dashboard/ARCHITECTURE.md`, `packages/dashboard/README.md`
+- **Deleted:** `packages/agent-core/scripts/otel-stack.yaml` (promoted to canonical) and the 9 LGTM-stack files: `infra/observability/{collector,grafana,loki,prometheus,tempo}/...`
