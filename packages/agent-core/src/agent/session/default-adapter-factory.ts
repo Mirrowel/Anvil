@@ -105,7 +105,15 @@ export function defaultAdapterFactory(request: AdapterRequest): AgentAdapter {
   const registry = ProviderRegistry.getInstance();
   const provider = resolveProvider(request.model);
   const resolved = resolveAdapterOrFallback(registry, provider);
-  const enriched = enrichRequestWithWorkspace(request, resolved.provider);
+  // Default workspaceDir to cwd when the spawn caller didn't set one. This
+  // makes skills + MCP first-class for every spawn site — dashboard, cli,
+  // eval — without each caller having to opt in. Per AGENT-PROCESS-
+  // CONSOLIDATION-ADR §C4 + Phase 4. Callers can explicitly pass
+  // `workspaceDir: ''` (empty string is falsy) to opt out, e.g. from tests.
+  const requestWithDefaults: AdapterRequest = request.workspaceDir === undefined
+    ? { ...request, workspaceDir: request.cwd }
+    : request;
+  const enriched = enrichRequestWithWorkspace(requestWithDefaults, resolved.provider);
   return new LanguageModelBridge(enriched, resolved.adapter, resolved.provider);
 }
 
