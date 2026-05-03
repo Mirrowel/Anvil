@@ -224,11 +224,12 @@ issues `GET /v1/models` with the Bearer token to validate the key.
 
 ## OTel auto-detection
 
-On startup the dashboard probes `localhost:4318/v1/traces` (HEAD
-request, ~500 ms). If the OTLP collector is up and the user hasn't
-explicitly set `OTEL_EXPORTER_OTLP_ENDPOINT`, the dashboard wires it
-automatically so the local Grafana / Tempo / Prometheus stack at
-`infra/observability/` picks up traces with zero config.
+On startup the dashboard probes `localhost:3000/` (HEAD request,
+~800 ms). If something responds and the user hasn't explicitly set
+`OTEL_EXPORTER_OTLP_ENDPOINT`, the dashboard wires it to
+`localhost:3000/api/public/otel/v1/traces` so the local Langfuse
+stack at `infra/observability/docker-compose.yml` picks up traces
+with zero config.
 
 `ANVIL_OTEL_DISABLED=1` short-circuits the probe;
 `ANVIL_OTEL_CONSOLE=1` dumps spans to stderr instead of OTLP.
