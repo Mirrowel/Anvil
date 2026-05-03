@@ -197,10 +197,11 @@ try {
 } catch { /* ok — no .env file */ }
 
 // ── Telemetry auto-detect ──────────────────────────────────────────────
-// If the user is running an OTLP collector locally (port 4318) and
-// hasn't explicitly set OTEL_EXPORTER_OTLP_ENDPOINT, point at it. This
-// flips telemetry from noop → otlp without forcing the user to learn
-// our env-var convention. Probe is best-effort and bounded to 800ms so
+// If the user is running the canonical local Langfuse stack
+// (infra/observability/docker-compose.yml on port 3000) and hasn't
+// explicitly set OTEL_EXPORTER_OTLP_ENDPOINT, point at it. This flips
+// telemetry from noop → otlp without forcing the user to learn our
+// env-var convention. Probe is best-effort and bounded to 800ms so
 // dashboard start isn't blocked by a slow loopback.
 async function autoDetectTelemetry(): Promise<void> {
   if (process.env.ANVIL_OTEL_DISABLED === '1') return;
@@ -212,25 +213,26 @@ async function autoDetectTelemetry(): Promise<void> {
     console.log('[dashboard] OTel exporter → console (ANVIL_OTEL_CONSOLE=1)');
     return;
   }
-  const candidate = 'http://localhost:4318';
+  const host = 'http://localhost:3000';
+  const otlpPath = '/api/public/otel/v1/traces';
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 800);
-    // Probe the OTLP HTTP traces endpoint with a HEAD request — collectors
-    // typically 405 on HEAD (method not allowed) but the connection
-    // succeeds, which is enough to confirm something's listening.
-    const res = await fetch(`${candidate}/v1/traces`, { method: 'HEAD', signal: ctrl.signal })
+    // Probe the Langfuse Next.js root with a HEAD request — Langfuse
+    // serves the app on / and returns 200/3xx; the OTLP path itself is
+    // POST-only and would 405. Either confirms "something's listening".
+    const res = await fetch(`${host}/`, { method: 'HEAD', signal: ctrl.signal })
       .catch(() => null);
     clearTimeout(timer);
-    if (res && (res.ok || res.status === 405 || res.status === 404)) {
-      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = candidate;
+    if (res && res.status < 500) {
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = `${host}${otlpPath}`;
       if (!process.env.OTEL_SERVICE_NAME) process.env.OTEL_SERVICE_NAME = 'anvil-dashboard';
-      console.log(`[dashboard] OTel collector detected at ${candidate} — exporter enabled (service.name=${process.env.OTEL_SERVICE_NAME})`);
+      console.log(`[dashboard] Langfuse detected at ${host} — exporter enabled (service.name=${process.env.OTEL_SERVICE_NAME})`);
     } else {
-      console.log('[dashboard] No OTel collector at localhost:4318 — telemetry off (set OTEL_EXPORTER_OTLP_ENDPOINT to override)');
+      console.log('[dashboard] No Langfuse at localhost:3000 — telemetry off (set OTEL_EXPORTER_OTLP_ENDPOINT to override)');
     }
   } catch {
-    console.log('[dashboard] OTel collector probe failed — telemetry off');
+    console.log('[dashboard] Langfuse probe failed — telemetry off');
   }
 }
 // Fire-and-forget; the actual tracer is initialized lazily on first

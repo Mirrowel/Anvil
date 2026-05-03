@@ -147,12 +147,13 @@ issues `GET /v1/models` with the Bearer token).
 
 ### OTel auto-detection
 
-On startup `autoDetectTelemetry()` probes `localhost:4318/v1/traces`
-(HEAD, ~500 ms). If alive AND the user hasn't already set
-`OTEL_EXPORTER_OTLP_ENDPOINT`, the dashboard auto-wires it so the
-local Grafana/Tempo/Prometheus stack at `infra/observability/`
-lights up with zero config. `ANVIL_OTEL_DISABLED=1` short-circuits
-the probe; `ANVIL_OTEL_CONSOLE=1` dumps spans to stderr.
+On startup `autoDetectTelemetry()` probes `localhost:3000` (HEAD on
+`/`, ~800 ms). If alive AND the user hasn't already set
+`OTEL_EXPORTER_OTLP_ENDPOINT`, the dashboard auto-wires it to
+`localhost:3000/api/public/otel/v1/traces` so the local Langfuse
+stack at `infra/observability/docker-compose.yml` lights up with
+zero config. `ANVIL_OTEL_DISABLED=1` short-circuits the probe;
+`ANVIL_OTEL_CONSOLE=1` dumps spans to stderr.
 
 ### Project-prompt cache invariants (P1)
 

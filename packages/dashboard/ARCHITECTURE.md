@@ -19,7 +19,7 @@ future-tense roadmap content — only what compiles today.
    │   • boots subsystems: AgentManager, MemoryStore, FeatureStore,   │
    │     KnowledgeBaseManager, PipelinePauseStore, PipelineRunner,    │
    │     CostLedger, BridgedCostLedger, RunStore                      │
-   │   • OTel auto-detection (probes localhost:4318/v1/traces)        │
+   │   • OTel auto-detection (probes Langfuse at localhost:3000/)     │
    │   • PR URL extraction + PR-tracker rollup                        │
    │   • approval-token HTTP handlers (/approve, /reject)             │
    └──────────────────────────────────────────────────────────────────┘
