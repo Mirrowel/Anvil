@@ -6,68 +6,20 @@ import { registerGlobalFlags } from './flags.js';
 import { initCommand } from './commands/init.js';
 import { doctorCommand } from './commands/doctor.js';
 import { dashboardCommand } from './commands/dashboard.js';
-import { planCommand } from './commands/plan.js';
-import { reviewCommand } from './commands/review.js';
-import { testCommand } from './commands/test.js';
-import { incidentsCommand } from './commands/incidents.js';
-import { policyCommand } from './commands/policy.js';
-import { costCommand } from './commands/cost.js';
-import { checkpointsCommand } from './commands/checkpoints.js';
-import { contractsCommand } from './commands/contracts.js';
-import { testsRankCommand } from './commands/tests-rank.js';
-import { triageCommand } from './commands/triage.js';
-import { runCommand } from './commands/run.js';
 
 const program = new Command();
 
 program
   .name('anvil')
   .version(getVersion())
-  .description('Anvil — AI-powered development pipeline\n\nMVP 1: Use the dashboard for full pipeline experience.\nCLI commands coming in a future release.');
+  .description('Anvil — AI-powered development pipeline\n\nMVP 2: Use the dashboard for full pipeline experience.\nCLI commands coming in a future release.');
 
 registerGlobalFlags(program);
 
-// ── MVP 1 — Active commands ──────────────────────────────────────────
+// ── MVP 2 — Active commands ──────────────────────────────────────────
 program.addCommand(initCommand);
 program.addCommand(doctorCommand);
 program.addCommand(dashboardCommand);
-program.addCommand(planCommand);
-program.addCommand(reviewCommand);
-program.addCommand(testCommand);
-program.addCommand(incidentsCommand);
-program.addCommand(policyCommand);
-program.addCommand(costCommand);
-program.addCommand(checkpointsCommand);
-program.addCommand(contractsCommand);
-program.addCommand(testsRankCommand);
-program.addCommand(triageCommand);
-program.addCommand(runCommand);
-
-// ── Future CLI commands (disabled for MVP 1) ─────────────────────────
-const comingSoon = (name: string, desc: string) => {
-  const cmd = new Command(name);
-  cmd.description(`${desc} [coming soon]`);
-  cmd.action(() => {
-    console.log(`\n  anvil ${name} is coming in a future release.\n`);
-    console.log(`  For now, use the dashboard:\n`);
-    console.log(`    anvil dashboard\n`);
-  });
-  return cmd;
-};
-
-program.addCommand(comingSoon('fix', 'Fix a bug'));
-program.addCommand(comingSoon('resume', 'Resume a pipeline'));
-program.addCommand(comingSoon('status', 'Show pipeline status'));
-program.addCommand(comingSoon('runs', 'List pipeline runs'));
-program.addCommand(comingSoon('cancel', 'Cancel a running pipeline'));
-program.addCommand(comingSoon('ship', 'Ship changes and create PRs'));
-program.addCommand(comingSoon('memory', 'Manage project memory'));
-program.addCommand(comingSoon('search', 'Search the knowledge base'));
-program.addCommand(comingSoon('learn', 'Learn conventions from codebase'));
-program.addCommand(comingSoon('diff', 'AI-powered diff analysis'));
-program.addCommand(comingSoon('test-gen', 'Generate tests'));
-program.addCommand(comingSoon('watch', 'Watch for changes'));
-program.addCommand(comingSoon('team', 'Team collaboration'));
 
 // Default action — launch dashboard
 if (process.argv.length <= 2) {

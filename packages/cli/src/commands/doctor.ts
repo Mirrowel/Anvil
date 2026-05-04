@@ -72,17 +72,58 @@ function checkGeminiCli(): CheckResult {
   return { name: 'gemini', ok: true, optional: true, message: extractVersion(out) };
 }
 
+type AuthStore = Record<string, { key?: string }>;
+
+function loadAuthStore(): AuthStore {
+  const authPath = join(homedir(), '.anvil', 'auth.json');
+  if (!existsSync(authPath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(authPath, 'utf-8'));
+    return parsed && typeof parsed === 'object' ? (parsed as AuthStore) : {};
+  } catch {
+    return {};
+  }
+}
+
+function readAnvilEnvFile(): Record<string, string> {
+  const envPath = join(homedir(), '.anvil', '.env');
+  if (!existsSync(envPath)) return {};
+  try {
+    const content = readFileSync(envPath, 'utf-8');
+    const out: Record<string, string> = {};
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx < 1) continue;
+      out[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function isProviderConfigured(envVars: string[], authStore: AuthStore, dotenv: Record<string, string>, authKeys: string[]): boolean {
+  if (envVars.some((v) => !!process.env[v])) return true;
+  if (envVars.some((v) => !!dotenv[v])) return true;
+  if (authKeys.some((k) => !!authStore[k]?.key)) return true;
+  return false;
+}
+
 function checkProviderKeys(): CheckResult {
   const children: CheckResult[] = [];
+  const auth = loadAuthStore();
+  const dotenv = readAnvilEnvFile();
 
-  const openaiKey = !!process.env.OPENAI_API_KEY;
-  children.push({ name: 'OpenAI', ok: openaiKey, optional: true, message: openaiKey ? 'OPENAI_API_KEY set' : 'OPENAI_API_KEY not set' });
+  const openai = isProviderConfigured(['OPENAI_API_KEY'], auth, dotenv, ['openai']);
+  children.push({ name: 'OpenAI', ok: openai, optional: true, message: openai ? 'API key set' : 'OPENAI_API_KEY not set' });
 
-  const geminiKey = !!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
-  children.push({ name: 'Gemini', ok: geminiKey, optional: true, message: geminiKey ? 'API key set' : 'GOOGLE_API_KEY / GEMINI_API_KEY not set' });
+  const gemini = isProviderConfigured(['GOOGLE_API_KEY', 'GEMINI_API_KEY'], auth, dotenv, ['gemini']);
+  children.push({ name: 'Gemini', ok: gemini, optional: true, message: gemini ? 'API key set' : 'GOOGLE_API_KEY / GEMINI_API_KEY not set' });
 
-  const openrouterKey = !!process.env.OPENROUTER_API_KEY;
-  children.push({ name: 'OpenRouter', ok: openrouterKey, optional: true, message: openrouterKey ? 'OPENROUTER_API_KEY set' : 'OPENROUTER_API_KEY not set' });
+  const openrouter = isProviderConfigured(['OPENROUTER_API_KEY'], auth, dotenv, ['openrouter']);
+  children.push({ name: 'OpenRouter', ok: openrouter, optional: true, message: openrouter ? 'API key set' : 'OPENROUTER_API_KEY not set' });
 
   const ollamaAvail = tryExec('curl -s http://localhost:11434/api/tags 2>/dev/null');
   children.push({ name: 'Ollama', ok: !!ollamaAvail, optional: true, message: ollamaAvail ? 'running on localhost:11434' : 'not running' });

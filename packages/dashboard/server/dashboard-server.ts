@@ -197,13 +197,12 @@ try {
   }
 } catch { /* ok — no .env file */ }
 
-// ── Telemetry auto-detect ──────────────────────────────────────────────
+// ── Telemetry auto-detect (silent when off) ────────────────────────────
 // If the user is running the canonical local Langfuse stack
 // (infra/observability/docker-compose.yml on port 3000) and hasn't
-// explicitly set OTEL_EXPORTER_OTLP_ENDPOINT, point at it. This flips
-// telemetry from noop → otlp without forcing the user to learn our
-// env-var convention. Probe is best-effort and bounded to 800ms so
-// dashboard start isn't blocked by a slow loopback.
+// explicitly set OTEL_EXPORTER_OTLP_ENDPOINT, point at it. We only log
+// when telemetry is actually enabled — a missing/closed Langfuse is the
+// expected default and shouldn't print anything.
 async function autoDetectTelemetry(): Promise<void> {
   if (process.env.ANVIL_OTEL_DISABLED === '1') return;
   if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
@@ -219,9 +218,6 @@ async function autoDetectTelemetry(): Promise<void> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 800);
-    // Probe the Langfuse Next.js root with a HEAD request — Langfuse
-    // serves the app on / and returns 200/3xx; the OTLP path itself is
-    // POST-only and would 405. Either confirms "something's listening".
     const res = await fetch(`${host}/`, { method: 'HEAD', signal: ctrl.signal })
       .catch(() => null);
     clearTimeout(timer);
@@ -229,13 +225,16 @@ async function autoDetectTelemetry(): Promise<void> {
       process.env.OTEL_EXPORTER_OTLP_ENDPOINT = `${host}${otlpPath}`;
       if (!process.env.OTEL_SERVICE_NAME) process.env.OTEL_SERVICE_NAME = 'anvil-dashboard';
       console.log(`[dashboard] Langfuse detected at ${host} — exporter enabled (service.name=${process.env.OTEL_SERVICE_NAME})`);
-    } else {
-      console.log('[dashboard] No Langfuse at localhost:3000 — telemetry off (set OTEL_EXPORTER_OTLP_ENDPOINT to override)');
     }
+    // No log when Langfuse isn't running — that's the expected default.
   } catch {
-    console.log('[dashboard] Langfuse probe failed — telemetry off');
+    // No log on probe failure — same reason.
   }
 }
+// Default OTel SDK log level to NONE so a misconfigured/unreachable
+// exporter doesn't spam the terminal. Override with OTEL_LOG_LEVEL=ERROR
+// to debug.
+if (!process.env.OTEL_LOG_LEVEL) process.env.OTEL_LOG_LEVEL = 'NONE';
 // Fire-and-forget; the actual tracer is initialized lazily on first
 // agent call, by which time process.env will be populated.
 void autoDetectTelemetry();
@@ -7070,11 +7069,7 @@ Findings array may be empty. No prose outside the JSON block.`;
       const { findInterruptedPipelines } = await import('./pipeline-runner.js');
       const incomplete = findInterruptedPipelines(ANVIL_HOME);
       if (incomplete.length > 0) {
-        console.log(`[dashboard] Found ${incomplete.length} incomplete pipeline(s) from previous session(s)`);
         for (const cp of incomplete) {
-          const stageInfo = cp.stages[cp.currentStage];
-          console.log(`  - "${cp.feature}" (${cp.project}) [${cp.status}] at stage ${cp.currentStage} [${stageInfo?.name ?? '?'}]`);
-
           // Add to activeRuns so they appear in the Active Runs page
           activeRuns.set(cp.runId, {
             id: cp.runId,
