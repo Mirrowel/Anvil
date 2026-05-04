@@ -1,6 +1,6 @@
 {
   "name": "@anvil/memory-core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "Long-term memory layer for Anvil — five-type taxonomy (working/episodic/semantic/procedural/profile), bi-temporal facts, code-fact drift detection, sleeptime ratification, PR-as-episode primitives.",
   "type": "module",

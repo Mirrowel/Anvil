@@ -1,6 +1,6 @@
 {
   "name": "@anvil/agent-core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "Shared LLM stack — unified LanguageModel interface, provider adapters, agent subprocess machinery, and cost calculation for cli + knowledge-core + headless runners.",
   "type": "module",

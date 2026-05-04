@@ -1,6 +1,6 @@
 {
   "name": "@anvil/convention-core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "Project convention extraction, rule engine, and promotion ledger for Anvil. Owns ~/.anvil/conventions/<project>/{conventions.md, rules.json}.",
   "type": "module",

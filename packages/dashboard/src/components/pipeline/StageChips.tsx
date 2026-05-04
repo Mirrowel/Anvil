@@ -138,38 +138,25 @@ export function StageChips({ stages, currentStage: _currentStage, onStageSelect,
                 <Circle size={16} strokeWidth={1.75} style={{ color: 'var(--text-quaternary)', flexShrink: 0 }} />
               )}
 
-              {/* Stage name */}
-              <span style={{ flex: 1 }}>
+              {/* Stage name — truncates with ellipsis so the model badge stays visible */}
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 {getDisplayName(stage.name)}
               </span>
 
-              {/* Permission badge — read 🔒 / write 📝 / exec ⚡ */}
-              {stage.permissionClasses && stage.permissionClasses.length > 0 && (
-                <span
-                  title={`Tools allowed: ${stage.permissionClasses.join(', ')}`}
-                  style={{
-                    fontSize: 10,
-                    fontFamily: 'var(--font-mono)',
-                    color: 'var(--text-tertiary)',
-                    background: 'var(--bg-elevated-3)',
-                    padding: '1px 5px',
-                    borderRadius: 'var(--radius-sm)',
-                    lineHeight: '16px',
-                  }}
-                >
-                  {stage.permissionClasses.includes('exec')
-                    ? 'r/w/x'
-                    : stage.permissionClasses.includes('write')
-                      ? 'r/w'
-                      : 'r'}
-                </span>
-              )}
-
-              {/* Model badge */}
+              {/* Model badge — never shrinks; the stage name truncates first */}
               {stage.modelLabel && (
                 <span
                   title={`Resolved: ${stage.modelLabel}`}
                   style={{
+                    flexShrink: 0,
                     fontSize: 10,
                     fontFamily: 'var(--font-mono)',
                     color: 'var(--text-tertiary)',
@@ -177,6 +164,7 @@ export function StageChips({ stages, currentStage: _currentStage, onStageSelect,
                     padding: '1px 5px',
                     borderRadius: 'var(--radius-sm)',
                     lineHeight: '16px',
+                    whiteSpace: 'nowrap',
                   }}
                 >
                   {stage.modelLabel}
