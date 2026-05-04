@@ -96,10 +96,13 @@ export class ProviderRegistry {
       return 'openai';
     }
 
-    // Gemini patterns
-    if (id.startsWith('gemini-')) {
-      return 'gemini';
-    }
+    // Gemini patterns intentionally not auto-mapped here. The bare HTTP
+    // `gemini` adapter is `tier: function-calling`, NOT agentic, so
+    // routing `gemini-2.5-flash` → 'gemini' would silently fall back to
+    // claude on agentic stages. Force callers to be explicit:
+    //   - Agentic Gemini  → use `adk:gemini-…` (provider: adk)
+    //   - Single-shot CLI → use single-shot.runGemini (gemini-cli binary)
+    // models.yaml entries should declare `provider: adk` explicitly.
 
     // OpenRouter uses `org/model` format
     if (id.includes('/')) {

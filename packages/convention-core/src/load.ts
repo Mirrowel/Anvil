@@ -51,25 +51,19 @@ export async function loadConventions(paths: ConventionPaths, project: string): 
 /**
  * Load structured convention rules for a project. Returns [] when none exist.
  *
- * Resolution order (first non-empty wins):
- *  1. `<conventionsDir>/<project>/rules.json` — canonical
- *  2. `<rulesDir>/<project>/generated.json` — legacy dashboard path
- *
- * Step 2 is read-fallback only; new writes go to (1).
+ * convention-core is the single source of truth — rules live at
+ * `<conventionsDir>/<project>/rules.json`, written by `extractConventions`.
+ * The legacy `<rulesDir>/<project>/generated.json` fallback was dropped:
+ * it produced stale rules whenever `Regenerate` was clicked because the
+ * dashboard's old `convention-generator.js` wrote that file separately.
  */
 export function loadRules(paths: ConventionPaths, project: string): ConventionRule[] {
   const canonical = join(paths.conventionsDir, project, 'rules.json');
-  const legacy = join(paths.rulesDir, project, 'generated.json');
-
-  const tryRead = (path: string): ConventionRule[] | null => {
-    if (!existsSync(path)) return null;
-    try {
-      const raw = JSON.parse(readFileSync(path, 'utf-8')) as { rules?: ConventionRule[] };
-      return Array.isArray(raw.rules) ? raw.rules : [];
-    } catch {
-      return null;
-    }
-  };
-
-  return tryRead(canonical) ?? tryRead(legacy) ?? [];
+  if (!existsSync(canonical)) return [];
+  try {
+    const raw = JSON.parse(readFileSync(canonical, 'utf-8')) as { rules?: ConventionRule[] };
+    return Array.isArray(raw.rules) ? raw.rules : [];
+  } catch {
+    return [];
+  }
 }

@@ -17,6 +17,7 @@
 import { execSync } from 'node:child_process';
 import { trace } from '@opentelemetry/api';
 import { ProviderRegistry } from '../../registry.js';
+import { loadModelRegistry, type ModelRegistry } from '../../router/model-registry.js';
 import type { ModelAdapter, ProviderName } from '../../types.js';
 import type {
   AdapterRequest,
@@ -30,16 +31,27 @@ import { findMcpConfigPath, loadMcpServers } from '../../mcp/index.js';
 // ── Provider resolution ──────────────────────────────────────────────────
 
 export function resolveProvider(modelId: string): ProviderName {
+  // User registry wins over heuristics. If models.yaml declares
+  // `provider: gemini` for `gemini-2.5-flash`, honor that — don't
+  // silently route to gemini-cli just because the binary is on PATH.
+  const declared = lookupDeclaredProvider(modelId);
+  if (declared) return declared;
+
   const id = modelId.toLowerCase();
 
   // Ollama: explicit `ollama:` prefix or `:tag` suffix common to local models
   // (e.g. `qwen2.5-coder:7b`, `llama3.1:8b`).
   if (id.startsWith('ollama:')) return 'ollama';
 
-  // Gemini: prefer CLI when available, fall back to HTTP API.
+  // Gemini: route to the CLI when the binary is on PATH (matches user
+  // intent of running `gemini` interactively). Otherwise fall through to
+  // the registry's claude default — the bare HTTP `gemini` adapter is
+  // `tier: function-calling` (no agentic loop) so callers must opt in
+  // explicitly via `adk:gemini-…` for agentic Gemini, or use
+  // `single-shot.runGemini` for the CLI single-shot path.
   if (id.startsWith('gemini-')) {
     if (geminiCliAvailable()) return 'gemini-cli';
-    return 'gemini';
+    // No silent fallback to non-agentic gemini HTTP — fall through.
   }
 
   // OpenAI patterns
@@ -76,6 +88,24 @@ export function resolveProvider(modelId: string): ProviderName {
 
   // Claude (default)
   return 'claude';
+}
+
+// Cache the parsed user registry so repeated factory calls don't re-read +
+// re-parse models.yaml from disk. Set ANVIL_MODELS_RELOAD=1 in the env to
+// bypass the cache (useful when iterating on the yaml during a long-lived
+// dashboard session).
+let modelRegistryCache: ModelRegistry | null = null;
+function lookupDeclaredProvider(modelId: string): ProviderName | null {
+  if (process.env.ANVIL_MODELS_RELOAD === '1') modelRegistryCache = null;
+  if (modelRegistryCache === null) {
+    try {
+      modelRegistryCache = loadModelRegistry();
+    } catch {
+      modelRegistryCache = { models: [], walker: { liveness_ttl_ms: 30000, max_attempts: 5 } };
+    }
+  }
+  const match = modelRegistryCache.models.find((m) => m.id === modelId);
+  return match?.provider ?? null;
 }
 
 // Cache the CLI probe so repeated factory calls don't fork a shell each time.

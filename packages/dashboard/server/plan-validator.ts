@@ -12,7 +12,12 @@ import { homedir } from 'node:os';
 import type { Plan } from './plan-store.js';
 import type { ProjectLoader } from './project-loader.js';
 import { checkBudget } from './plan-validator-rules/budget.js';
-import { checkConventions } from './plan-validator-rules/conventions.js';
+// Convention enforcement on plans is intentionally absent — the legacy
+// `plan-validator-rules/conventions.ts` read its own bespoke
+// `~/.anvil/projects/<project>/conventions.json` outside convention-core.
+// Per the single-source-of-truth migration, plans no longer get
+// convention checks here; convention-core is consulted only by the
+// review/build stages where rule shape and severity are already wired.
 import { checkPrConflicts } from './plan-validator-rules/pr-conflicts.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -295,13 +300,8 @@ export class PlanValidator {
       } catch { /* rule failure is non-fatal */ }
     }
 
-    // 6. Conventions (enforced rules only)
-    try {
-      issues.push(...checkConventions(plan, {
-        anvilHome: ANVIL_HOME,
-        project: plan.project,
-      }));
-    } catch { /* non-fatal */ }
+    // 6. Conventions check removed (was reading a legacy bespoke file).
+    //    Add back here once convention-core grows a plan-shaped check API.
 
     // 7. Open-PR conflicts (deep only — hits gh CLI)
     if (options.deep && options.githubByRepoName) {

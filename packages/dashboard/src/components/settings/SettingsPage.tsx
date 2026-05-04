@@ -425,74 +425,58 @@ function ProvidersTab({
         </section>
       )}
 
-      {/* API Providers — Coming Soon teaser for MVP2 */}
+      {/* API Providers — live; status dot reflects whether the env var is loaded */}
       {apiProviders.length > 0 && (
         <section aria-label="API Providers">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <h3 style={{ ...sectionHeaderStyle, marginBottom: 0 }}>API Providers</h3>
-            <span style={{
-              padding: '1px 8px', fontSize: 9, fontWeight: 600,
-              background: 'var(--accent-muted)',
-              color: 'var(--accent)',
-              borderRadius: 'var(--radius-full)',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-            }}>
-              MVP 2
-            </span>
-          </div>
-          <div style={{
-            padding: '16px',
-            background: 'var(--bg-elevated-2)',
-            border: '1px solid var(--separator)',
-            borderRadius: 'var(--radius-md)',
-            opacity: 0.7,
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
-              {apiProviders.map((p) => (
-                <div
-                  key={p.name}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '8px 12px',
-                    background: 'var(--bg-base)',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: 13,
-                  }}
-                >
-                  <span style={{
-                    width: 8, height: 8, borderRadius: '50%',
-                    background: 'var(--text-tertiary)', opacity: 0.4,
-                    flexShrink: 0,
-                  }} />
-                  <span style={{ fontWeight: 500, color: 'var(--text-secondary)', minWidth: 120 }}>
-                    {p.displayName || p.name}
-                  </span>
+          <h3 style={sectionHeaderStyle}>API Providers</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {apiProviders.map((p) => (
+              <div
+                key={p.name}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 14px',
+                  background: 'var(--bg-elevated-2)',
+                  border: '1px solid var(--separator)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 13,
+                }}
+              >
+                <ProviderStatusDot active={p.isAvailable} />
+                <span style={{ fontWeight: 500, color: 'var(--text-primary)', minWidth: 120 }}>
+                  {p.displayName || p.name}
+                </span>
+                {p.envVar && (
                   <span style={{
                     fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)',
                   }}>
-                    {p.envVar || ''}
+                    {p.envVar}
                   </span>
-                  {p.capabilities && p.capabilities.length > 0 && (
-                    <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
-                      {p.capabilities.map((cap) => (
-                        <span key={cap} style={{ ...capabilityBadgeStyle, opacity: 0.6 }}>{cap}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div style={{
-              fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6,
-              padding: '10px 12px',
-              background: 'var(--bg-base)',
-              borderRadius: 'var(--radius-sm)',
-              border: '1px dashed var(--separator)',
-            }}>
-              Configure API keys for OpenAI, Gemini, OpenRouter, and Ollama to use any model
-              as a pipeline agent. Coming in MVP 2 alongside multi-provider orchestration.
-            </div>
+                )}
+                {!p.isAvailable && (
+                  <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                    Not set
+                  </span>
+                )}
+                {p.capabilities && p.capabilities.length > 0 && (
+                  <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+                    {p.capabilities.map((cap) => (
+                      <span key={cap} style={capabilityBadgeStyle}>{cap}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {apiProviders.filter((p) => !p.isAvailable && p.setupHint).map((p) => (
+              <div key={`${p.name}-hint`} style={{
+                padding: '6px 14px 6px 34px',
+                fontSize: 11,
+                color: 'var(--text-tertiary)',
+                fontFamily: 'var(--font-mono)',
+              }}>
+                {p.setupHint}
+              </div>
+            ))}
           </div>
         </section>
       )}

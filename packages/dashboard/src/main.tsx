@@ -977,7 +977,6 @@ function App() {
         return <ProjectOverview
           projectName={currentProject?.name ?? 'None'}
           repos={overviewData.repos}
-          memories={overviewData.memories}
           conventions={overviewData.conventions}
           features={overviewData.features}
           kbStatus={overviewData.kbStatus ?? null}

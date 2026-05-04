@@ -85,7 +85,11 @@ function ensureMeter(): Meter {
   if (_meter) return _meter;
 
   const config = loadTelemetryConfig();
-  if (!config.enabled || config.exporterMode !== 'otlp') {
+  // ANVIL_OTEL_METRICS_DISABLED=1 → keep traces but skip metrics export.
+  // Useful when the OTLP backend is traces-only (e.g. Langfuse), where
+  // POSTing metrics produces a periodic AggregateError every export tick.
+  const metricsDisabled = process.env.ANVIL_OTEL_METRICS_DISABLED === '1';
+  if (!config.enabled || config.exporterMode !== 'otlp' || metricsDisabled) {
     // Use the global no-op MeterProvider when telemetry is disabled or in
     // console mode (no metrics console exporter wired today).
     _meter = metrics.getMeter(METER_NAME, VERSION);

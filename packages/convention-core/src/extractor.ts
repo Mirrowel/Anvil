@@ -10,6 +10,7 @@ import { detectErrorHandling } from './detectors/error-handling.js';
 import { aggregateConventions } from './aggregator.js';
 import type { RepoConventions } from './aggregator.js';
 import { formatConventions } from './formatter.js';
+import { synthesizeRules } from './synthesize-rules.js';
 
 /**
  * Recursively list files in a directory with an extension filter.
@@ -96,14 +97,22 @@ export function extractConventions(
 
   const aggregated = aggregateConventions(repoConventions);
   const markdown = formatConventions(aggregated);
+  const rules = synthesizeRules(aggregated);
 
-  // Write to conventions dir
+  // Write to conventions dir. `rules.json` is the canonical structured
+  // form (read by loadRules), `conventions.md` is the human-readable
+  // narrative form. Both regenerate together — keeping them in lock-step
+  // is what makes the dashboard's "Regenerate" button visibly work.
   const conventionsDir = join(paths.conventionsDir, project);
   if (!existsSync(conventionsDir)) {
     mkdirSync(conventionsDir, { recursive: true });
   }
-  const outputPath = join(conventionsDir, 'conventions.md');
-  writeFileSync(outputPath, markdown, 'utf-8');
+  writeFileSync(join(conventionsDir, 'conventions.md'), markdown, 'utf-8');
+  writeFileSync(
+    join(conventionsDir, 'rules.json'),
+    JSON.stringify({ rules }, null, 2),
+    'utf-8',
+  );
 
   return markdown;
 }
