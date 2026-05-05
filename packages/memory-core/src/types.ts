@@ -75,7 +75,7 @@ export interface MemoryProvenance {
 
 export interface CodeFactBinding {
   filePath: string;
-  /** Reuses `@anvil/knowledge-core/structural-hasher.ts`. */
+  /** Reuses `@esankhan3/anvil-knowledge-core/structural-hasher.ts`. */
   structuralHash: string;
   lastSeenCommitSha: string;
   /** ISO-8601. */

@@ -20,7 +20,7 @@
  * prose only when a fact can't be expressed mechanically.
  */
 
-import type { ModelCapability, ModelComplexity, ModelTier } from '@anvil/agent-core';
+import type { ModelCapability, ModelComplexity, ModelTier } from '@esankhan3/anvil-agent-core';
 
 export type TaskOperation = 'create' | 'modify' | 'delete';
 

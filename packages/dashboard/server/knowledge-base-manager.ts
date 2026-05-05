@@ -39,7 +39,7 @@ const execFileAsync = promisify(execFile);
  */
 const KB_BUILD_REFS: readonly string[] = ['origin/main', 'main', 'origin/master', 'master'];
 
-/** index_meta.json shape written by `@anvil/knowledge-core`'s indexer. */
+/** index_meta.json shape written by `@esankhan3/anvil-knowledge-core`'s indexer. */
 interface KnowledgeCoreIndexMeta {
   lastIndexedSha: string;
   lastIndexedAt: string;
@@ -537,7 +537,7 @@ export class KnowledgeBaseManager {
       // dedup (the merkle bit), AST graph build, cross-repo edges, and
       // vector embeddings. The dashboard used to reimplement a thinner
       // version of this — that path has been removed.
-      const { KnowledgeIndexer, loadKnowledgeConfig } = await import('@anvil/knowledge-core');
+      const { KnowledgeIndexer, loadKnowledgeConfig } = await import('@esankhan3/anvil-knowledge-core');
       const config = loadKnowledgeConfig(project);
       const indexer = new KnowledgeIndexer();
 
@@ -1168,7 +1168,7 @@ export class KnowledgeBaseManager {
     if (this.hybridContextCache.has(key)) return;
 
     try {
-      const { getRetriever } = await import('@anvil/knowledge-core');
+      const { getRetriever } = await import('@esankhan3/anvil-knowledge-core');
       const retriever = await getRetriever(project);
       const result = await retriever.retrieve(query, { maxTokens });
       if (result.chunks.length > 0) {

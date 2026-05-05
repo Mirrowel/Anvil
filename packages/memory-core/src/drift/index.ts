@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/drift — code-fact drift detection (Phase 6).
+ * @esankhan3/anvil-memory-core/drift — code-fact drift detection (Phase 6).
  */
 
 export {

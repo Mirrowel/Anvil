@@ -1,5 +1,5 @@
 /**
- * `@anvil/agent-core/agent/session` — barrel exports for the agent-lifecycle
+ * `@esankhan3/anvil-agent-core/agent/session` — barrel exports for the agent-lifecycle
  * layer. agent-core is the canonical source of truth for `AgentManager`
  * (registry of many) and `AgentProcess` (one logical agent).
  */

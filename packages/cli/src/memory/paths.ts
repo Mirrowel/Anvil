@@ -9,7 +9,7 @@ import { getFFDirs } from '../home.js';
 import {
   namespaceToRelativePath,
   type MemoryNamespace,
-} from '@anvil/memory-core';
+} from '@esankhan3/anvil-memory-core';
 
 /**
  * Sanitize a project name for use as a directory name.

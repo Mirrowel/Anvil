@@ -31,7 +31,7 @@
  *   build        → extractChangeBrief
  *   validate     → extractOpenQuestions
  */
-import type { Step } from '@anvil/core-pipeline';
+import type { Step } from '@esankhan3/anvil-core-pipeline';
 import type { FeatureManifestStore } from '../feature-manifest.js';
 import { type ManifestExtractor } from '../feature-manifest-extractors.js';
 /**

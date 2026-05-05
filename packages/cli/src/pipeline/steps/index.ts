@@ -8,7 +8,7 @@
  * artifact emission).
  */
 
-import { InMemoryStepRegistry, type StepRegistry } from '@anvil/core-pipeline';
+import { InMemoryStepRegistry, type StepRegistry } from '@esankhan3/anvil-core-pipeline';
 import { createClarifyStep, CLARIFY_STEP_ID, CLARIFICATION_ARTIFACT_ID } from './clarify.step.js';
 import {
   createHighLevelRequirementsStep,

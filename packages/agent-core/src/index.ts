@@ -1,5 +1,5 @@
 /**
- * @anvil/agent-core — public barrel.
+ * @esankhan3/anvil-agent-core — public barrel.
  *
  * What lives here today (Phase 1):
  *   - Shared LLM types: `LanguageModel`, `ModelAdapter`, `ProviderName`,

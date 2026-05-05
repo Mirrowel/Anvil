@@ -1,5 +1,5 @@
 /**
- * Phase 1 smoke tests for `@anvil/agent-core/router`.
+ * Phase 1 smoke tests for `@esankhan3/anvil-agent-core/router`.
  *
  * Verifies:
  *   1. Module barrel exports the canonical surface

@@ -28,8 +28,8 @@
  * directly — pipeline-runner wires those callbacks today.
  */
 import { type ClarifyQAPair } from './clarify.step.js';
-import type { AgentManager } from '@anvil/agent-core';
-import type { Step, StepContext } from '@anvil/core-pipeline';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 export interface RunClarifyForProjectOptions {
     agentManager: AgentManager;
     /** Project slug — forwarded to the spawn config. */

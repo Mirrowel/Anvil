@@ -12,8 +12,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_CONFIG } from '@anvil/knowledge-core';
-import { createReranker } from '@anvil/knowledge-core';
+import { DEFAULT_CONFIG } from '@esankhan3/anvil-knowledge-core';
+import { createReranker } from '@esankhan3/anvil-knowledge-core';
 
 describe('knowledge defaults — Phase 6', () => {
   it('uses ollama as the default reranker so rerank is always on', () => {

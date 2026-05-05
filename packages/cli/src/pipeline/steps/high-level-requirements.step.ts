@@ -3,8 +3,8 @@
  * Lifts orchestrator.ts:Stage-1 logic.
  */
 
-import type { Step, StepContext } from '@anvil/core-pipeline';
-import { APPROVAL_GATE_CHANNEL } from '@anvil/core-pipeline';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
+import { APPROVAL_GATE_CHANNEL } from '@esankhan3/anvil-core-pipeline';
 import { buildPersonaProjectPrompt } from '../persona-prompt.js';
 import { updatePipelineStage, updateStageCost, updatePipelineCost } from '../state-file.js';
 import { estimateAgentCallCost } from '../cost-estimator.js';

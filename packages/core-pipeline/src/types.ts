@@ -1,5 +1,5 @@
 /**
- * `@anvil/core-pipeline` canonical types.
+ * `@esankhan3/anvil-core-pipeline` canonical types.
  *
  * Locked verbatim in CORE-PIPELINE-EXTRACT-ADR.md §4 / PLAN §5. Phases 2-9
  * implement the runtime against these contracts; do not change shapes here

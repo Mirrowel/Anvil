@@ -1,7 +1,7 @@
 /**
  * Vector retrieval (Phase 8 stub) — semantic recall over per-memory
  * embeddings. The store schema reserves `embedding_id`; sleeptime
- * (Phase 10) will embed memory content via `@anvil/knowledge-core/embedder`
+ * (Phase 10) will embed memory content via `@esankhan3/anvil-knowledge-core/embedder`
  * and persist into LanceDB. Until then, this module returns an empty
  * array so the hybrid fusion path stays consistent.
  *

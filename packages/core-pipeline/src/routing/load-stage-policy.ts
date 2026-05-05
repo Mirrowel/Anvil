@@ -8,7 +8,7 @@
  *   1. process.env.ANVIL_STAGE_POLICY (full path)
  *   2. <workspaceRoot>/.anvil/stage-policy.yaml         — per-workspace
  *   3. ${ANVIL_HOME or $HOME/.anvil}/stage-policy.yaml  — per-user
- *   4. Bundled default shipped with @anvil/core-pipeline
+ *   4. Bundled default shipped with @esankhan3/anvil-core-pipeline
  *
  * Step 3 is the canonical home for end-user routing customisation —
  * the same directory that already holds `models.yaml`.
@@ -23,7 +23,7 @@ import type {
   ModelCapability,
   ModelComplexity,
   ModelTier,
-} from '@anvil/agent-core';
+} from '@esankhan3/anvil-agent-core';
 
 export interface StagePolicy {
   capability: ModelCapability;

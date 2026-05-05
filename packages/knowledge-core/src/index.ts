@@ -1,4 +1,4 @@
-// @anvil/knowledge-core — shared knowledge stack public API.
+// @esankhan3/anvil-knowledge-core — shared knowledge stack public API.
 //
 // Phase 1: types.
 // Phase 2: chunking, file-walking, AST parsing, BM25/graph primitives,

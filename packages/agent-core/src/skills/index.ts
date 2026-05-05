@@ -1,5 +1,5 @@
 /**
- * @anvil/agent-core/skills — public skills barrel.
+ * @esankhan3/anvil-agent-core/skills — public skills barrel.
  *
  * Phase 1: parser + loader + activator.
  * Phase 2: render + resolve-dir + tool-policy + composeSkillContext.

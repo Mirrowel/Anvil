@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/scrubber — PII/secret scrubbing (Phase 7).
+ * @esankhan3/anvil-memory-core/scrubber — PII/secret scrubbing (Phase 7).
  */
 
 export {

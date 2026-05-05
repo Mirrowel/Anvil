@@ -2,7 +2,7 @@
  * Memory Store — Phase 5 of the dashboard consolidation (D6).
  *
  * Replaces the legacy Hermes-style markdown backend with a thin façade
- * over `@anvil/memory-core`'s `HybridMemoryStore` (JSONL canonical +
+ * over `@esankhan3/anvil-memory-core`'s `HybridMemoryStore` (JSONL canonical +
  * SQLite hot index). The 5 operations the dashboard consumes
  * (`add`, `replace`, `remove`, `getEntriesWithMeta`, `formatForPrompt`)
  * keep their existing return shapes verbatim per D10 — only the storage
@@ -36,8 +36,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-import { HybridMemoryStore } from '@anvil/memory-core';
-import type { Memory, MemoryNamespace } from '@anvil/memory-core';
+import { HybridMemoryStore } from '@esankhan3/anvil-memory-core';
+import type { Memory, MemoryNamespace } from '@esankhan3/anvil-memory-core';
 
 // ── Constants ─────────────────────────────────────────────────────────
 

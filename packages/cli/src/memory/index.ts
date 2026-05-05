@@ -1,5 +1,5 @@
 /**
- * cli memory barrel — re-exports from `@anvil/memory-core` (Phase 2 hoist)
+ * cli memory barrel — re-exports from `@esankhan3/anvil-memory-core` (Phase 2 hoist)
  * with cli-specific orchestration that stays here:
  *   - resolveMemoryPath (project-aware via `getFFDirs()`)
  *   - createMemoryStore factory (wires resolveMemoryPath into the store)
@@ -16,7 +16,7 @@ export type {
   MemoryQueryOpts,
   MemoryStoreConfig,
   CreateMemoryOpts,
-} from '@anvil/memory-core/legacy/index.js';
+} from '@esankhan3/anvil-memory-core/legacy/index.js';
 export {
   DEFAULT_TTL_DAYS,
   MAX_SIZE_BYTES,
@@ -30,7 +30,7 @@ export {
   queryByTags,
   queryByContent,
   selectTopK,
-} from '@anvil/memory-core/legacy/index.js';
+} from '@esankhan3/anvil-memory-core/legacy/index.js';
 
 // cli-specific
 export { resolveMemoryPath, resolveNamespacePath } from './paths.js';
@@ -43,14 +43,14 @@ import {
   pruneBySize,
   DEFAULT_TTL_DAYS,
   MAX_SIZE_BYTES,
-} from '@anvil/memory-core/legacy/index.js';
+} from '@esankhan3/anvil-memory-core/legacy/index.js';
 import type {
   MemoryStoreConfig,
   MemoryEntry,
   MemoryKind,
   MemoryQueryOpts,
-} from '@anvil/memory-core/legacy/index.js';
-import type { MemoryNamespace } from '@anvil/memory-core';
+} from '@esankhan3/anvil-memory-core/legacy/index.js';
+import type { MemoryNamespace } from '@esankhan3/anvil-memory-core';
 import { resolveMemoryPath, resolveNamespacePath } from './paths.js';
 
 /**

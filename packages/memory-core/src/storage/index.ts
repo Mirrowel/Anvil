@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/storage — v2 hybrid storage barrel.
+ * @esankhan3/anvil-memory-core/storage — v2 hybrid storage barrel.
  *
  * JSONL append-only canonical + SQLite hot index per ADR §M1.
  */

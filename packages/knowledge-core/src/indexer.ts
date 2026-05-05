@@ -2,24 +2,24 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync, readdirSync, statSy
 import { execSync } from 'node:child_process';
 import { join, basename } from 'node:path';
 
-import { chunkRepo, chunkChangedFiles } from '@anvil/knowledge-core';
-import type { FileIndexEntry } from '@anvil/knowledge-core';
-import { buildAstGraph, generateGraphReport, incrementalGraphUpdate } from '@anvil/knowledge-core';
-import { getAllChanges, getChangedFilesList, getDeletedFilesList } from '@anvil/knowledge-core';
-import type { GitDiff } from '@anvil/knowledge-core';
-import { createEmbeddingProvider } from '@anvil/knowledge-core';
-import { VectorStore } from '@anvil/knowledge-core';
-import { ProjectGraphBuilder } from '@anvil/knowledge-core';
-import { detectCrossRepoEdges } from '@anvil/knowledge-core';
-import { detectWorkspace } from '@anvil/knowledge-core';
+import { chunkRepo, chunkChangedFiles } from '@esankhan3/anvil-knowledge-core';
+import type { FileIndexEntry } from '@esankhan3/anvil-knowledge-core';
+import { buildAstGraph, generateGraphReport, incrementalGraphUpdate } from '@esankhan3/anvil-knowledge-core';
+import { getAllChanges, getChangedFilesList, getDeletedFilesList } from '@esankhan3/anvil-knowledge-core';
+import type { GitDiff } from '@esankhan3/anvil-knowledge-core';
+import { createEmbeddingProvider } from '@esankhan3/anvil-knowledge-core';
+import { VectorStore } from '@esankhan3/anvil-knowledge-core';
+import { ProjectGraphBuilder } from '@esankhan3/anvil-knowledge-core';
+import { detectCrossRepoEdges } from '@esankhan3/anvil-knowledge-core';
+import { detectWorkspace } from '@esankhan3/anvil-knowledge-core';
 import { HybridRetriever } from './retriever.js';
-import { loadKnowledgeConfig, getKnowledgeBasePath, DEFAULT_CONFIG } from '@anvil/knowledge-core';
-import type { KnowledgeConfig } from '@anvil/knowledge-core';
-import type { CodeChunk, IndexStats, WorkspaceMap } from '@anvil/knowledge-core';
-import { profileProject, loadAllProfiles } from '@anvil/knowledge-core';
-import { inferServiceMesh } from '@anvil/knowledge-core';
-import { computeStructuralHashes, deduplicateByStructure } from '@anvil/knowledge-core';
-import { createQueryRouter } from '@anvil/knowledge-core';
+import { loadKnowledgeConfig, getKnowledgeBasePath, DEFAULT_CONFIG } from '@esankhan3/anvil-knowledge-core';
+import type { KnowledgeConfig } from '@esankhan3/anvil-knowledge-core';
+import type { CodeChunk, IndexStats, WorkspaceMap } from '@esankhan3/anvil-knowledge-core';
+import { profileProject, loadAllProfiles } from '@esankhan3/anvil-knowledge-core';
+import { inferServiceMesh } from '@esankhan3/anvil-knowledge-core';
+import { computeStructuralHashes, deduplicateByStructure } from '@esankhan3/anvil-knowledge-core';
+import { createQueryRouter } from '@esankhan3/anvil-knowledge-core';
 
 // ---------------------------------------------------------------------------
 // SHA-based staleness detection

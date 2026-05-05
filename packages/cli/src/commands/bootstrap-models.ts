@@ -19,8 +19,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { execSync, spawn } from 'node:child_process';
-import { parseModelRegistry } from '@anvil/agent-core';
-import type { ModelEntry } from '@anvil/agent-core';
+import { parseModelRegistry } from '@esankhan3/anvil-agent-core';
+import type { ModelEntry } from '@esankhan3/anvil-agent-core';
 import { parse as parseYaml } from 'yaml';
 
 export interface BootstrapDeps {

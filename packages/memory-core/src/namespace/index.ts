@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/namespace — LangMem-style namespace tuple helpers
+ * @esankhan3/anvil-memory-core/namespace — LangMem-style namespace tuple helpers
  * (Phase 4).
  */
 

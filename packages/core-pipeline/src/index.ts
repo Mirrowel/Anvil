@@ -1,5 +1,5 @@
 /**
- * `@anvil/core-pipeline` barrel.
+ * `@esankhan3/anvil-core-pipeline` barrel.
  *
  * Public surface for the typed Step<I,O> graph + EventBus + StepRegistry +
  * lifecycle hooks. See CORE-PIPELINE-EXTRACT-PLAN.md for the phased rollout.

@@ -18,8 +18,8 @@
  *     finds the latest id.
  *   - Disallowed tools = `['Agent']` (engineer + tester rule).
  */
-import type { AgentManager } from '@anvil/agent-core';
-import type { Step, StepContext } from '@anvil/core-pipeline';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 /**
  * Pure helper: detect validation failures in an artifact. Lifted
  * verbatim from `pipeline-runner.ts:hasValidationFailures()` so the

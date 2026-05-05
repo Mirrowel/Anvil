@@ -13,7 +13,7 @@ import {
   getLivenessTtlMs,
   _resetLivenessCache,
 } from '../provider-liveness.js';
-import type { ResolvedChain } from '@anvil/agent-core';
+import type { ResolvedChain } from '@esankhan3/anvil-agent-core';
 
 const origFetch = globalThis.fetch;
 const origEnv = { ...process.env };

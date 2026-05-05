@@ -1,4 +1,4 @@
-import { loadConventions as coreLoadConventions } from '@anvil/convention-core';
+import { loadConventions as coreLoadConventions } from '@esankhan3/anvil-convention-core';
 import { getAnvilDirs } from '../home.js';
 
 export async function loadConventions(project: string): Promise<string> {

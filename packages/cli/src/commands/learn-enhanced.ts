@@ -12,7 +12,7 @@ import { scanTestPatterns } from '../learn/test-scanner.js';
 import { analyzePastRuns } from '../learn/run-analyzer.js';
 import { generateRules } from '../learn/rule-generator.js';
 import { IndexReader } from '../run/index-reader.js';
-import { extractConventions } from '@anvil/convention-core';
+import { extractConventions } from '@esankhan3/anvil-convention-core';
 import pc from 'picocolors';
 
 export const learnEnhancedCommand = new Command('learn')

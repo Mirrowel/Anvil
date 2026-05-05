@@ -11,13 +11,13 @@
  * including ollama / opencode.
  */
 
-import type { AgentManager } from '@anvil/agent-core';
-import type { ReflectionInvoker } from '@anvil/memory-core';
-import { resolveModelForStage } from '@anvil/core-pipeline';
-import { allowedToolsForStage } from '@anvil/core-pipeline';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
+import type { ReflectionInvoker } from '@esankhan3/anvil-memory-core';
+import { resolveModelForStage } from '@esankhan3/anvil-core-pipeline';
+import { allowedToolsForStage } from '@esankhan3/anvil-core-pipeline';
 import { pickAliveModelFromChainSync } from './provider-liveness.js';
 import { resolveProviderForModel } from './provider-registry.js';
-import type { ProviderName } from '@anvil/agent-core';
+import type { ProviderName } from '@esankhan3/anvil-agent-core';
 
 const REFLECTION_STAGE = 'reflection';
 

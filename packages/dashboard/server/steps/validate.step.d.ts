@@ -9,7 +9,7 @@
  *   - Detects failure via `hasValidationFailures` (lifted from fix-loop).
  *   - Persona = 'tester'; allowedTools sourced by the caller.
  */
-import type { AgentManager } from '@anvil/agent-core';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
 export interface RunValidateOptions {
     agentManager: AgentManager;
     project: string;

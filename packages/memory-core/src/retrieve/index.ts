@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/retrieve — hybrid retrieval (Phase 8).
+ * @esankhan3/anvil-memory-core/retrieve — hybrid retrieval (Phase 8).
  */
 
 export { bm25Search, type Bm25Options } from './bm25.js';

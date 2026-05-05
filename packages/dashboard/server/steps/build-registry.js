@@ -18,7 +18,7 @@
  * `Step.run()` doesn't need to type-thread dashboard internals through
  * `StepContext` (which stays generic per core-pipeline's contract).
  */
-import { InMemoryStepRegistry } from '@anvil/core-pipeline';
+import { InMemoryStepRegistry } from '@esankhan3/anvil-core-pipeline';
 import { FEATURE_MANIFEST_STAGES, createFeatureManifestStep, } from './feature-manifest.step.js';
 /**
  * Build the dashboard's `StepRegistry` for one pipeline run.

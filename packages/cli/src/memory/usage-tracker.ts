@@ -1,7 +1,7 @@
 // Memory usage tracker — Section B.5
 
 import { join } from 'node:path';
-import { appendJSONL, readJSONL } from '@anvil/memory-core/legacy/index.js';
+import { appendJSONL, readJSONL } from '@esankhan3/anvil-memory-core/legacy/index.js';
 import { getFFDirs } from '../home.js';
 
 export interface MemoryUsageRecord {

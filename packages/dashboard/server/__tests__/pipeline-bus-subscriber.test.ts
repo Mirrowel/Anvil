@@ -7,8 +7,8 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { InMemoryEventBus } from '@anvil/core-pipeline';
-import type { PipelineEvent, StepHookPoint } from '@anvil/core-pipeline';
+import { InMemoryEventBus } from '@esankhan3/anvil-core-pipeline';
+import type { PipelineEvent, StepHookPoint } from '@esankhan3/anvil-core-pipeline';
 import {
   attachPipelineBusSubscriber,
   type PipelineStepDescriptor,

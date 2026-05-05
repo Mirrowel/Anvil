@@ -23,7 +23,7 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ulid } from 'ulid';
-import { computeStructuralHash } from '@anvil/knowledge-core';
+import { computeStructuralHash } from '@esankhan3/anvil-knowledge-core';
 
 import {
   HybridMemoryStore,

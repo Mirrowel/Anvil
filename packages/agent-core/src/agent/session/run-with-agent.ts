@@ -9,7 +9,7 @@
  * spawn-and-stream-parse pattern with bare `child_process.spawn`.
  *
  * No checkpoint cache — for cache-aware single-shot execution wrap the
- * call site with `runWithCheckpoint` (see `@anvil/agent-core/checkpoint`).
+ * call site with `runWithCheckpoint` (see `@esankhan3/anvil-agent-core/checkpoint`).
  */
 
 import { AgentManager } from './session-registry.js';

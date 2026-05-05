@@ -1,5 +1,5 @@
 /**
- * `LanguageModelBridge` — adapts an `@anvil/agent-core` `ModelAdapter` (or a
+ * `LanguageModelBridge` — adapts an `@esankhan3/anvil-agent-core` `ModelAdapter` (or a
  * future `LanguageModel`) to the `AgentAdapter` interface that
  * `AgentProcess` consumes (5-event EventEmitter: `content` / `activity` /
  * `result` / `error-output` / `exit`).
