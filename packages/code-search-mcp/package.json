@@ -18,8 +18,8 @@
     "dev": "tsc -b --watch"
   },
   "dependencies": {
-    "@anvil/agent-core": "*",
-    "@anvil/knowledge-core": "*",
+    "@esankhan3/anvil-agent-core": "^0.1.0",
+    "@esankhan3/anvil-knowledge-core": "^0.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "devDependencies": {

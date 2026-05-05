@@ -17,7 +17,7 @@ import {
   InMemoryStepRegistry,
   Pipeline,
   type Step,
-} from '@anvil/core-pipeline';
+} from '@esankhan3/anvil-core-pipeline';
 
 import {
   combinePerRepoArtifacts,
@@ -26,7 +26,7 @@ import {
   runPerRepoStageForRepo,
   type RunPerRepoStageResult,
 } from '../steps/per-repo-stage.step.js';
-import type { AgentManager, AgentState, SpawnConfig } from '@anvil/agent-core';
+import type { AgentManager, AgentState, SpawnConfig } from '@esankhan3/anvil-agent-core';
 
 interface FakeOpts {
   /** Status sequence the next getAgent() calls return for each agent id. */

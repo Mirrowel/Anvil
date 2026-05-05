@@ -13,8 +13,8 @@ import { mkdtempSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { BuiltinToolExecutor } from '@anvil/agent-core';
-import type { ToolCall } from '@anvil/agent-core';
+import { BuiltinToolExecutor } from '@esankhan3/anvil-agent-core';
+import type { ToolCall } from '@esankhan3/anvil-agent-core';
 import { allowedToolsForStage, permissionClassesForStage } from '../routing/stage-permissions.js';
 
 function makeCall(name: string, args: Record<string, unknown> = {}): ToolCall {

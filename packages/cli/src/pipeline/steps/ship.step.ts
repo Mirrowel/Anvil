@@ -4,7 +4,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import type { Step, StepContext } from '@anvil/core-pipeline';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 import { buildPersonaProjectPrompt } from '../persona-prompt.js';
 import { updatePipelineStage, updateStageCost, updatePipelineCost } from '../state-file.js';
 import { warn } from '../../logger.js';

@@ -1,5 +1,5 @@
 /**
- * `@anvil/agent-core/checkpoint` — barrel exports for the per-call agent
+ * `@esankhan3/anvil-agent-core/checkpoint` — barrel exports for the per-call agent
  * checkpoint cache (Phase 3 of the agent-manager consolidation).
  *
  * Lifted verbatim from dashboard's `dashboard/server/checkpoint-*.ts` +

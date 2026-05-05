@@ -11,8 +11,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 
 import { join, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { runLLM } from './claude-runner.js';
-import type { RepoProfile } from '@anvil/knowledge-core';
-import { getKnowledgeBasePath } from '@anvil/knowledge-core';
+import type { RepoProfile } from '@esankhan3/anvil-knowledge-core';
+import { getKnowledgeBasePath } from '@esankhan3/anvil-knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Types (internal)

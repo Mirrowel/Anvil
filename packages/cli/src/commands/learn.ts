@@ -16,7 +16,7 @@ import {
   runWithAgent,
   runWithCheckpoint,
   type CheckpointInputs,
-} from '@anvil/agent-core';
+} from '@esankhan3/anvil-agent-core';
 
 interface PRData {
   number: number;

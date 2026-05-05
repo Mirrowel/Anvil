@@ -4,7 +4,7 @@
  * Standard formula: score(d) = Σ_i 1 / (k + rank_i(d)). Larger weight on
  * a per-stream basis (BM25 vs vector vs graph) lets callers dial how
  * much each retriever contributes. Default `k=60` matches the value
- * `@anvil/knowledge-core/retriever.ts` uses for code-search RRF.
+ * `@esankhan3/anvil-knowledge-core/retriever.ts` uses for code-search RRF.
  */
 
 import type { Memory } from '../types.js';

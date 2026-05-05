@@ -33,7 +33,7 @@
  * support. Phase 4f will land first-class hook points if the dashboard
  * UI needs them.
  */
-import type { Step } from '@anvil/core-pipeline';
+import type { Step } from '@esankhan3/anvil-core-pipeline';
 export declare const CLARIFY_QA_ARTIFACT_ID = "CLARIFY-QA.json";
 export interface ClarifyQAPair {
     question: string;

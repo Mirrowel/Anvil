@@ -4,7 +4,7 @@ import { createMemoryStore } from '../index.js';
 import {
   createMemoryEntry,
   type MemoryEntry,
-} from '@anvil/memory-core/legacy/index.js';
+} from '@esankhan3/anvil-memory-core/legacy/index.js';
 
 /**
  * Record a fix pattern: how an error was resolved.

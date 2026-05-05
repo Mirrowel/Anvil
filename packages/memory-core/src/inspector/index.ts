@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/inspector — dashboard inspector primitive (Phase 13).
+ * @esankhan3/anvil-memory-core/inspector — dashboard inspector primitive (Phase 13).
  */
 
 export {

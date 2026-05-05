@@ -17,7 +17,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { runFixFlow, type FixFlowStageEvent } from '../fix-flow.js';
-import type { AgentManager, AgentState, SpawnConfig } from '@anvil/agent-core';
+import type { AgentManager, AgentState, SpawnConfig } from '@esankhan3/anvil-agent-core';
 
 interface ScriptedSpawn {
   /** Substring matched against the spawn's `stage` so the script can route

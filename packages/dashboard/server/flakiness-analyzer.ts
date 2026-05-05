@@ -27,7 +27,7 @@ import type {
   Confidence,
   TestSeverity,
 } from './test-types.js';
-import type { AgentManager, AgentState } from '@anvil/agent-core';
+import type { AgentManager, AgentState } from '@esankhan3/anvil-agent-core';
 import type { TestLearningsStore } from './test-learnings.js';
 
 // ── Public API ───────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 /**
- * @anvil/agent-core/mcp — Model Context Protocol *client*-side helpers.
+ * @esankhan3/anvil-agent-core/mcp — Model Context Protocol *client*-side helpers.
  *
  * Companion to `code-search-mcp` (which is the MCP *server* Anvil already
  * publishes). The client side lets Anvil's agent connect to OTHER MCP

@@ -14,7 +14,7 @@
  * the test stage.
  */
 import type { Plan } from '../plan-store.js';
-import type { Step } from '@anvil/core-pipeline';
+import type { Step } from '@esankhan3/anvil-core-pipeline';
 export interface TestGenArtifactEvent {
     stage: string;
     file: string;

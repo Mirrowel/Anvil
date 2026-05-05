@@ -26,7 +26,7 @@
  * Today's TaskBundlerStep is `serial`; Phase 4f either wraps it with
  * per-repo fanout or composes it inside a per-repo build Step.
  */
-import type { Step } from '@anvil/core-pipeline';
+import type { Step } from '@esankhan3/anvil-core-pipeline';
 import { type ExecutionGroup, type ParsedTask } from '../engineer-task-bundler.js';
 export declare const TASK_BUNDLES_ARTIFACT_ID = "TASK-BUNDLES.json";
 export interface TaskBundleOutput {

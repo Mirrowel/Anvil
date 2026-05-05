@@ -8,12 +8,12 @@
  * Phase 4: Cross-encoder reranking via Ollama (or Cohere/Voyage)
  */
 
-import type { ScoredChunk, RetrievalResult, EmbeddingProvider } from '@anvil/knowledge-core';
-import type { VectorStore } from '@anvil/knowledge-core';
-import type { ProjectGraphBuilder } from '@anvil/knowledge-core';
-import type { Reranker } from '@anvil/knowledge-core';
-import type { QueryRouter } from '@anvil/knowledge-core';
-import { classifyQuery } from '@anvil/knowledge-core';
+import type { ScoredChunk, RetrievalResult, EmbeddingProvider } from '@esankhan3/anvil-knowledge-core';
+import type { VectorStore } from '@esankhan3/anvil-knowledge-core';
+import type { ProjectGraphBuilder } from '@esankhan3/anvil-knowledge-core';
+import type { Reranker } from '@esankhan3/anvil-knowledge-core';
+import type { QueryRouter } from '@esankhan3/anvil-knowledge-core';
+import { classifyQuery } from '@esankhan3/anvil-knowledge-core';
 
 export type RetrievalMode = 'vector' | 'bm25' | 'vector+bm25' | 'vector+graph' | 'vector+bm25+graph';
 

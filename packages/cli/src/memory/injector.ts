@@ -8,8 +8,8 @@ import {
   queryByContent,
   selectTopK,
   type MemoryEntry,
-} from '@anvil/memory-core/legacy/index.js';
-import type { MemoryNamespace } from '@anvil/memory-core';
+} from '@esankhan3/anvil-memory-core/legacy/index.js';
+import type { MemoryNamespace } from '@esankhan3/anvil-memory-core';
 
 export interface InjectionContext {
   tags?: string[];

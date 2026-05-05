@@ -15,14 +15,14 @@ import {
   InMemoryStepRegistry,
   Pipeline,
   type Step,
-} from '@anvil/core-pipeline';
+} from '@esankhan3/anvil-core-pipeline';
 
 import {
   createClarifyStageStep,
   runClarifyForProject,
   type RunClarifyForProjectResult,
 } from '../steps/clarify-stage.step.js';
-import type { AgentManager, AgentState, SpawnConfig } from '@anvil/agent-core';
+import type { AgentManager, AgentState, SpawnConfig } from '@esankhan3/anvil-agent-core';
 
 interface FakeOpts {
   /** First-phase poll responses (explore). */

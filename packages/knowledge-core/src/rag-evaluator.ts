@@ -7,8 +7,8 @@
  */
 
 import { runLLM } from './claude-runner.js';
-import type { ScoredChunk } from '@anvil/knowledge-core';
-import type { RetrievalMode } from '@anvil/knowledge-core';
+import type { ScoredChunk } from '@esankhan3/anvil-knowledge-core';
+import type { RetrievalMode } from '@esankhan3/anvil-knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Types

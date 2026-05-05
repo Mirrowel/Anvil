@@ -1,5 +1,5 @@
 /**
- * Pipeline bus subscriber — dashboard-side translator for `@anvil/core-pipeline`
+ * Pipeline bus subscriber — dashboard-side translator for `@esankhan3/anvil-core-pipeline`
  * lifecycle events.
  *
  * Subscribes to the `EventBus` and rebuilds the dashboard's `DashboardState`
@@ -15,7 +15,7 @@
  * Phase 2 of the dashboard consolidation. See DASHBOARD-CONSOLIDATION-PLAN.md.
  */
 
-import type { EventBus, EventListener, PipelineEvent } from '@anvil/core-pipeline';
+import type { EventBus, EventListener, PipelineEvent } from '@esankhan3/anvil-core-pipeline';
 import type {
   DashboardState,
   DashboardPipeline,

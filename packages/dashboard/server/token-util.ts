@@ -11,7 +11,7 @@
  * through `countTokens` so future tokenizer upgrades take effect everywhere.
  */
 
-import type { PromptAwareAdapter } from '@anvil/agent-core';
+import type { PromptAwareAdapter } from '@esankhan3/anvil-agent-core';
 
 const HEURISTIC_DIVISOR = 4;
 

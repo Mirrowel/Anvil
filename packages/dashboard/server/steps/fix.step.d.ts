@@ -6,7 +6,7 @@
  *
  * Per-repo fan-out when `repoNames.length > 0`, else single-workspace.
  */
-import type { AgentManager } from '@anvil/agent-core';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
 export interface RunFixOptions {
     agentManager: AgentManager;
     project: string;

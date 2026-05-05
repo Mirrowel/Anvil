@@ -1,7 +1,7 @@
 /**
  * cli pipeline orchestrator — Phase 6 of CORE-PIPELINE-CONSOLIDATION-PLAN.
  *
- * Drives lifecycle through `@anvil/core-pipeline`'s `Pipeline.run()`.
+ * Drives lifecycle through `@esankhan3/anvil-core-pipeline`'s `Pipeline.run()`.
  * Per-stage logic lives in 8 step adapters under `./steps/`. Cross-
  * cutting concerns (audit, cost, run-store, feature-store, approval-
  * gate, dashboard-state, learners) attach as bus hooks. There is NO
@@ -23,7 +23,7 @@ import {
   attachRunStoreHook,
   attachDashboardStateHook,
   type RunStoreLike,
-} from '@anvil/core-pipeline';
+} from '@esankhan3/anvil-core-pipeline';
 
 import { PIPELINE_STAGES, type AffectedProject } from './types.js';
 import type { AgentRunner } from './stages/index.js';

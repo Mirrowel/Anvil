@@ -30,7 +30,7 @@ import {
   type ModelAdapterConfig,
   type ModelAdapterResult,
   type ProviderCapabilities,
-} from '@anvil/agent-core';
+} from '@esankhan3/anvil-agent-core';
 
 // ── STAGE_OUTPUT_LIMITS table ─────────────────────────────────────────────
 

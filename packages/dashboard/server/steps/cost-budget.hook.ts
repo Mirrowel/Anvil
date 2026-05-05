@@ -21,7 +21,7 @@
  * this one. Until then, both run.
  */
 
-import type { EventBus, EventListener, PipelineEvent } from '@anvil/core-pipeline';
+import type { EventBus, EventListener, PipelineEvent } from '@esankhan3/anvil-core-pipeline';
 
 import type { CostBreachHandler, CostPolicy } from '../cost-breach-handler.js';
 

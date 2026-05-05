@@ -3,8 +3,8 @@
  * Lifts orchestrator.ts:Stage-3 logic with manual per-project fanout.
  */
 
-import type { Step, StepContext } from '@anvil/core-pipeline';
-import { APPROVAL_GATE_CHANNEL } from '@anvil/core-pipeline';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
+import { APPROVAL_GATE_CHANNEL } from '@esankhan3/anvil-core-pipeline';
 import { runProjectSpecsStage } from '../stages/index.js';
 import type { StageContext } from '../stages/types.js';
 import { updatePipelineStage, updateStageCost, updatePipelineCost } from '../state-file.js';

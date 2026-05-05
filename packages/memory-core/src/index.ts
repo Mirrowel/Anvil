@@ -1,9 +1,9 @@
 /**
- * @anvil/memory-core — public barrel.
+ * @esankhan3/anvil-memory-core — public barrel.
  *
  * Phase 1: v2 canonical types (this file's `./types.js` re-export).
  * Phase 2: legacy primitives hoisted from `cli/src/memory/` — accessible
- *          via the subpath import `@anvil/memory-core/legacy/index.js` to
+ *          via the subpath import `@esankhan3/anvil-memory-core/legacy/index.js` to
  *          avoid name collisions with the v2 schema (`MemoryKind` is
  *          different in legacy vs v2).
  *

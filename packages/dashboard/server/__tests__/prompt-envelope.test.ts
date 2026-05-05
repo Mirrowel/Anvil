@@ -13,7 +13,7 @@ import {
   buildPromptEnvelope,
   type PromptEnvelopeInput,
 } from '../prompt-envelope.js';
-import type { PromptAwareAdapter } from '@anvil/agent-core';
+import type { PromptAwareAdapter } from '@esankhan3/anvil-agent-core';
 
 type AdapterStub = Pick<PromptAwareAdapter, 'capabilities' | 'markCacheBreakpoint'>;
 

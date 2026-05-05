@@ -1,5 +1,5 @@
 /**
- * `@anvil/agent-core` — public type surface.
+ * `@esankhan3/anvil-agent-core` — public type surface.
  *
  * Two interfaces live here, intentionally:
  *
@@ -185,7 +185,7 @@ export interface ModelAdapterConfig {
   maxOutputTokens?: number;
   /**
    * Routes the call through the process-local FIFO single-slot executor
-   * (`@anvil/agent-core/router/local-executor`). Set true ONLY for local
+   * (`@esankhan3/anvil-agent-core/router/local-executor`). Set true ONLY for local
    * GPU-resident models that cannot co-reside (Qwen 14B / Gemma class).
    * Other adapters ignore this flag. Default false = bypass queue.
    */

@@ -15,11 +15,11 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execSync, spawn as cpSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { AgentManager } from '@anvil/agent-core';
+import { AgentManager } from '@esankhan3/anvil-agent-core';
 import {
   extractConventions as coreExtractConventions,
   loadConventions as coreLoadConventions,
-} from '@anvil/convention-core';
+} from '@esankhan3/anvil-convention-core';
 import { ProjectLoader } from './project-loader.js';
 import type { ProjectInfo } from './project-loader.js';
 import { FeatureStore } from './feature-store.js';
@@ -32,10 +32,10 @@ import {
   UnknownStageError,
   allowedToolsForStage,
   permissionClassesForStage,
-} from '@anvil/core-pipeline';
+} from '@esankhan3/anvil-core-pipeline';
 import { pickAliveModelFromChainSync, prefetchLiveness, setLivenessTtlMs } from './provider-liveness.js';
-import { loadModelRegistry, DEFAULT_WALKER_CONFIG } from '@anvil/agent-core';
-import type { ModelRegistry, ProviderName, WalkerConfig } from '@anvil/agent-core';
+import { loadModelRegistry, DEFAULT_WALKER_CONFIG } from '@esankhan3/anvil-agent-core';
+import type { ModelRegistry, ProviderName, WalkerConfig } from '@esankhan3/anvil-agent-core';
 import { parseTasks, bundleFiles } from './engineer-task-bundler.js';
 import type { ParsedTask } from './engineer-task-bundler.js';
 import { sliceSpecForRefs } from './engineer-spec-slicer.js';
@@ -897,7 +897,7 @@ export class PipelineRunner extends EventEmitter {
   /**
    * Memoised conventions block. Loads `<conventionsDir>/global.md` and
    * `<conventionsDir>/<project>/conventions.md` once per run via
-   * @anvil/convention-core. Returns empty string on error or when the
+   * @esankhan3/anvil-convention-core. Returns empty string on error or when the
    * project has no conventions extracted yet — auto-warm runs at pipeline
    * start to populate the file before clarify.
    */

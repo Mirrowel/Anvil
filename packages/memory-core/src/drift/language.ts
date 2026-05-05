@@ -3,7 +3,7 @@
  * detector when computing the structural hash of an on-disk file
  * referenced by `Memory.codeBinding.filePath`.
  *
- * Mirrors the labels `@anvil/knowledge-core/structural-hasher.ts`
+ * Mirrors the labels `@esankhan3/anvil-knowledge-core/structural-hasher.ts`
  * already understands; `'unknown'` is a valid input for that hasher
  * (it falls back to whitespace-only normalization), so the helper is
  * safe to use on extensions we haven't enumerated.

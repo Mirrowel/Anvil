@@ -1,5 +1,5 @@
 /**
- * `@anvil/convention-core` — public surface.
+ * `@esankhan3/anvil-convention-core` — public surface.
  *
  * Convention extraction (file naming, imports, tests, error handling),
  * rule engine + defaults (typescript, go, kafka), promotion ledger

@@ -34,7 +34,7 @@
  * UI needs them.
  */
 
-import type { Step, StepContext } from '@anvil/core-pipeline';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 
 export const CLARIFY_QA_ARTIFACT_ID = 'CLARIFY-QA.json';
 

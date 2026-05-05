@@ -41,7 +41,7 @@ const DEFAULT_MAX_ITERATIONS = 32;
 
 /**
  * Re-export the shared `UpstreamError` so existing imports
- * (`import { UpstreamError } from '@anvil/agent-core/openrouter-adapter'`)
+ * (`import { UpstreamError } from '@esankhan3/anvil-agent-core/openrouter-adapter'`)
  * keep working. The class itself lives in `upstream-error.ts` and is
  * shared by every adapter that talks to a remote provider.
  */

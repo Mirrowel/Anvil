@@ -28,7 +28,7 @@ import {
   attachFeatureStoreHook,
   APPROVAL_GATE_CHANNEL,
   type PipelineEvent,
-} from '@anvil/core-pipeline';
+} from '@esankhan3/anvil-core-pipeline';
 
 import { buildDefaultPipelineRegistry } from '../steps/index.js';
 import { FEATURE_STORE_ARTIFACT_PATHS } from '../feature-store.js';

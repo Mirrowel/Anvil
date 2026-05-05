@@ -1,7 +1,6 @@
 {
-  "name": "@anvil/core-pipeline",
+  "name": "@esankhan3/anvil-core-pipeline",
   "version": "0.1.0",
-  "private": true,
   "description": "Core pipeline runner for Anvil — typed Step<I,O> graph, EventBus, StepRegistry, lifecycle hooks. Replaces cli's monolithic orchestrator if-tree.",
   "type": "module",
   "license": "MIT",
@@ -26,8 +25,8 @@
     "test": "tsc -b && mkdir -p dist/routing && cp src/routing/*.yaml dist/routing/ 2>/dev/null; node --test dist/__tests__/*.test.js"
   },
   "dependencies": {
-    "@anvil/agent-core": "*",
-    "@anvil/memory-core": "*",
+    "@esankhan3/anvil-agent-core": "^0.1.0",
+    "@esankhan3/anvil-memory-core": "^0.1.0",
     "yaml": "^2.8.3"
   },
   "devDependencies": {

@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, relative, extname, basename, dirname } from 'node:path';
-import type { CodeChunk } from '@anvil/knowledge-core';
+import type { CodeChunk } from '@esankhan3/anvil-knowledge-core';
 import { SOURCE_EXTENSIONS, SKIP_DIRS, walkDir, langFromExt, extractImports } from './file-walker.js';
 
 // ---------------------------------------------------------------------------

@@ -14,7 +14,15 @@
   "bugs": {
     "url": "https://github.com/esanmohammad/Anvil/issues"
   },
-  "keywords": ["anvil", "dashboard", "react", "pipeline", "ai", "agents", "knowledge-graph"],
+  "keywords": [
+    "anvil",
+    "dashboard",
+    "react",
+    "pipeline",
+    "ai",
+    "agents",
+    "knowledge-graph"
+  ],
   "main": "./server/dashboard-server.js",
   "exports": {
     ".": "./server/dashboard-server.js",
@@ -47,11 +55,11 @@
     "test:server": "npx tsc -p server/tsconfig.json && node --test server/out/__tests__/*.test.js"
   },
   "dependencies": {
-    "@anvil/agent-core": "*",
-    "@anvil/convention-core": "*",
-    "@anvil/core-pipeline": "*",
-    "@anvil/knowledge-core": "*",
-    "@anvil/memory-core": "*",
+    "@esankhan3/anvil-agent-core": "^0.1.0",
+    "@esankhan3/anvil-convention-core": "^0.1.0",
+    "@esankhan3/anvil-core-pipeline": "^0.1.0",
+    "@esankhan3/anvil-knowledge-core": "^0.1.0",
+    "@esankhan3/anvil-memory-core": "^0.1.0",
     "lucide-react": "1.8.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

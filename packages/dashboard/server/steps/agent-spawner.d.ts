@@ -15,7 +15,7 @@
  * Test seam: `now`, `sleep`, and `pollIntervalMs` are injectable so
  * tests can drive the polling loop deterministically.
  */
-import type { AgentManager, SpawnConfig } from '@anvil/agent-core';
+import type { AgentManager, SpawnConfig } from '@esankhan3/anvil-agent-core';
 export interface SpawnAndWaitOptions {
     /** AgentManager instance owned by the caller (PipelineRunner today). */
     agentManager: AgentManager;

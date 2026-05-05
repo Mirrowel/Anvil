@@ -27,7 +27,7 @@
  * available for adapters that consume a single string.
  */
 
-import type { PromptAwareAdapter } from '@anvil/agent-core';
+import type { PromptAwareAdapter } from '@esankhan3/anvil-agent-core';
 
 export interface PromptEnvelopeInput {
   // ── STABLE ──────────────────────────────────────────────

@@ -21,8 +21,8 @@
 
 import { spawnAndWait, waitForAgent } from './agent-spawner.js';
 import { disallowedToolsForPersona } from './per-repo-stage.step.js';
-import type { AgentManager } from '@anvil/agent-core';
-import type { Step, StepContext } from '@anvil/core-pipeline';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 
 /**
  * Pure helper: detect validation failures in an artifact. Lifted

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { info, warn } from '../logger.js';
 import { createMemoryStore } from '../memory/index.js';
-import type { MemoryNamespace } from '@anvil/memory-core';
+import type { MemoryNamespace } from '@esankhan3/anvil-memory-core';
 import pc from 'picocolors';
 
 const VALID_SCOPES = new Set<MemoryNamespace['scope']>([

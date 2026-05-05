@@ -18,8 +18,8 @@ import {
   type ModelRegistry,
   type ResolvedChain,
   type DiscoveryAdapter,
-} from '@anvil/agent-core';
-import type { ProviderName } from '@anvil/agent-core';
+} from '@esankhan3/anvil-agent-core';
+import type { ProviderName } from '@esankhan3/anvil-agent-core';
 import { loadStagePolicy, type StagePolicyMap } from './load-stage-policy.js';
 
 export class UnknownStageError extends Error {
@@ -115,4 +115,4 @@ export function _resetStageRoutingCache(): void {
 }
 
 // Re-export so callers don't need a second import for the error type.
-export { ModelResolutionError } from '@anvil/agent-core';
+export { ModelResolutionError } from '@esankhan3/anvil-agent-core';

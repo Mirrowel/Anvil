@@ -18,7 +18,7 @@ import {
   InMemoryStepRegistry,
   Pipeline,
   type Step,
-} from '@anvil/core-pipeline';
+} from '@esankhan3/anvil-core-pipeline';
 
 import {
   BUILD_DISALLOWED_TOOLS,
@@ -28,7 +28,7 @@ import {
   type RunBuildForRepoResult,
 } from '../steps/per-repo-build.step.js';
 import type { ParsedTask } from '../engineer-task-bundler.js';
-import type { AgentManager, AgentState, SpawnConfig } from '@anvil/agent-core';
+import type { AgentManager, AgentState, SpawnConfig } from '@esankhan3/anvil-agent-core';
 
 interface FakeOpts {
   /** Status sequence the next getAgent() calls return. */

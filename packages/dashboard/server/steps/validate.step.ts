@@ -13,7 +13,7 @@
 import { spawnAndWait } from './agent-spawner.js';
 import { hasValidationFailures } from './fix-loop.step.js';
 import { disallowedToolsForPersona } from './per-repo-stage.step.js';
-import type { AgentManager } from '@anvil/agent-core';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
 
 export interface RunValidateOptions {
   agentManager: AgentManager;
