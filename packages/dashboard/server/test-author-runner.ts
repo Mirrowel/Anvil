@@ -24,7 +24,7 @@ import type {
   TestCase,
   TestSpec,
 } from './test-types.js';
-import type { AgentManager } from '@anvil/agent-core';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
 import type { TestCaseStore } from './test-case-store.js';
 import type { TestLearningsStore } from './test-learnings.js';
 

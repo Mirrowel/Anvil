@@ -1,5 +1,5 @@
 /**
- * `@anvil/agent-core/agent` — barrel exports for the agent-lifecycle layer.
+ * `@esankhan3/anvil-agent-core/agent` — barrel exports for the agent-lifecycle layer.
  *
  * The pre-existing single-shot `AgentManager` class and its supporting
  * subprocess machinery (spawn, stream-parser, output-buffer, restart-policy,

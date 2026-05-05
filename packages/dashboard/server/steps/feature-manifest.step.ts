@@ -32,7 +32,7 @@
  *   validate     → extractOpenQuestions
  */
 
-import type { Step, StepContext } from '@anvil/core-pipeline';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 
 import type { FeatureManifest, FeatureManifestStore } from '../feature-manifest.js';
 import {

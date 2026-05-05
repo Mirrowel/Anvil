@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/episode — episodic memory primitives (Phase 12).
+ * @esankhan3/anvil-memory-core/episode — episodic memory primitives (Phase 12).
  */
 
 export {

@@ -24,7 +24,7 @@ import type {
   ProjectRelationship,
   KeyFlow,
   CommunityLabel,
-} from '@anvil/knowledge-core';
+} from '@esankhan3/anvil-knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Constants

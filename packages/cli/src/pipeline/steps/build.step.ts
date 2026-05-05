@@ -3,8 +3,8 @@
  * Lifts orchestrator.ts:Stage-5 logic.
  */
 
-import type { Step, StepContext } from '@anvil/core-pipeline';
-import { APPROVAL_GATE_CHANNEL } from '@anvil/core-pipeline';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
+import { APPROVAL_GATE_CHANNEL } from '@esankhan3/anvil-core-pipeline';
 import { runBuildStage, type BuildStageConfig } from '../stages/build/index.js';
 import { buildPersonaProjectPrompt } from '../persona-prompt.js';
 import { createPipelineFeatureBranches } from '../feature-branches.js';

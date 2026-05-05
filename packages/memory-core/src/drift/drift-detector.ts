@@ -7,13 +7,13 @@
  * recompute its structural hash, and report whether the memory is still
  * fresh, structurally drifted, or pointing at a missing file.
  *
- * The structural hasher comes from `@anvil/knowledge-core` so we don't
+ * The structural hasher comes from `@esankhan3/anvil-knowledge-core` so we don't
  * duplicate its canonicalization logic.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { computeStructuralHash } from '@anvil/knowledge-core';
+import { computeStructuralHash } from '@esankhan3/anvil-knowledge-core';
 import type { CodeFactBinding } from '../types.js';
 import { detectLanguageFromPath } from './language.js';
 

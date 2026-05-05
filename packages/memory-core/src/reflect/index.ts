@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/reflect — reflection-on-completion (Phase 11).
+ * @esankhan3/anvil-memory-core/reflect — reflection-on-completion (Phase 11).
  */
 
 export {

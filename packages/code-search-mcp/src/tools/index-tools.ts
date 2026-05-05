@@ -3,7 +3,7 @@
  */
 
 import type { ServerContext } from '../server.js';
-import { KnowledgeIndexer } from '@anvil/knowledge-core';
+import { KnowledgeIndexer } from '@esankhan3/anvil-knowledge-core';
 
 const TOOL_NAMES = ['index_status'];
 

@@ -35,8 +35,8 @@ import {
   parseClarifyQuestions,
   type ClarifyQAPair,
 } from './clarify.step.js';
-import type { AgentManager } from '@anvil/agent-core';
-import type { Step, StepContext } from '@anvil/core-pipeline';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 
 export interface RunClarifyForProjectOptions {
   agentManager: AgentManager;

@@ -11,8 +11,8 @@
  * to run when.
  */
 
-import type { ModelTier, ResolvedChain } from '@anvil/agent-core';
-import { loadModelRegistry, resolveModel } from '@anvil/agent-core';
+import type { ModelTier, ResolvedChain } from '@esankhan3/anvil-agent-core';
+import { loadModelRegistry, resolveModel } from '@esankhan3/anvil-agent-core';
 import { loadStagePolicy } from './load-stage-policy.js';
 import {
   UnknownStageError,

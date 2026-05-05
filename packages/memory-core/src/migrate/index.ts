@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/migrate — legacy importer (Phase 14).
+ * @esankhan3/anvil-memory-core/migrate — legacy importer (Phase 14).
  */
 
 export {

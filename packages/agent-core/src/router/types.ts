@@ -1,5 +1,5 @@
 /**
- * `@anvil/agent-core/router` — schema types.
+ * `@esankhan3/anvil-agent-core/router` — schema types.
  *
  * Locked verbatim in `AGENT-CORE-LLM-ROUTER-ADR.md` §4. Keep this file
  * declaration-only — runtime behavior lives in router.ts and friends.

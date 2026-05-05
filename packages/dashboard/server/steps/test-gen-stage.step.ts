@@ -19,7 +19,7 @@ import { join, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 
 import type { Plan } from '../plan-store.js';
-import type { Step, StepContext } from '@anvil/core-pipeline';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 
 export interface TestGenArtifactEvent {
   stage: string;

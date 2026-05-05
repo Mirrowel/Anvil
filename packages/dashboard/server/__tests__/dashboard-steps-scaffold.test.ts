@@ -11,7 +11,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { InMemoryEventBus, Pipeline } from '@anvil/core-pipeline';
+import { InMemoryEventBus, Pipeline } from '@esankhan3/anvil-core-pipeline';
 
 import { buildDashboardStepRegistry } from '../steps/index.js';
 

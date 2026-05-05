@@ -19,7 +19,7 @@
  * `StepContext` (which stays generic per core-pipeline's contract).
  */
 
-import { InMemoryStepRegistry, type Step, type StepRegistry } from '@anvil/core-pipeline';
+import { InMemoryStepRegistry, type Step, type StepRegistry } from '@esankhan3/anvil-core-pipeline';
 
 import type { FeatureStore } from '../feature-store.js';
 import type { FeatureManifestStore } from '../feature-manifest.js';

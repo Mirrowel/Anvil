@@ -1,7 +1,7 @@
 /**
  * Default `AgentAdapterFactory` for `AgentManager`.
  *
- * Resolves a `SpawnConfig`'s model field to an `@anvil/agent-core`
+ * Resolves a `SpawnConfig`'s model field to an `@esankhan3/anvil-agent-core`
  * `ModelAdapter` via `ProviderRegistry`, then wraps it in a
  * `LanguageModelBridge` so `AgentProcess` can drive it through the 5-event
  * `AgentAdapter` surface.

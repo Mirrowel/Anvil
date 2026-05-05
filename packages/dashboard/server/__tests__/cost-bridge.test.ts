@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { SpendLedger } from '@anvil/agent-core';
+import { SpendLedger } from '@esankhan3/anvil-agent-core';
 
 import {
   BridgedCostLedger,

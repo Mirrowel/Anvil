@@ -10,7 +10,7 @@ import { info, success, error, warn } from '../logger.js';
 import { findProject } from '../project/loader.js';
 import { getFFDirs } from '../home.js';
 import { execSync } from 'node:child_process';
-import { runWithAgent } from '@anvil/agent-core';
+import { runWithAgent } from '@esankhan3/anvil-agent-core';
 
 const SCHEMA_PATTERNS = [
   '*.prisma',

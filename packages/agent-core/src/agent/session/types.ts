@@ -1,5 +1,5 @@
 /**
- * Type surface for `@anvil/agent-core`'s agent-lifecycle layer.
+ * Type surface for `@esankhan3/anvil-agent-core`'s agent-lifecycle layer.
  *
  * `AgentProcess` (one logical agent, EventEmitter, supports `sendInput` for
  * resume) and `AgentManager` (Map<id, AgentProcess>) are the canonical

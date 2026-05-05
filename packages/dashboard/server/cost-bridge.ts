@@ -37,7 +37,7 @@
  * to correlate join on `(runId, project, ts, model)` instead.
  */
 
-import { SpendLedger, type SpendRow } from '@anvil/agent-core';
+import { SpendLedger, type SpendRow } from '@esankhan3/anvil-agent-core';
 
 import { CostLedger, type CostRecordInput } from './cost-ledger.js';
 import type { CostEntry } from './cost-types.js';

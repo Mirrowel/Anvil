@@ -23,7 +23,7 @@
 import { runFix, type RunFixResult } from './steps/fix.step.js';
 import { runValidate, type RunValidateResult } from './steps/validate.step.js';
 import { runFixLoop } from './steps/fix-loop.step.js';
-import type { AgentManager } from '@anvil/agent-core';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
 
 export type FixFlowStageName = 'fix' | 'validate' | 'fix-loop';
 export type FixFlowStageStatus = 'pending' | 'running' | 'completed' | 'failed';

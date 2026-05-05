@@ -12,7 +12,7 @@
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { InMemoryStepRegistry } from '@anvil/core-pipeline';
+import { InMemoryStepRegistry } from '@esankhan3/anvil-core-pipeline';
 import {
   registerCustomStages,
   type CustomStageConfigV2,

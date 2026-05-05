@@ -1,5 +1,5 @@
 /**
- * `@anvil/agent-core/router` — barrel.
+ * `@esankhan3/anvil-agent-core/router` — barrel.
  *
  * Public surface for the LLM router subsystem. See
  * `AGENT-CORE-LLM-ROUTER-PLAN.md` for the phased rollout.

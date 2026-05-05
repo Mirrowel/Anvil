@@ -221,7 +221,7 @@ export async function loadKnowledgeGraph(project: string, featureQuery?: string)
   // 1. Hybrid-search path (only when a query is supplied + index is reachable)
   if (featureQuery) {
     try {
-      const { getRetriever } = await import('@anvil/knowledge-core');
+      const { getRetriever } = await import('@esankhan3/anvil-knowledge-core');
       const { assembleKnowledgeContext } = await import('../knowledge/context-assembler.js');
       const retriever = await getRetriever(project);
       const result = await retriever.retrieve(featureQuery, { maxTokens: 12000 });

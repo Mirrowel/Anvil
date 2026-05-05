@@ -20,7 +20,7 @@
  * Phase 4f decides whether to drop the per-LLM-call hook in favor of
  * this one. Until then, both run.
  */
-import type { EventBus } from '@anvil/core-pipeline';
+import type { EventBus } from '@esankhan3/anvil-core-pipeline';
 import type { CostBreachHandler, CostPolicy } from '../cost-breach-handler.js';
 export interface CostBudgetHookOptions {
     /** The active run id; only events with this runId fire evaluation. */

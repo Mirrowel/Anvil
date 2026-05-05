@@ -1,5 +1,5 @@
 /**
- * @anvil/memory-core/sleeptime — proposal queue + consolidator (Phase 10).
+ * @esankhan3/anvil-memory-core/sleeptime — proposal queue + consolidator (Phase 10).
  */
 
 export {

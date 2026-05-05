@@ -3,8 +3,8 @@
  * Lifts orchestrator.ts:Stage-6 logic with the validate-fix retry loop.
  */
 
-import type { Step, StepContext } from '@anvil/core-pipeline';
-import { APPROVAL_GATE_CHANNEL } from '@anvil/core-pipeline';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
+import { APPROVAL_GATE_CHANNEL } from '@esankhan3/anvil-core-pipeline';
 import { buildPersonaProjectPrompt } from '../persona-prompt.js';
 import { runPostBuildGuards, hasValidationFailures } from '../post-build-guards.js';
 import { sendPipelineNotification } from '../notifications.js';

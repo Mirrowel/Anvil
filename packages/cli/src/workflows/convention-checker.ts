@@ -1,8 +1,8 @@
 // Convention checker — Wave 9, Section B
 // Checks a diff against convention rules
 
-import type { ConventionRule, RuleViolation } from '@anvil/convention-core';
-import { evaluateRules } from '@anvil/convention-core';
+import type { ConventionRule, RuleViolation } from '@esankhan3/anvil-convention-core';
+import { evaluateRules } from '@esankhan3/anvil-convention-core';
 import type { DiffFile } from './diff-reviewer.js';
 import { parseDiff } from './diff-reviewer.js';
 

@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import pc from 'picocolors';
 import { info, success, error, warn } from '../logger.js';
-import { runWithAgent } from '@anvil/agent-core';
+import { runWithAgent } from '@esankhan3/anvil-agent-core';
 
 // ---------------------------------------------------------------------------
 // Helpers

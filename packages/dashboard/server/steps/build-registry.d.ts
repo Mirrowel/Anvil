@@ -18,7 +18,7 @@
  * `Step.run()` doesn't need to type-thread dashboard internals through
  * `StepContext` (which stays generic per core-pipeline's contract).
  */
-import { type StepRegistry } from '@anvil/core-pipeline';
+import { type StepRegistry } from '@esankhan3/anvil-core-pipeline';
 import type { FeatureStore } from '../feature-store.js';
 import type { FeatureManifestStore } from '../feature-manifest.js';
 import type { ProjectLoader } from '../project-loader.js';

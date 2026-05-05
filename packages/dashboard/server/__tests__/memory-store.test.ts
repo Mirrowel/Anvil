@@ -1,6 +1,6 @@
 /**
  * Phase 5 tests — `MemoryStore` is now a thin façade over
- * `@anvil/memory-core`'s `HybridMemoryStore`. Tests verify:
+ * `@esankhan3/anvil-memory-core`'s `HybridMemoryStore`. Tests verify:
  *   - The 5 public ops keep their legacy return shapes.
  *   - Char-limit enforcement, dedup, and substring matching for
  *     replace/remove are preserved.

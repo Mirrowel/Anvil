@@ -1,7 +1,7 @@
 // Violation tracker — Section F.1
 
 import { join } from 'node:path';
-import { readJSONL, appendJSONL } from '@anvil/memory-core/legacy/index.js';
+import { readJSONL, appendJSONL } from '@esankhan3/anvil-memory-core/legacy/index.js';
 import type { ConventionPaths } from '../paths.js';
 
 export interface ViolationRecord {

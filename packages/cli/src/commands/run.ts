@@ -21,7 +21,7 @@ import {
   type AgentActivity,
   type CostInfo,
   type SpawnConfig,
-} from '@anvil/agent-core';
+} from '@esankhan3/anvil-agent-core';
 import { error as logError } from '../logger.js';
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';

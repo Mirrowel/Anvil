@@ -8,8 +8,8 @@
  * REQUIREMENTS.md per project.
  */
 
-import type { Step, StepContext } from '@anvil/core-pipeline';
-import { APPROVAL_GATE_CHANNEL } from '@anvil/core-pipeline';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
+import { APPROVAL_GATE_CHANNEL } from '@esankhan3/anvil-core-pipeline';
 import { runRepoRequirementsStage } from '../stages/index.js';
 import type { StageContext } from '../stages/types.js';
 import { detectAffectedProjects } from '../affected-projects.js';

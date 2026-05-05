@@ -3,7 +3,7 @@
 // The planner is asked to emit BOTH:
 //   1. A human-readable plan (markdown)
 //   2. A fenced ```json``` block containing a TaskEnvelope[] that
-//      conforms to @anvil/core-pipeline's schema.
+//      conforms to @esankhan3/anvil-core-pipeline's schema.
 //
 // The JSON block is extracted + validated. On validation failure we
 // retry up to MAX_RETRIES times with the structured error fed back to
@@ -13,8 +13,8 @@
 
 import { checkpointStage } from '../../checkpoint/checkpoint-writer.js';
 import type { StageContext, StageOutput } from './types.js';
-import { extractTaskEnvelopes, buildRetryPrompt } from '@anvil/core-pipeline';
-import type { ExtractResult } from '@anvil/core-pipeline';
+import { extractTaskEnvelopes, buildRetryPrompt } from '@esankhan3/anvil-core-pipeline';
+import type { ExtractResult } from '@esankhan3/anvil-core-pipeline';
 import { info, warn } from '../../logger.js';
 
 const STAGE_ID = 4;

@@ -10,7 +10,7 @@
  */
 
 import { runLLM } from './claude-runner.js';
-import type { RepoProfile, ServiceEndpoint, CrossRepoEdge } from '@anvil/knowledge-core';
+import type { RepoProfile, ServiceEndpoint, CrossRepoEdge } from '@esankhan3/anvil-knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -28,7 +28,7 @@ import {
   type PipelineEvent,
   type Step,
   type StepContext,
-} from '@anvil/core-pipeline';
+} from '@esankhan3/anvil-core-pipeline';
 
 import { FeatureStore } from '../feature-store.js';
 import { FeatureManifestStore } from '../feature-manifest.js';

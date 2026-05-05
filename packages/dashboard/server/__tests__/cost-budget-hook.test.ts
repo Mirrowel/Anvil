@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import {
   InMemoryEventBus,
   makePipelineEvent,
-} from '@anvil/core-pipeline';
+} from '@esankhan3/anvil-core-pipeline';
 
 import { attachCostBudgetHook } from '../steps/index.js';
 import type { CostBreachHandler, CostPolicy } from '../cost-breach-handler.js';

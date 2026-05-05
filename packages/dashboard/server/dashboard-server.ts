@@ -35,7 +35,7 @@ import { fileURLToPath } from 'node:url';
 // @ts-ignore — ws is a runtime dependency
 import { WebSocketServer, WebSocket } from 'ws';
 
-import { AgentManager, type AgentState } from '@anvil/agent-core';
+import { AgentManager, type AgentState } from '@esankhan3/anvil-agent-core';
 import { PipelineRunner } from './pipeline-runner.js';
 import { disallowedToolsForPersona } from './steps/per-repo-stage.step.js';
 import { runFixFlow, type FixFlowStageEvent } from './fix-flow.js';
@@ -85,7 +85,7 @@ import {
   BlobStore,
   CheckpointStore,
   computeKey as computeCheckpointKey,
-} from '@anvil/agent-core';
+} from '@esankhan3/anvil-agent-core';
 import { CheckpointSimilarityIndex } from './checkpoint-similarity-index.js';
 import { embedPrompt } from './prompt-similarity.js';
 import { loadPolicy, evaluatePolicy } from './pipeline-policy.js';
@@ -129,7 +129,7 @@ import {
 import { discoverProviders, invalidateProviderCache } from './provider-registry.js';
 import { setDiscoveryResult } from './model-tier-resolver.js';
 import { autoLearn } from './pipeline-learner.js';
-import { extractConventions, loadRules } from '@anvil/convention-core';
+import { extractConventions, loadRules } from '@esankhan3/anvil-convention-core';
 import {
   InMemoryEventBus,
   attachAuditLogHook,
@@ -140,7 +140,7 @@ import {
   ModelResolutionError,
   UnknownStageError,
   allowedToolsForStage,
-} from '@anvil/core-pipeline';
+} from '@esankhan3/anvil-core-pipeline';
 import {
   attachPipelineBusSubscriber,
   type PipelineStepDescriptor,
@@ -895,7 +895,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
   // ── Shared services ─────────────────────────────────────────────────
   const projectLoader = new ProjectLoader();
   const featureStore = new FeatureStore();
-  // AgentManager lives in @anvil/agent-core (the source of truth) and
+  // AgentManager lives in @esankhan3/anvil-agent-core (the source of truth) and
   // resolves its own adapter via ProviderRegistry — no factory injection
   // needed. Pass `{ adapterFactory: customFactory }` if a non-default
   // resolution is required (tests, custom routing).
@@ -2260,7 +2260,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
         // Run async — broadcast progress
         (async () => {
           try {
-            const { buildProjectGraph } = await import('@anvil/knowledge-core');
+            const { buildProjectGraph } = await import('@esankhan3/anvil-knowledge-core');
 
             // Find factory.yaml path
             const { homedir: getHome } = await import('node:os');
@@ -2310,7 +2310,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
       case 'get-project-graph-status': {
         const project = msg.project ?? '';
         try {
-          const { getProjectGraphStatus, loadProjectSummary } = await import('@anvil/knowledge-core');
+          const { getProjectGraphStatus, loadProjectSummary } = await import('@esankhan3/anvil-knowledge-core');
           const status = getProjectGraphStatus(project);
           const summary = status.exists ? loadProjectSummary(project) : null;
           ws.send(JSON.stringify({
@@ -3863,8 +3863,8 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
 
       case 'get-routing': {
         try {
-          const { resolveModelForStage } = await import('@anvil/core-pipeline');
-          const { loadModelRegistry } = await import('@anvil/agent-core');
+          const { resolveModelForStage } = await import('@esankhan3/anvil-core-pipeline');
+          const { loadModelRegistry } = await import('@esankhan3/anvil-agent-core');
           const registry = loadModelRegistry({});
           const byId = new Map(registry.models.map((m) => [m.id, m]));
 
@@ -3998,7 +3998,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
       }
       case 'list-memories': {
         try {
-          const { MemoryInspector } = await import('@anvil/memory-core');
+          const { MemoryInspector } = await import('@esankhan3/anvil-memory-core');
           const inspector = new MemoryInspector(memoryStore.unwrap());
           const project = msg.project ?? '';
           const m = msg as unknown as { search?: string; kind?: string; limit?: number };
@@ -4022,7 +4022,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
 
       case 'ratify-proposal': {
         try {
-          const { MemoryInspector } = await import('@anvil/memory-core');
+          const { MemoryInspector } = await import('@esankhan3/anvil-memory-core');
           const inspector = new MemoryInspector(memoryStore.unwrap());
           const m = msg as unknown as { id: string };
           const result = inspector.ratifyProposal(m.id);
@@ -4036,7 +4036,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
 
       case 'reject-proposal': {
         try {
-          const { MemoryInspector } = await import('@anvil/memory-core');
+          const { MemoryInspector } = await import('@esankhan3/anvil-memory-core');
           const inspector = new MemoryInspector(memoryStore.unwrap());
           const m = msg as unknown as { id: string; reason?: string };
           const ok = inspector.rejectProposal(m.id, m.reason ?? 'manual reject');
@@ -4912,7 +4912,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
     //      sleeptime `consolidate` ratifies them.
     if (state.status === 'completed' && prUrls.length > 0) {
       try {
-        const { recordPrEpisode } = await import('@anvil/memory-core');
+        const { recordPrEpisode } = await import('@esankhan3/anvil-memory-core');
         for (const prUrl of prUrls) {
           recordPrEpisode(
             memoryStore.unwrap(),
@@ -4948,7 +4948,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
       (reflectionMode !== 'on-success' || state.status === 'completed');
     if (shouldReflect) {
       try {
-        const { reflectOnRun, ProposalQueue } = await import('@anvil/memory-core');
+        const { reflectOnRun, ProposalQueue } = await import('@esankhan3/anvil-memory-core');
         const { createReflectionInvoker } = await import('./reflection-invoker.js');
         const queue = new ProposalQueue(memoryStore.unwrap().sqlite);
         const invoker = createReflectionInvoker({
@@ -5814,7 +5814,7 @@ You have ${repoNames.length} repos: ${repoNames.join(', ')}. Stay within these d
 
     // Resolution precedence (matches pipeline-runner):
     //   1. Caller-supplied model (UI dropdown override).
-    //   2. Registry-driven resolver from @anvil/core-pipeline.
+    //   2. Registry-driven resolver from @esankhan3/anvil-core-pipeline.
     //   3. Hardcoded fallback (sonnet) — last resort.
     const resolvedModel = (() => {
       if (model) return model;
@@ -7178,8 +7178,8 @@ Findings array may be empty. No prose outside the JSON block.`;
   if (sleeptimeIntervalMs > 0) {
     const runSleeptime = async () => {
       try {
-        const { consolidate, defaultDecide, ProposalQueue } = await import('@anvil/memory-core');
-        const { checkAndPromote } = await import('@anvil/convention-core');
+        const { consolidate, defaultDecide, ProposalQueue } = await import('@esankhan3/anvil-memory-core');
+        const { checkAndPromote } = await import('@esankhan3/anvil-convention-core');
         const projects = await projectLoader.listProjects().catch(() => []);
         const store = memoryStore.unwrap();
         const queue = new ProposalQueue(store.sqlite);

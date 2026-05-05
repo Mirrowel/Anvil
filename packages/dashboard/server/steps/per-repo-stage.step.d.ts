@@ -22,8 +22,8 @@
  * The build stage's per-task fanout is NOT lifted here — see Phase 4f.3
  * (`per-repo-build.step.ts`).
  */
-import type { AgentManager } from '@anvil/agent-core';
-import type { Step, StepContext } from '@anvil/core-pipeline';
+import type { AgentManager } from '@esankhan3/anvil-agent-core';
+import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 export declare function disallowedToolsForPersona(persona: string): string[];
 export interface RunPerRepoStageOptions {
     /** AgentManager instance owned by the caller (PipelineRunner today). */

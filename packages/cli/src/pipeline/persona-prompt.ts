@@ -165,7 +165,7 @@ export async function buildPersonaProjectPrompt(
 
   let knowledgeGraph: string | null = null;
   try {
-    const { getRetriever } = await import('@anvil/knowledge-core');
+    const { getRetriever } = await import('@esankhan3/anvil-knowledge-core');
     const retriever = await getRetriever(project);
     const result = await retriever.retrieve(feature, {
       maxTokens: tokenBudget,

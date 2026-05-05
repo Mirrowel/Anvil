@@ -8,8 +8,8 @@
  *   L3 — Deep Search (on-demand, future)
  */
 
-import type { CodeChunk, RetrievalResult, ScoredChunk } from '@anvil/knowledge-core';
-import { loadProjectGraph, formatProjectGraphForPrompt } from '@anvil/knowledge-core';
+import type { CodeChunk, RetrievalResult, ScoredChunk } from '@esankhan3/anvil-knowledge-core';
+import { loadProjectGraph, formatProjectGraphForPrompt } from '@esankhan3/anvil-knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Helpers

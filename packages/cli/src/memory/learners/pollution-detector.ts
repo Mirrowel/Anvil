@@ -4,7 +4,7 @@ import { getMemoryUsage } from '../usage-tracker.js';
 import type {
   MemoryStore,
   MemoryEntry,
-} from '@anvil/memory-core/legacy/index.js';
+} from '@esankhan3/anvil-memory-core/legacy/index.js';
 
 /**
  * Detect memories that appear in 3+ failed runs and reduce their confidence by 20.

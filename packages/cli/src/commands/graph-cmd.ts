@@ -49,7 +49,7 @@ graphCommand.addCommand(
     .option('--model <model>', 'Override model (e.g., gpt-4o, claude-sonnet-4-20250514)')
     .option('--dry-run', 'Show prompt without calling LLM')
     .action(async (projectName, opts) => {
-      const { buildProjectGraph } = await import('@anvil/knowledge-core');
+      const { buildProjectGraph } = await import('@esankhan3/anvil-knowledge-core');
 
       // Resolve project
       let configPath: string | undefined;
@@ -148,7 +148,7 @@ graphCommand.addCommand(
     .description('Show the project graph summary')
     .argument('[project]', 'Project name')
     .action(async (projectName) => {
-      const { loadProjectSummary, getProjectGraphStatus } = await import('@anvil/knowledge-core');
+      const { loadProjectSummary, getProjectGraphStatus } = await import('@esankhan3/anvil-knowledge-core');
 
       if (!projectName) {
         const configs = findProjectConfigs();
@@ -186,7 +186,7 @@ graphCommand.addCommand(
     .argument('[project]', 'Project name')
     .option('--provider <name>', 'LLM provider: openai, anthropic, gemini, openrouter')
     .action(async (projectName, opts) => {
-      const { estimateProjectGraphCost } = await import('@anvil/knowledge-core');
+      const { estimateProjectGraphCost } = await import('@esankhan3/anvil-knowledge-core');
 
       if (!projectName) {
         const configs = findProjectConfigs();
@@ -233,7 +233,7 @@ graphCommand.addCommand(
     .description('Show project graph status')
     .argument('[project]', 'Project name')
     .action(async (projectName) => {
-      const { getProjectGraphStatus } = await import('@anvil/knowledge-core');
+      const { getProjectGraphStatus } = await import('@esankhan3/anvil-knowledge-core');
 
       const configs = findProjectConfigs();
       const projects = projectName

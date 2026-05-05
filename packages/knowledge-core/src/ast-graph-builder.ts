@@ -20,10 +20,10 @@
 
 import { readFileSync } from 'node:fs';
 import { relative, extname, dirname, resolve, basename, join } from 'node:path';
-import { walkDir, langFromExt, extractImports, extractNamedImports } from '@anvil/knowledge-core';
-import type { GraphifyNode, GraphifyEdge, GraphifyOutput, WorkspaceMap } from '@anvil/knowledge-core';
-import { initTreeSitter, parseFile as tsParseFile, supportedLanguages } from '@anvil/knowledge-core';
-import type { FileParseResult, TreeSitterEntity } from '@anvil/knowledge-core';
+import { walkDir, langFromExt, extractImports, extractNamedImports } from '@esankhan3/anvil-knowledge-core';
+import type { GraphifyNode, GraphifyEdge, GraphifyOutput, WorkspaceMap } from '@esankhan3/anvil-knowledge-core';
+import { initTreeSitter, parseFile as tsParseFile, supportedLanguages } from '@esankhan3/anvil-knowledge-core';
+import type { FileParseResult, TreeSitterEntity } from '@esankhan3/anvil-knowledge-core';
 
 // ---------------------------------------------------------------------------
 // Tree-sitter integration — use AST parsing when available, regex fallback
@@ -237,8 +237,8 @@ function extractPackageName(importPath: string): string {
   return slashIdx > 0 ? importPath.slice(0, slashIdx) : importPath;
 }
 
-function findOwningPackage(relPath: string, workspaceMap: WorkspaceMap): import('@anvil/knowledge-core').WorkspacePackage | null {
-  let best: import('@anvil/knowledge-core').WorkspacePackage | null = null;
+function findOwningPackage(relPath: string, workspaceMap: WorkspaceMap): import('@esankhan3/anvil-knowledge-core').WorkspacePackage | null {
+  let best: import('@esankhan3/anvil-knowledge-core').WorkspacePackage | null = null;
   let bestLen = -1;
   for (const pkg of workspaceMap.packages) {
     if (pkg.relativePath === '.') continue;

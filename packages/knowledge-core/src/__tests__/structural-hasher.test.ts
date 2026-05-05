@@ -8,7 +8,7 @@ import {
   computeStructuralHash,
   computeStructuralHashes,
   deduplicateByStructure,
-} from '@anvil/knowledge-core';
+} from '@esankhan3/anvil-knowledge-core';
 
 // ---------------------------------------------------------------------------
 // computeStructuralHash

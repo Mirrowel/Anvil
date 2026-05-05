@@ -26,7 +26,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import type { Step, StepContext, StepRegistry } from '@anvil/core-pipeline';
+import type { Step, StepContext, StepRegistry } from '@esankhan3/anvil-core-pipeline';
 import {
   loadCustomStages,
   type CustomStageConfig,

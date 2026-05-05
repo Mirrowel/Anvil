@@ -9,7 +9,7 @@
  * one minute.
  */
 
-import type { ProviderName, ResolvedChain } from '@anvil/agent-core';
+import type { ProviderName, ResolvedChain } from '@esankhan3/anvil-agent-core';
 
 interface LivenessRecord {
   alive: boolean;

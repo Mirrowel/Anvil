@@ -14,7 +14,7 @@ import {
   readDashboardState,
 } from './state-file.js';
 import { info, warn } from '../logger.js';
-import type { ApprovalRequest } from '@anvil/core-pipeline';
+import type { ApprovalRequest } from '@esankhan3/anvil-core-pipeline';
 
 const APPROVAL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 

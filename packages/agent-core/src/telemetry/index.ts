@@ -1,5 +1,5 @@
 /**
- * Public telemetry barrel for `@anvil/agent-core`.
+ * Public telemetry barrel for `@esankhan3/anvil-agent-core`.
  *
  * Consumers import the GenAi attribute constants and (optionally) the tracer
  * accessor. The wrapper that emits spans (Phase 2) is not yet exposed —

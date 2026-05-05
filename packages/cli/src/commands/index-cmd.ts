@@ -207,7 +207,7 @@ export const indexCommand = new Command('index')
       }
 
       try {
-        const { KnowledgeIndexer } = await import('@anvil/knowledge-core');
+        const { KnowledgeIndexer } = await import('@esankhan3/anvil-knowledge-core');
         const indexer = new KnowledgeIndexer();
         const stats = await indexer.getStats(projectName);
         console.log('');
@@ -306,8 +306,8 @@ export const indexCommand = new Command('index')
     const startTime = Date.now();
 
     try {
-      const { KnowledgeIndexer } = await import('@anvil/knowledge-core');
-      const { loadKnowledgeConfig } = await import('@anvil/knowledge-core');
+      const { KnowledgeIndexer } = await import('@esankhan3/anvil-knowledge-core');
+      const { loadKnowledgeConfig } = await import('@esankhan3/anvil-knowledge-core');
 
       const kConfig = loadKnowledgeConfig(projectName);
 
