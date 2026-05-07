@@ -269,8 +269,12 @@ export class AgentProcess extends EventEmitter {
       // (cost.stopReason prefers the freshly reported value).
       this.state.cost = accumulateCost(this.state.cost, data.cost);
 
+      // Canonical artifact lives in finalAnswer — set once, never mixed
+      // with the streaming transcript. `output` keeps accumulating chunks
+      // for the Activity tab; the Raw tab + on-disk artifact read from
+      // finalAnswer instead. On resume, the latest result wins.
       if (data.result) {
-        appendOutput(this.state, data.result);
+        this.state.finalAnswer = data.result;
       }
       // Stamp the running aggregate cost on the session span so a single
       // trace shows total token / USD spend without re-summing children.
@@ -346,6 +350,7 @@ export function createPendingState(
     status: 'pending',
     cost: emptyCost(),
     output: '',
+    finalAnswer: '',
     activities: [],
     startedAt: null,
     finishedAt: null,

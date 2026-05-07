@@ -110,6 +110,25 @@ belong in ADRs, not here.
   for the yaml file: `ANVIL_MODELS_CONFIG` env →
   `<workspace>/.anvil/models.yaml` → `~/.anvil/models.yaml` (canonical) →
   empty.
+- Provider liveness probe (`src/provider-liveness.ts`) — module-scoped
+  cache of provider availability + sync chain walker. Exports
+  `setLivenessTtlMs`, `prefetchLiveness`, `isProviderAlive`,
+  `pickAliveModelFromChainSync`, `pickAliveModelFromChain`. The TTL
+  defaults to 30s (configurable via the registry's `walker.liveness_ttl_ms`).
+  Probes: Ollama hits `localhost:11434/api/tags`; cloud providers are
+  env-var-presence only (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`,
+  `OPENCODE_API_KEY`, etc.). Both cli and dashboard share one cache.
+- Empty-output retryable throws — the three agentic adapters (`claude`,
+  `openrouter` / `opencode`, `ollama`) throw `503 retryable
+  UpstreamError` when the run completes with empty final text. The
+  dashboard's `runWithChainFallback` (in `core-pipeline`) catches this
+  and walks the chain to the next model. Without this, claude-cli's
+  silent-empty bug (exit 0, no `result` frame) silently produced 0-byte
+  artifacts downstream; now the chain walker recovers automatically.
+- Concurrency-safe Claude adapter — `claude-adapter.ts` keeps a
+  `Set<ChildProcess>` instead of a single `child` field, so parallel
+  spawns (per-repo backend + frontend, per-task build) don't trample
+  each other's process handles.
 
 Public barrel: `src/index.ts` re-exports everything.
 

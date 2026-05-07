@@ -27,6 +27,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { buildShipUserPrompt } from '@esankhan3/anvil-core-pipeline';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { budgetPromptContext } from '../context-budget.js';
@@ -416,16 +417,15 @@ export function buildStagePrompt(ctx, stage, prevArtifact) {
         case 'requirements':
             return `${feature}${repoList}${reviewBlock}\n\nProduce high-level requirements for this feature across the entire project. Identify which repositories need changes and why. Include success criteria.${prev}${resumeCtx}`;
         case 'ship': {
-            const prLabels = ['anvil'];
-            const at = ctx.actionType ?? 'feature';
-            if (at === 'bugfix' || at === 'fix')
-                prLabels.push('bug');
-            else if (at === 'spike' || at === 'review')
-                prLabels.push(at);
-            else
-                prLabels.push('enhancement');
-            const labelFlags = prLabels.map((l) => `--label "${l}"`).join(' ');
-            return `${feature}${repoList}${reviewBlock}\n\nShip the changes for each repository. The code is already on a feature branch "anvil/${ctx.featureSlug}".\n\nMANDATORY for every repo (even if prior stages reported errors):\n1. Stage and commit any uncommitted changes — git add -A && git commit -m "[anvil] ${ctx.feature}". If there's nothing new to commit, skip this step but continue.\n2. Push the feature branch to origin — git push -u origin "anvil/${ctx.featureSlug}". This is REQUIRED — the user needs the branch on the remote to review. If push fails, surface the exact error.\n3. Create a PR — gh pr create --base "${ctx.baseBranch}" --head "anvil/${ctx.featureSlug}" ${labelFlags}\n   - If the build / validate / test stages had failures, mark the PR as DRAFT (add --draft) and include a "## Known Issues" section in the body listing what's broken so the reviewer can see the work-in-progress and finish it.\n   - If everything passed, create a regular PR (no --draft).\n\nNon-negotiable: every repo with a feature branch MUST end with a pushed branch and an open PR (draft or not). Reporting back "I didn't ship because errors exist" is NOT an acceptable outcome — you ship as a draft instead. Do NOT merge to ${ctx.baseBranch}.${prev}${resumeCtx}`;
+            const shipPrompt = buildShipUserPrompt({
+                feature: ctx.feature,
+                featureSlug: ctx.featureSlug,
+                repoNames: ctx.repoNames,
+                workspaceDir: ctx.workspaceDir,
+                actionType: ctx.actionType,
+                baseBranch: ctx.baseBranch,
+            });
+            return `${shipPrompt}${reviewBlock}${prev}${resumeCtx}`;
         }
         default:
             return `${feature}${repoList}${reviewBlock}${prev}${resumeCtx}`;

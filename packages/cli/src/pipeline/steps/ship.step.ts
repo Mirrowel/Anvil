@@ -1,10 +1,15 @@
 /**
- * Ship step — Phase 6 per-stage adapter.
- * Lifts orchestrator.ts:Stage-7 logic.
+ * Ship step — single agent turn that pushes the feature branch, opens
+ * one PR per repo, and deploys a preview sandbox via the nexus MCP.
+ *
+ * The Step factory pattern is the unification surface — both cli (today)
+ * and dashboard (after R3 lands and pipeline-runner.ts migrates to
+ * `Pipeline.run()` + `InMemoryStepRegistry`) drive the same Step.
  */
 
 import { execSync } from 'node:child_process';
 import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
+import { buildShipUserPrompt, extractPrUrls, extractSandboxUrl } from '@esankhan3/anvil-core-pipeline';
 import { buildPersonaProjectPrompt } from '../persona-prompt.js';
 import { updatePipelineStage, updateStageCost, updatePipelineCost } from '../state-file.js';
 import { warn } from '../../logger.js';
@@ -16,7 +21,7 @@ export const SHIP_STEP_ID = 'ship' as const;
 export function createShipStep(): Step<unknown, unknown> {
   return {
     id: SHIP_STEP_ID,
-    name: 'Commit, push feature branch, create PRs',
+    name: 'Commit, push feature branch, create PRs, deploy sandbox',
     parallelism: 'serial',
     run: async (ctx: StepContext<unknown>) => {
       const state = ctx.shared as unknown as CliPipelineState;
@@ -41,31 +46,32 @@ export function createShipStep(): Step<unknown, unknown> {
         state.projectYamlPath, state.workspaceDir, state.repoNames, state.memoryStore,
       );
 
-      const branchName = `anvil/${state.featureSlug}`;
-      const repoListStr = state.repoNames.length > 0 ? state.repoNames.join(', ') : '(workspace root)';
-
-      const prLabels = ['anvil'];
-      if (state.actionType === 'bugfix' || state.actionType === 'fix') prLabels.push('bug');
-      else if (state.actionType === 'spike' || state.actionType === 'review') prLabels.push(state.actionType);
-      else prLabels.push('enhancement');
-      const labelFlags = prLabels.map((l) => `--label "${l}"`).join(' ');
+      const userPrompt = buildShipUserPrompt({
+        feature: state.feature,
+        featureSlug: state.featureSlug,
+        repoNames: state.repoNames,
+        workspaceDir: state.workspaceDir,
+        actionType: state.actionType,
+      });
 
       const shipResult = await state.agentRunner.run({
         persona: 'engineer',
         projectPrompt,
-        userPrompt: `Feature: "${state.feature}"\nRepositories: ${repoListStr}\n\nShip the changes. The code is already on feature branch "${branchName}". The build, lint, and tests all pass.\n\nFor each repo with changes:\n1. Run a final quick check: build and lint to confirm everything is clean\n2. If ANY errors remain, fix them before proceeding\n3. Stage and commit all changes with a clear commit message: "[anvil] ${state.feature}"\n4. Push the feature branch to origin\n5. Create a PR from "${branchName}" to main with a description of the changes. Add these label flags to the gh pr create command: ${labelFlags}\n\nDo NOT merge to main. Only create PRs. Do NOT create a PR if the code has unfixed errors.`,
+        userPrompt,
         workingDir: state.workspaceDir,
         stage: 'ship',
       });
 
-      const prUrlPattern = /https:\/\/github\.com\/[^\s"')]+\/pull\/\d+/g;
-      const extractedPrUrls = shipResult.output.match(prUrlPattern);
-      if (extractedPrUrls) {
-        state.prUrls = [...new Set(extractedPrUrls)];
+      const prUrls = extractPrUrls(shipResult.output);
+      if (prUrls.length > 0) {
+        state.prUrls = prUrls;
+      }
+      const sandboxUrl = extractSandboxUrl(shipResult.output);
+      if (sandboxUrl) {
+        state.sandboxUrl = sandboxUrl;
       }
 
-      const totalTokens = shipResult.tokenEstimate;
-      const { inputTokens, outputTokens, costUsd } = estimateAgentCallCost(totalTokens, state.model);
+      const { inputTokens, outputTokens, costUsd } = estimateAgentCallCost(shipResult.tokenEstimate, state.model);
       state.stageCosts.set(7, { inputTokens, outputTokens, estimatedCost: costUsd });
       updateStageCost(7, costUsd);
       updatePipelineCost(aggregateCost(state));

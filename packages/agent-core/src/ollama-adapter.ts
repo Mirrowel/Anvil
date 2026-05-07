@@ -272,6 +272,18 @@ export class OllamaAdapter implements ModelAdapter {
 
     const durationMs = totalDurMs > 0 ? totalDurMs : Date.now() - startMs;
 
+    // Silent-empty defense: agentic loop terminated without final assistant
+    // text. Surface as retryable so the dashboard's chain-fallback walks
+    // to the next chain entry instead of writing a 0-byte artifact.
+    // Mirrors claude-adapter + openrouter-adapter contract.
+    if (!aggregatedText.trim() && stopReason !== 'aborted') {
+      throw new UpstreamError(
+        503,
+        `ollama model "${config.model}" returned empty final text (stopReason=${stopReason}, outputTokens=${totalOut}, toolCalls=${countToolCalls(messages)})`,
+        { provider: 'ollama', retryable: true },
+      );
+    }
+
     emitResult(output, {
       text: aggregatedText,
       costUsd: 0,

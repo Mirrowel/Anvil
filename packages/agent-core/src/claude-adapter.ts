@@ -72,7 +72,11 @@ export class ClaudeAdapter implements ModelAdapter {
     maxOutputTokens: false,
   };
 
-  private child: ChildProcess | null = null;
+  // Per-call subprocess tracking. `ClaudeAdapter` is registered as a
+  // singleton, so a scalar `child` field gets trampled by concurrent
+  // `run()` calls (per-repo backend + frontend in parallel). The set
+  // mirrors the pattern used by Ollama / OpenRouter adapters.
+  private readonly children = new Set<ChildProcess>();
 
   supportsModel(modelId: string): boolean {
     const lower = modelId.toLowerCase();
@@ -151,7 +155,11 @@ export class ClaudeAdapter implements ModelAdapter {
       cwd: config.workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    this.child = child;
+    this.children.add(child);
+    // Bulletproof cleanup regardless of how this run() exits — `close`
+    // fires after both stdout/stderr have closed and the process has
+    // exited, which covers normal exit, throws, and `kill()`.
+    child.once('close', () => { this.children.delete(child); });
 
     // End stdin immediately — prompt is passed via args
     child.stdin!.end();
@@ -212,7 +220,6 @@ export class ClaudeAdapter implements ModelAdapter {
       child.on('error', reject);
     });
 
-    this.child = null;
     const durationMs = Date.now() - startTime;
 
     if (exitCode !== 0 && !resultMsg) {
@@ -231,6 +238,19 @@ export class ClaudeAdapter implements ModelAdapter {
       throw new Error(`Claude CLI exited with code ${exitCode}${stderrBuf ? `\n${stderrBuf.slice(0, 400)}` : ''}`);
     }
 
+    // Exit 0 with no result message: claude-cli ended its stream-json
+    // output without emitting the terminating `result` frame. Observed
+    // intermittently under parallel spawns. Surface as retryable so the
+    // dashboard's chain-fallback re-resolves to the next chain entry
+    // instead of writing an empty artifact downstream.
+    if (!resultMsg) {
+      throw new UpstreamError(
+        503,
+        stderrBuf || 'Claude CLI exited 0 with no result message',
+        { provider: 'claude', retryable: true },
+      );
+    }
+
     // ---- Build result -----------------------------------------------------
     const pricing = this.getModelPricing(config.model) ?? [3.0, 15.0];
     const rm = resultMsg as Record<string, any> | null;
@@ -241,6 +261,17 @@ export class ClaudeAdapter implements ModelAdapter {
     const costUsd =
       rm?.total_cost_usd ??
       (inputTokens * pricing[0] + outputTokens * pricing[1]) / 1_000_000;
+
+    // Empty output combined with zero output tokens means claude-cli
+    // recorded a result frame but the assistant produced nothing. Treat
+    // as transient — same retry semantics as a missing result frame.
+    if (!fullOutput && outputTokens === 0) {
+      throw new UpstreamError(
+        503,
+        'Claude CLI returned empty output with 0 output tokens',
+        { provider: 'claude', retryable: true },
+      );
+    }
 
     return {
       output: fullOutput,
@@ -259,9 +290,9 @@ export class ClaudeAdapter implements ModelAdapter {
   }
 
   kill(): void {
-    if (this.child && !this.child.killed) {
-      this.child.kill('SIGTERM');
-      this.child = null;
+    for (const child of this.children) {
+      if (!child.killed) child.kill('SIGTERM');
     }
+    this.children.clear();
   }
 }

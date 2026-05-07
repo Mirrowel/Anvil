@@ -27,7 +27,14 @@ export interface OutputPanelAgent {
   name: string;
   persona: string;
   status: 'running' | 'done' | 'error' | 'idle';
+  /** Streaming transcript — used as fallback for the Raw tab. */
   output: string;
+  /**
+   * Canonical artifact text from the adapter's terminal `result` event.
+   * When present, the Raw tab renders this instead of the noisier
+   * streaming transcript. Empty until the agent emits its final result.
+   */
+  finalAnswer?: string;
 }
 
 export interface OutputPanelProps {
@@ -69,7 +76,11 @@ export function OutputPanel({
   const isRunning = isRunningProp ?? agent?.status === 'running';
   const showInput = isRunning || agent?.status === 'done' || !!onSendInput;
   const agentId = agent?.id ?? '';
-  const baseOutput = agent?.output ?? rawOutput ?? '';
+  // Raw tab + downstream consumers prefer the canonical artifact
+  // (finalAnswer) — falls back to streaming transcript when the agent
+  // hasn't emitted its terminal result yet, then to whatever the parent
+  // passed via rawOutput (per-stage filtered text).
+  const baseOutput = agent?.finalAnswer || agent?.output || rawOutput || '';
 
   const toggleExpanded = useCallback((id: number) => {
     setExpandedIds((prev) => {
@@ -231,24 +242,11 @@ export function OutputPanel({
     return coalesced;
   }, [activities, searchQuery]);
 
-  // Empty state
-  if (!agent && activities.length === 0 && !baseOutput) {
-    return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100%', flexDirection: 'column', gap: 12,
-      }}>
-        {isRunning ? (
-          <>
-            <div className="status-dot-spin" style={{ width: 24, height: 24 }} />
-            <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Awaiting output...</p>
-          </>
-        ) : (
-          <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>No output for this stage yet</p>
-        )}
-      </div>
-    );
-  }
+  // Empty state — render placeholder INSIDE the panel so the tab strip
+  // (Activity/Changes/Raw) below remains visible and clickable. Earlier
+  // we returned a centered spinner here that occluded the toolbar, so
+  // users couldn't switch tabs while a stage was warming up.
+  const isEmpty = !agent && activities.length === 0 && !baseOutput;
 
   return (
     <div style={{
@@ -260,7 +258,21 @@ export function OutputPanel({
         onScroll={handleScroll}
         style={{ flex: 1, overflow: 'auto', background: 'var(--bg-base)' }}
       >
-        {viewMode === 'changes' ? (
+        {isEmpty ? (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            height: '100%', flexDirection: 'column', gap: 12,
+          }}>
+            {isRunning ? (
+              <>
+                <div className="status-dot-spin" style={{ width: 24, height: 24 }} />
+                <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Awaiting output...</p>
+              </>
+            ) : (
+              <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>No output for this stage yet</p>
+            )}
+          </div>
+        ) : viewMode === 'changes' ? (
           changes.length === 0 ? (
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',

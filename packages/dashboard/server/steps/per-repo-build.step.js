@@ -21,7 +21,7 @@
  * once `Pipeline.run()` becomes the orchestrator.
  */
 import { spawnAndWait } from './agent-spawner.js';
-import { parseTasks, groupTasksForExecution } from '../engineer-task-bundler.js';
+import { parseTasks, runTasksWithDependencyGraph } from '../engineer-task-bundler.js';
 /**
  * Per-task disallowedTools rule. Differs from the general
  * `disallowedToolsForPersona('engineer')` (which only disables `Agent`):
@@ -60,63 +60,91 @@ export async function runBuildForOneRepo(opts) {
     if (tasks.length === 0) {
         return runBuildFallback(opts);
     }
-    const groups = groupTasksForExecution(tasks);
-    opts.onProjectEvent?.('info', `[build] ${opts.repoName}: ${tasks.length} task${tasks.length === 1 ? '' : 's'} in ${groups.length} group${groups.length === 1 ? '' : 's'} (per-task spawning)`);
+    opts.onProjectEvent?.('info', `[build] ${opts.repoName}: ${tasks.length} task${tasks.length === 1 ? '' : 's'} (dep-graph scheduling)`);
     const taskOutputs = [];
     let totalCost = 0;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let totalCacheReadTokens = 0;
     let totalCacheWriteTokens = 0;
-    for (const group of groups) {
-        if (opts.isCancelled()) {
+    await runTasksWithDependencyGraph(tasks, async (task) => {
+        if (opts.isCancelled())
             throw new Error('Pipeline cancelled');
+        const prompt = opts.buildPerTaskPrompt(task);
+        // AgentRunner path: routes through chain-fallback + empty-throw
+        // defense without per-task glue. The legacy spawnAndWait fallback
+        // remains for callers that haven't migrated yet.
+        if (opts.agentRunner) {
+            const r = await opts.agentRunner.run({
+                persona: opts.persona,
+                projectPrompt: opts.projectPrompt,
+                userPrompt: prompt,
+                workingDir: opts.repoPath,
+                stage: `${opts.stageName}:${opts.repoName}:${task.id}`,
+                allowedTools: opts.allowedTools,
+                disallowedTools: [...BUILD_DISALLOWED_TOOLS],
+                maxOutputTokens: opts.maxOutputTokens,
+                repoName: opts.repoName,
+            });
+            return {
+                artifact: r.output,
+                cost: r.costUsd ?? 0,
+                inputTokens: r.inputTokens ?? 0,
+                outputTokens: r.outputTokens ?? 0,
+                cacheReadTokens: r.cacheReadTokens ?? 0,
+                cacheWriteTokens: r.cacheWriteTokens ?? 0,
+            };
         }
-        const groupPromises = group.tasks.map(async (task) => {
-            try {
-                const prompt = opts.buildPerTaskPrompt(task);
-                const result = await spawnAndWait({
-                    agentManager: opts.agentManager,
-                    spec: {
-                        name: `engineer-${opts.repoName}-${task.id}`,
-                        persona: opts.persona,
-                        project: opts.project,
-                        stage: `${opts.stageName}:${opts.repoName}:${task.id}`,
-                        prompt,
-                        model: opts.model,
-                        cwd: opts.repoPath,
-                        projectPrompt: opts.projectPrompt,
-                        permissionMode: 'bypassPermissions',
-                        disallowedTools: [...BUILD_DISALLOWED_TOOLS],
-                        allowedTools: opts.allowedTools,
-                        maxOutputTokens: opts.maxOutputTokens,
-                    },
-                    isCancelled: opts.isCancelled,
-                    onSpawn: opts.onAgentSpawned,
-                    onTruncation: opts.onTruncation,
-                    pollIntervalMs: opts.pollIntervalMs,
-                    sleep: opts.sleep,
-                });
-                totalCost += result.cost;
-                totalInputTokens += result.inputTokens;
-                totalOutputTokens += result.outputTokens;
-                totalCacheReadTokens += result.cacheReadTokens;
-                totalCacheWriteTokens += result.cacheWriteTokens;
-                taskOutputs.push({ id: task.id, title: task.title, artifact: result.artifact });
-                opts.onProjectEvent?.('info', `[build] ${opts.repoName} ${task.id} done (${(result.cost * 100).toFixed(2)}¢)`);
-            }
-            catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                taskOutputs.push({
-                    id: task.id,
-                    title: task.title,
-                    artifact: unresolvedArtifact(task, msg),
-                });
-                opts.onProjectEvent?.('warn', `[build] ${opts.repoName} ${task.id} failed: ${msg}`);
-            }
+        // Legacy direct-spawn path.
+        if (!opts.agentManager) {
+            throw new Error('runBuildForOneRepo requires either agentRunner or agentManager');
+        }
+        const result = await spawnAndWait({
+            agentManager: opts.agentManager,
+            spec: {
+                name: `engineer-${opts.repoName}-${task.id}`,
+                persona: opts.persona,
+                project: opts.project,
+                stage: `${opts.stageName}:${opts.repoName}:${task.id}`,
+                prompt,
+                model: opts.model ?? '',
+                cwd: opts.repoPath,
+                projectPrompt: opts.projectPrompt,
+                permissionMode: 'bypassPermissions',
+                disallowedTools: [...BUILD_DISALLOWED_TOOLS],
+                allowedTools: opts.allowedTools,
+                maxOutputTokens: opts.maxOutputTokens,
+            },
+            isCancelled: opts.isCancelled,
+            onSpawn: opts.onAgentSpawned,
+            onTruncation: opts.onTruncation,
+            pollIntervalMs: opts.pollIntervalMs,
+            sleep: opts.sleep,
         });
-        await Promise.all(groupPromises);
-    }
+        return result;
+    }, {
+        onStart: (task) => {
+            opts.onProjectEvent?.('info', `[build] ${opts.repoName} ${task.id} starting`);
+        },
+        onComplete: (task, result) => {
+            totalCost += result.cost;
+            totalInputTokens += result.inputTokens;
+            totalOutputTokens += result.outputTokens;
+            totalCacheReadTokens += result.cacheReadTokens;
+            totalCacheWriteTokens += result.cacheWriteTokens;
+            taskOutputs.push({ id: task.id, title: task.title, artifact: result.artifact });
+            opts.onProjectEvent?.('info', `[build] ${opts.repoName} ${task.id} done (${(result.cost * 100).toFixed(2)}¢)`);
+        },
+        onFail: (task, err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            taskOutputs.push({
+                id: task.id,
+                title: task.title,
+                artifact: unresolvedArtifact(task, msg),
+            });
+            opts.onProjectEvent?.('warn', `[build] ${opts.repoName} ${task.id} failed: ${msg}`);
+        },
+    }, { enforceFileConflicts: true });
     const combined = combineTaskArtifacts(tasks, taskOutputs);
     return {
         artifact: combined,
@@ -130,6 +158,33 @@ export async function runBuildForOneRepo(opts) {
     };
 }
 async function runBuildFallback(opts) {
+    // AgentRunner path — preferred when supplied.
+    if (opts.agentRunner) {
+        const r = await opts.agentRunner.run({
+            persona: opts.persona,
+            projectPrompt: opts.projectPrompt,
+            userPrompt: opts.buildFallbackPrompt(),
+            workingDir: opts.repoPath,
+            stage: `${opts.stageName}:${opts.repoName}`,
+            allowedTools: opts.allowedTools,
+            disallowedTools: [...BUILD_DISALLOWED_TOOLS],
+            maxOutputTokens: opts.maxOutputTokens,
+            repoName: opts.repoName,
+        });
+        return {
+            artifact: r.output,
+            cost: r.costUsd ?? 0,
+            taskCount: 0,
+            fallback: true,
+            inputTokens: r.inputTokens ?? 0,
+            outputTokens: r.outputTokens ?? 0,
+            cacheReadTokens: r.cacheReadTokens ?? 0,
+            cacheWriteTokens: r.cacheWriteTokens ?? 0,
+        };
+    }
+    if (!opts.agentManager) {
+        throw new Error('runBuildFallback requires either agentRunner or agentManager');
+    }
     const result = await spawnAndWait({
         agentManager: opts.agentManager,
         spec: {
@@ -138,7 +193,7 @@ async function runBuildFallback(opts) {
             project: opts.project,
             stage: `${opts.stageName}:${opts.repoName}`,
             prompt: opts.buildFallbackPrompt(),
-            model: opts.model,
+            model: opts.model ?? '',
             cwd: opts.repoPath,
             projectPrompt: opts.projectPrompt,
             permissionMode: 'bypassPermissions',

@@ -27,11 +27,19 @@
  * `onClarifyAck`, `setWaitingState`. The helper does NOT speak WS
  * directly — pipeline-runner wires those callbacks today.
  */
-import { type ClarifyQAPair } from './clarify.step.js';
+import type { ClarifyQAPair } from '@esankhan3/anvil-core-pipeline';
 import type { AgentManager } from '@esankhan3/anvil-agent-core';
 import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 export interface RunClarifyForProjectOptions {
-    agentManager: AgentManager;
+    /**
+     * Multi-turn agent surface. When supplied, the explore + synthesize
+     * phases route through `agentSession.start` / `sendInput` — chain
+     * fallback and empty-output throws are baked in by the underlying
+     * runner. When omitted, falls back to direct `agentManager` calls.
+     */
+    agentSession?: import('@esankhan3/anvil-core-pipeline').AgentSession;
+    /** Legacy direct path — used when `agentSession` is omitted. */
+    agentManager?: AgentManager;
     /** Project slug — forwarded to the spawn config. */
     project: string;
     /** Working directory for the explore-phase agent (project workspace). */

@@ -336,6 +336,20 @@ export class OpenRouterAdapter implements ModelAdapter {
       ? 'max_tokens'
       : stopReason;
 
+    // Silent-empty defense: if the agentic loop terminated without ever
+    // appending final text content (model spent its turns on tool_use /
+    // reasoning blocks but never emitted assistant text), surface as a
+    // retryable upstream error so the dashboard's chain-fallback walks
+    // to the next chain entry instead of writing a 0-byte artifact
+    // downstream. Mirrors the claude-adapter contract.
+    if (!aggregatedText.trim() && stopReason !== 'aborted') {
+      throw new _UpstreamError(
+        503,
+        `${this.provider} model "${config.model}" returned empty final text (stopReason=${stopReason}, outputTokens=${totalOut}, toolCalls=${countToolCalls(messages)})`,
+        { provider: this.provider, retryable: true },
+      );
+    }
+
     emitResult(output, {
       text: aggregatedText,
       costUsd,

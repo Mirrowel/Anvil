@@ -1,16 +1,12 @@
 // Shared types for pipeline stages
+//
+// AgentRunner now lives in @esankhan3/anvil-core-pipeline so the same
+// interface drives both cli and dashboard stage logic. Re-exported here
+// so existing cli imports keep working without churn.
 
-export interface AgentRunner {
-  run(config: {
-    persona: string;
-    projectPrompt: string;
-    userPrompt: string;
-    workingDir: string;
-    stage: string;
-    model?: string;
-    provider?: string;
-  }): Promise<{ output: string; tokenEstimate: number }>;
-}
+import type { AgentRunner } from '@esankhan3/anvil-core-pipeline';
+
+export type { AgentRunner, AgentRunRequest, AgentRunResult } from '@esankhan3/anvil-core-pipeline';
 
 export interface StageContext {
   runDir: string;

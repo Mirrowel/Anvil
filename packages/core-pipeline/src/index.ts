@@ -66,6 +66,44 @@ export type {
 } from './hooks/index.js';
 export { VERSION } from './version.js';
 
+// — Agent invocation surface (canonical AgentRunner type)
+export type { AgentRunner, AgentRunRequest, AgentRunResult } from './agent-runner.js';
+export type { AgentSession, AgentSessionResult } from './agent-session.js';
+
+// — Chain-fallback for retryable upstream failures
+export type { ChainFallbackOptions, BurnInfo } from './routing/with-fallback.js';
+export { runWithChainFallback, isRetryableUpstreamError } from './routing/with-fallback.js';
+
+// — Stage logic owned by core-pipeline
+export type { StageContext, StageOutput, StageTokens } from './stages/types.js';
+export { emptyStageTokens } from './stages/types.js';
+export type { StageDefinition, StagePersona } from './stages/registry.js';
+export { STAGES, STAGE_NAMES, getStage, getStageByIndex } from './stages/registry.js';
+export type { ShipPromptInput } from './stages/ship.js';
+export { buildShipUserPrompt, extractPrUrls, extractSandboxUrl } from './stages/ship.js';
+export type { PerRepoStageOptions } from './stages/per-repo.js';
+export { runPerRepoStage } from './stages/per-repo.js';
+export type { PerRepoTelemetryRecord, TelemetryWriterOptions } from './stages/telemetry.js';
+export { writePerRepoTelemetry, formatTelemetrySummary } from './stages/telemetry.js';
+export type {
+  BuildStageOptions,
+  BuildStageTask,
+  BuildTaskOutput,
+  BuildRepoResult,
+  RunTasksWithDependencyGraph,
+} from './stages/build.js';
+export { runBuildStage } from './stages/build.js';
+export type { ValidateStageOptions, ValidateRepoResult } from './stages/validate.js';
+export { runValidateStage } from './stages/validate.js';
+export type { ClarifyQAPair, ClarifyQALoopOptions, ClarifyQALoopResult } from './stages/clarify.js';
+export {
+  parseClarifyQuestions,
+  formatQAPairs,
+  buildClarifySynthesisPrompt,
+  runClarifyQALoop,
+  deriveClarifyQuestions,
+} from './stages/clarify.js';
+
 // — Routing (stage policy + capability/complexity resolver + task envelope)
 export {
   loadStagePolicy,

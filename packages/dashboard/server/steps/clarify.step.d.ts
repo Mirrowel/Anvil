@@ -82,20 +82,10 @@ export type ClarifyEvent = {
  * Lifted verbatim from `pipeline-runner.ts:parseQuestions()` so the
  * dedup + length filter behavior matches byte-for-byte.
  */
-export declare function parseClarifyQuestions(output: string): string[];
-/**
- * Format Q&A pairs into the body the synthesis prompt expects.
- * Mirrors `pipeline-runner.ts:runClarifyStage()` qaText assembly.
- */
-export declare function formatQAPairs(qaPairs: ClarifyQAPair[]): string;
-/**
- * Build the synthesis prompt the resumed clarifier agent receives after
- * the user has answered every question. Lifted verbatim from
- * `pipeline-runner.ts:runClarifyStage()` so cache-key parity with the
- * legacy holds. Exported for Phase 4f.4 (`runClarifyForProject`) which
- * orchestrates the explore → QA → synthesize round-trip.
- */
-export declare function buildClarifySynthesisPrompt(qaText: string): string;
+import { parseClarifyQuestions as _parseClarifyQuestions, formatQAPairs as _formatQAPairs, buildClarifySynthesisPrompt as _buildClarifySynthesisPrompt } from '@esankhan3/anvil-core-pipeline';
+export declare const parseClarifyQuestions: typeof _parseClarifyQuestions;
+export declare const formatQAPairs: typeof _formatQAPairs;
+export declare const buildClarifySynthesisPrompt: typeof _buildClarifySynthesisPrompt;
 /**
  * Build the clarify Q&A Step. The Step's input is the explore-phase
  * output (raw markdown emitted by the clarifier agent). Output is a

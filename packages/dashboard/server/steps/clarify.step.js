@@ -39,60 +39,13 @@ export const CLARIFY_QA_ARTIFACT_ID = 'CLARIFY-QA.json';
  * Lifted verbatim from `pipeline-runner.ts:parseQuestions()` so the
  * dedup + length filter behavior matches byte-for-byte.
  */
-export function parseClarifyQuestions(output) {
-    const lines = output.split('\n');
-    const questions = [];
-    let current = '';
-    for (const line of lines) {
-        const isNewQ = /^\s*\d+[.)]\s+/.test(line);
-        if (isNewQ) {
-            if (current.trim())
-                questions.push(current.trim());
-            current = line.replace(/^\s*\d+[.)]\s+/, '');
-        }
-        else if (current) {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.toLowerCase().startsWith('please answer')) {
-                current += '\n' + line;
-            }
-        }
-    }
-    if (current.trim())
-        questions.push(current.trim());
-    const seen = new Set();
-    return questions.filter((q) => {
-        if (q.length <= 10)
-            return false;
-        const normalized = q.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-        if (seen.has(normalized))
-            return false;
-        seen.add(normalized);
-        return true;
-    });
-}
-/**
- * Format Q&A pairs into the body the synthesis prompt expects.
- * Mirrors `pipeline-runner.ts:runClarifyStage()` qaText assembly.
- */
-export function formatQAPairs(qaPairs) {
-    return qaPairs
-        .map((qa, i) => `**Q${i + 1}**: ${qa.question}\n**A${i + 1}**: ${qa.answer}`)
-        .join('\n\n');
-}
-/**
- * Build the synthesis prompt the resumed clarifier agent receives after
- * the user has answered every question. Lifted verbatim from
- * `pipeline-runner.ts:runClarifyStage()` so cache-key parity with the
- * legacy holds. Exported for Phase 4f.4 (`runClarifyForProject`) which
- * orchestrates the explore → QA → synthesize round-trip.
- */
-export function buildClarifySynthesisPrompt(qaText) {
-    return `Here are the clarifying questions and the user's answers:\n\n${qaText}\n\n`
-        + 'Now synthesize a CLARIFICATION.md document that combines the questions, '
-        + "answers, and your codebase understanding into clear context for the next "
-        + 'stages. Output ONLY the markdown content.';
-}
-const SYNTHESIS_PROMPT_TEMPLATE = (qaText) => buildClarifySynthesisPrompt(qaText);
+// Helpers moved to @esankhan3/anvil-core-pipeline. Re-exported here so
+// existing dashboard consumers don't break.
+import { parseClarifyQuestions as _parseClarifyQuestions, formatQAPairs as _formatQAPairs, buildClarifySynthesisPrompt as _buildClarifySynthesisPrompt, } from '@esankhan3/anvil-core-pipeline';
+export const parseClarifyQuestions = _parseClarifyQuestions;
+export const formatQAPairs = _formatQAPairs;
+export const buildClarifySynthesisPrompt = _buildClarifySynthesisPrompt;
+const SYNTHESIS_PROMPT_TEMPLATE = (qaText) => _buildClarifySynthesisPrompt(qaText);
 /**
  * Build the clarify Q&A Step. The Step's input is the explore-phase
  * output (raw markdown emitted by the clarifier agent). Output is a

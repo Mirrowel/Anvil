@@ -13,20 +13,44 @@ process, single file orchestrator (`server/dashboard-server.ts`).
   `prUrls` / `costLedger` / `runStore` rollups. Single-file by design
   — splitting it has been deferred until the WS event vocabulary
   (D10) is locked.
-- **`server/pipeline-runner.ts`** — per-run orchestrator. Walks the
-  9-stage list, fans out per-repo where applicable, runs the
-  validate-fix loop, broadcasts state over WS. Delegates every spawn,
-  prompt build, and shell op to a Step factory or pure helper under
-  `server/steps/`.
+- **`server/pipeline-runner.ts`** — per-run orchestrator. Drives via
+  `Pipeline.run()` from `core-pipeline` over an `InMemoryStepRegistry`
+  built from `STAGES` in core-pipeline; each Step's `run` calls
+  `runOneStage(i)` which contains the per-stage body (resume skip,
+  planSeed branch, dispatch to clarify/perRepo/single, validate-fix
+  loop, after-stage hook, ship deploy). Control-flow exits
+  (`continue` / `break` / early-return / reviewer rewind) translate to
+  thrown sentinel errors with `__anvilCancel` / `__anvilFailReturn` /
+  `__anvilRewind` markers; the outer try unwinds to the right exit.
+  Reviewer rewind is handled by trimming `completedSteps` and
+  re-invoking `Pipeline.run()` from the rewind target. WS broadcasts
+  + `broadcastState()` + `checkpoint()` calls remain inline today;
+  bus subscribers (`attachAuditLogHook`, `attachCostTrackerHook` from
+  core-pipeline) are wired to the runner's `pipelineBus` for forensic
+  audit + cost rollup.
 - **`server/steps/`** — Step factories + pure helpers extracted out
   of `pipeline-runner.ts` over the Phase-4 series. See README §
   "Pipeline runner shape (Phase 4)" for the full module table.
+- **`server/runners/`** — adapters that satisfy the canonical
+  `AgentRunner` / `AgentSession` interfaces (from `core-pipeline`)
+  over the dashboard's heavyweight `AgentManager`:
+    - `agent-manager-runner.ts` — `AgentManagerRunner` is the one-shot
+      runner. Wraps `spawnAndWait` + `runWithChainFallback`. Used by
+      `runOneStage`'s single-stage / per-repo / per-task delegations.
+    - `agent-manager-session.ts` — `AgentManagerSession` is the
+      multi-turn session. Wraps `agentManager.spawn` for `start()` and
+      `agentManager.sendInput + waitForAgent` for `sendInput()`. Used
+      by clarify (explore→Q&A→synthesize) and fix-loop (resume across
+      attempts).
+    - `pipeline-step-registry.ts` — `buildPipelineStepRegistry(opts)`
+      assembles the `InMemoryStepRegistry` driven by `Pipeline.run()`.
 - **`server/provider-registry.ts`** — discovery layer for the Settings
   UI. Reports each provider's display name, env var, model list,
   setup hint. Visibility toggles on env-var presence.
-- **`server/provider-liveness.ts`** — `pickAliveModelFromChainSync`
-  picks the first model in a tier-chain whose provider is alive,
-  excluding any in `runtimeBurnedModels`.
+- **`server/provider-liveness.ts`** — thin re-export shim over
+  `@esankhan3/anvil-agent-core`'s provider-liveness module. The
+  implementation moved to agent-core so cli + dashboard share one
+  module-scoped probe cache.
 - **`server/memory-store.ts`** — thin façade over
   `@anvil/memory-core`'s `HybridMemoryStore`, with the dashboard's
   legacy markdown-migration path on first read/write.
@@ -180,8 +204,15 @@ breaks reproducibility — only invalidate on explicit `clearCache()`.
 
 ## Where to look first
 
-- Adding a new pipeline stage? `server/pipeline-runner.ts:160` (stage
-  list) + `server/steps/` for the Step factory.
+- Adding a new pipeline stage? `core-pipeline/src/stages/registry.ts`
+  is the canonical `STAGES` array; the per-stage body lives in
+  `pipeline-runner.ts:runOneStage` (split by `stage.name`); the actual
+  agent prompt + dispatch lives in `core-pipeline/src/stages/<name>.ts`.
+- Pipeline orchestration end-to-end? `pipeline-runner.ts:run()` →
+  builds `pipelineBus` + `buildPipelineStepRegistry` →
+  `new Pipeline().run()`. Each Step's `run()` calls
+  `runOneStage(i)`. Cancellation / fail-early-return / reviewer rewind
+  flow through thrown sentinel errors.
 - WS message vocabulary? Search for `case '<msg>'` in
   `dashboard-server.ts`.
 - Settings UI doesn't show a provider? `server/provider-registry.ts`

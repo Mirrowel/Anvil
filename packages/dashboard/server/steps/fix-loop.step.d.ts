@@ -33,11 +33,18 @@ export declare function hasValidationFailures(artifact: string): boolean;
  */
 export declare function extractRepoSection(artifact: string, repoName: string): string;
 export interface RunFixLoopOptions {
-    agentManager: AgentManager;
+    /**
+     * Multi-turn agent surface. When supplied, fix-loop attempts spawn
+     * via `agentSession.start` and resume via `agentSession.sendInput`,
+     * routing through chain-fallback + empty-output throws.
+     */
+    agentSession?: import('@esankhan3/anvil-core-pipeline').AgentSession;
+    /** Legacy direct path — used when `agentSession` is omitted. */
+    agentManager?: AgentManager;
     /** Project slug — forwarded to the spawn config. */
     project: string;
     /** Resolved model id for the validate stage (the legacy resolves it then). */
-    model: string;
+    model?: string;
     /** Optional output-token ceiling — legacy passes `maxOutputTokensForStage('build')`. */
     maxOutputTokens?: number;
     /** Workspace root — used as cwd for the single-repo path. */
