@@ -36,4 +36,13 @@ export * from './skills/index.js';
 export * from './mcp/index.js';
 export * from './router/index.js';
 export * from './tools/index.js';
+export {
+  setLivenessTtlMs,
+  getLivenessTtlMs,
+  isProviderAlive,
+  pickAliveModelFromChain,
+  pickAliveModelFromChainSync,
+  prefetchLiveness,
+  _resetLivenessCache,
+} from './provider-liveness.js';
 export { VERSION } from './version.js';

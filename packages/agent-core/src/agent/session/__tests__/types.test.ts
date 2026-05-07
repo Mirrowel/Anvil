@@ -104,6 +104,7 @@ describe('AgentState — dashboard parity', () => {
       status: 'pending',
       cost: emptyCost(),
       output: '',
+      finalAnswer: '',
       activities: [],
       startedAt: null,
       finishedAt: null,

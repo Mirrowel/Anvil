@@ -11,6 +11,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { AgentRunner } from '../pipeline/stages/types.js';
+import { runWithChainFallback } from '@esankhan3/anvil-core-pipeline';
 import { ProviderRegistry, type ProviderName } from '@esankhan3/anvil-agent-core';
 import { error, success, info, warn } from '../logger.js';
 import { estimatePipelineCost, formatCostEstimate } from '../pipeline/cost-estimator.js';
@@ -31,79 +32,112 @@ import pc from 'picocolors';
  */
 function createAgentRunner(providerName?: ProviderName, defaultModel?: string): AgentRunner {
   const registry = ProviderRegistry.getInstance();
+  // Per-run burn-set so a model that fails one stage gets skipped on the next.
+  const burnedModels = new Set<string>();
+
+  // Inner runner — single attempt. The chain-fallback wrapper below handles
+  // retries on retryable upstream errors and empty-output throws.
+  const runOnce = async (
+    config: Parameters<AgentRunner['run']>[0],
+    overrideModel?: string,
+  ) => {
+    const model = overrideModel ?? config.model ?? defaultModel ?? 'claude-sonnet-4-6';
+    const provider = (config.provider as ProviderName) ?? providerName;
+
+    const { adapter, warning } = registry.resolveForStage(config.stage, model, provider);
+    if (warning) warn(warning);
+
+    const { PassThrough } = await import('node:stream');
+    const stream = new PassThrough();
+
+    let streamOutput = '';
+    let buffer = '';
+    let streamInputTokens = 0;
+    let streamOutputTokens = 0;
+
+    stream.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      process.stdout.write(chunk);
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const msg = JSON.parse(trimmed);
+          if (msg.type === 'assistant' && msg.message?.content) {
+            for (const block of msg.message.content) {
+              if (block.type === 'text' && block.text) streamOutput += block.text;
+            }
+          } else if (msg.type === 'result') {
+            if (msg.result) streamOutput = msg.result;
+            streamInputTokens = msg.usage?.input_tokens ?? 0;
+            streamOutputTokens = msg.usage?.output_tokens ?? 0;
+          }
+        } catch { /* skip non-JSON */ }
+      }
+    });
+
+    const result = await adapter.run(
+      {
+        userPrompt: config.userPrompt,
+        projectPrompt: config.projectPrompt,
+        model,
+        workingDir: config.workingDir,
+        stage: config.stage,
+        persona: config.persona,
+      },
+      stream,
+    );
+
+    const finalOutput = result.output || streamOutput;
+    const tokens = result.inputTokens + result.outputTokens || streamInputTokens + streamOutputTokens;
+
+    // Empty-output defense — same contract as adapter-level checks. Surfaces
+    // as retryable so the chain walker hops to the next model instead of
+    // writing a 0-byte artifact downstream.
+    if (!finalOutput || finalOutput.trim().length === 0) {
+      const err = new Error(`agent returned empty output (model=${model}, stage=${config.stage})`);
+      (err as Error & { name: string; status: number; retryable: boolean }).name = 'UpstreamError';
+      (err as Error & { name: string; status: number; retryable: boolean }).status = 503;
+      (err as Error & { name: string; status: number; retryable: boolean }).retryable = true;
+      throw err;
+    }
+
+    return {
+      output: finalOutput,
+      tokenEstimate: tokens,
+      inputTokens: result.inputTokens ?? streamInputTokens,
+      outputTokens: result.outputTokens ?? streamOutputTokens,
+      costUsd: result.costUsd ?? 0,
+      model,
+    };
+  };
 
   return {
     async run(config) {
-      const model = config.model ?? defaultModel ?? 'claude-sonnet-4-6';
-      const provider = (config.provider as ProviderName) ?? providerName;
-
-      const { adapter, provider: resolvedProvider, warning } = registry.resolveForStage(
-        config.stage,
-        model,
-        provider,
-      );
-
-      if (warning) {
-        warn(warning);
-      }
-
-      // Create a PassThrough stream that forwards to stdout and parses NDJSON
-      const { PassThrough } = await import('node:stream');
-      const stream = new PassThrough();
-
-      let output = '';
-      let buffer = '';
-      let inputTokens = 0;
-      let outputTokens = 0;
-
-      stream.on('data', (data: Buffer) => {
-        const chunk = data.toString();
-        // Forward raw stream-json to our stdout so dashboard server can capture it
-        process.stdout.write(chunk);
-
-        // Parse stream-json for result extraction
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const msg = JSON.parse(trimmed);
-            if (msg.type === 'assistant' && msg.message?.content) {
-              for (const block of msg.message.content) {
-                if (block.type === 'text' && block.text) {
-                  output += block.text;
-                }
-              }
-            } else if (msg.type === 'result') {
-              if (msg.result) output = msg.result;
-              inputTokens = msg.usage?.input_tokens ?? 0;
-              outputTokens = msg.usage?.output_tokens ?? 0;
-            }
-          } catch { /* skip non-JSON */ }
-        }
-      });
-
-      // Run the adapter — it writes Anvil Stream Format NDJSON to the stream
-      const result = await adapter.run(
+      // Single chain entry today — cli's resolver returns one model per
+      // (stage, persona, provider) tuple. The fallback wrapper still gives
+      // us the empty-throw retry surface and primes the model burn-set so
+      // future stages skip a model that's been burning.
+      return runWithChainFallback(
         {
-          userPrompt: config.userPrompt,
-          projectPrompt: config.projectPrompt,
-          model,
-          workingDir: config.workingDir,
-          stage: config.stage,
-          persona: config.persona,
+          stageName: config.stage,
+          maxAttempts: 5,
+          resolveModel: () => {
+            const requested = config.model ?? defaultModel ?? 'claude-sonnet-4-6';
+            // Nothing more to fall back to today — burn-set primed for future
+            // stages of this run.
+            return requested;
+          },
+          onBurn: ({ model, status }) => {
+            burnedModels.add(model);
+            warn(`[cli] ${config.stage}: ${model} burned (status ${status})`);
+          },
         },
-        stream,
+        async (resolvedModel) => runOnce(config, resolvedModel),
       );
-
-      // Prefer result from the adapter, fall back to stream-parsed output
-      return {
-        output: result.output || output,
-        tokenEstimate: result.inputTokens + result.outputTokens || inputTokens + outputTokens,
-      };
     },
   };
 }

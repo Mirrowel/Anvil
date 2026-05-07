@@ -78,7 +78,25 @@ export interface AgentState {
   model: string;
   status: AgentStatus;
   cost: CostInfo;
+  /**
+   * Streaming transcript — accumulates every text chunk emitted during the
+   * run (exploration narrative, tool-read paraphrases, partial drafts).
+   * Use this for the Activity tab; do NOT use for the canonical artifact.
+   * Capped at 500KB, tail-kept.
+   */
   output: string;
+  /**
+   * The single canonical artifact text — set once when the adapter fires
+   * its terminal `result` event. Never accumulates; never includes the
+   * agent's exploration narrative. This is what should land on disk and
+   * in the Raw tab. Undefined while the run is still in flight or the
+   * adapter never reached a `result` frame (Step 1's empty-throw makes
+   * the latter loud rather than silent).
+   *
+   * Optional so existing test fixtures and pre-finalAnswer cached states
+   * don't need migration; consumers always fall back to `output`.
+   */
+  finalAnswer?: string;
   activities: AgentActivity[];
   startedAt: number | null;
   finishedAt: number | null;

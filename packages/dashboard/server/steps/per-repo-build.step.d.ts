@@ -32,7 +32,18 @@ import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
  */
 export declare const BUILD_DISALLOWED_TOOLS: readonly string[];
 export interface RunBuildForRepoOptions {
-    agentManager: AgentManager;
+    /**
+     * Agent invocation surface. Per-task spawns flow through `agentRunner.run`
+     * — chain-fallback, empty-throw defense, and on-spawn telemetry are baked
+     * into the runner so this function stays substrate-agnostic.
+     */
+    agentRunner?: import('@esankhan3/anvil-core-pipeline').AgentRunner;
+    /**
+     * Legacy AgentManager path. Kept for back-compat — when `agentRunner`
+     * is omitted, the function still spawns directly via spawnAndWait.
+     * Slated for removal once all callers migrate.
+     */
+    agentManager?: AgentManager;
     /** Project slug — forwarded to the spawn config. */
     project: string;
     /** Stage name (typically `'build'`); part of the agent's `stage` label. */
@@ -40,7 +51,7 @@ export interface RunBuildForRepoOptions {
     /** Persona running the stage (typically `'engineer'`). */
     persona: string;
     /** Resolved model id for the build stage. */
-    model: string;
+    model?: string;
     /** Optional output-token ceiling. */
     maxOutputTokens?: number;
     /** Repo this invocation targets. */

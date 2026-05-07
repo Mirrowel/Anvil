@@ -1370,7 +1370,7 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
     broadcast({ type: 'agent-done', payload: { agentId: agent.id, agent } });
 
     // Plan-agent post-processing: parse JSON, persist, validate, broadcast.
-    try { finalizePlanAgent(agent.id, agent.output ?? ''); } catch { /* already broadcast */ }
+    try { finalizePlanAgent(agent.id, (agent.finalAnswer || agent.output) ?? ''); } catch { /* already broadcast */ }
     // Review-agent post-processing: same shape, different store.
     void finalizeReviewAgent(agent.id, agent).catch(() => { /* already broadcast */ });
 
@@ -1413,7 +1413,9 @@ export async function startDashboardServer(opts: DashboardServerOptions): Promis
           error: agent.error,
           repos: [],
         }],
-        output: agent.output?.slice(0, 50000) ?? '',
+        // Persist the canonical artifact (finalAnswer) — falls back to
+        // output for legacy runs / paths without a structured result.
+        output: (agent.finalAnswer || agent.output)?.slice(0, 50000) ?? '',
       };
 
       try {

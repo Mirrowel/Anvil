@@ -83,6 +83,46 @@ you want supported, otherwise the resolver throws `UnknownStageError`.
 - **Artifact store** (`src/artifacts.ts`) — write-once
   in-memory store. Steps `ctx.emit(id, data)` and downstream Steps
   read from `ctx.artifacts`.
+- **Agent invocation surface** (`src/agent-runner.ts`,
+  `src/agent-session.ts`) — `AgentRunner` is the canonical one-shot
+  shape (`run(req) → AgentRunResult` with output + cost + tokens +
+  cache + stop reason). `AgentSession` is the multi-turn shape
+  (`start` + `sendInput` + `kill`), used for stages that resume an
+  agent across user turns (clarify's explore→Q&A→synthesize, fix-loop's
+  iterative fixes). Both consumers (cli's lightweight runner and the
+  dashboard's `AgentManagerRunner`/`AgentManagerSession`) implement
+  these so stage logic stays substrate-agnostic.
+- **Stage logic** (`src/stages/`) — the canonical implementations of
+  every pipeline stage owned by this package. Both cli and dashboard
+  consume the same primitives:
+    - `ship.ts` — `buildShipUserPrompt` (PR creation + nexus deploy
+      in one agent turn) + `extractPrUrls` / `extractSandboxUrl`.
+    - `per-repo.ts` — `runPerRepoStage(ctx, opts)` over `AgentRunner`.
+      Empty-artifact retry baked in (≤50 chars throws retryable
+      UpstreamError). Used by repo-requirements / specs / tasks.
+    - `build.ts` — `runBuildStage(ctx, opts)` over `AgentRunner`,
+      driving per-task spawns through a caller-injected dependency-graph
+      scheduler (so node-fs deps stay in dashboard's task-bundler).
+    - `validate.ts` — `runValidateStage(ctx, opts)` with built-in
+      validate→fix-loop recursion (capped at `maxFixAttempts`,
+      default 3). cli adopts and gets the loop for free.
+    - `clarify.ts` — `parseClarifyQuestions`, `formatQAPairs`,
+      `buildClarifySynthesisPrompt`, `runClarifyQALoop`,
+      `deriveClarifyQuestions`. The runner-agnostic primitives;
+      callers wire their own input resolver.
+    - `telemetry.ts` — `writePerRepoTelemetry` writes JSONL records to
+      `~/.anvil/runs/<runId>/per-repo-telemetry.jsonl` so silent-empty
+      artifacts and cost anomalies leave a forensic trail.
+    - `types.ts` + `registry.ts` — `StageContext`, `StageOutput`,
+      `StageTokens`, the canonical `STAGES` array (9 stages with
+      name/label/persona/perRepo).
+- **Chain-fallback** (`src/routing/with-fallback.ts`) —
+  `runWithChainFallback(opts, attempt)` retries on
+  retryable `UpstreamError` (HTTP 429/5xx, or `name === 'UpstreamError'
+  && retryable === true`). Burns the failing model in a per-call set;
+  caller-supplied `resolveModel(burned)` picks the next chain entry.
+  Both cli's lightweight runner and dashboard's `AgentManagerRunner`
+  wrap their attempts with this.
 
 Public barrel: `src/index.ts`.
 
@@ -167,6 +207,13 @@ mutex).
 - Stage permissions? `routing/stage-permissions.ts` — both lookups
   (`allowedToolsForStage` + `permissionClassesForStage`) round-trip
   through `BuiltinToolExecutor.listSchemas()` in tests.
+- New stage logic? `stages/<name>.ts` — write the canonical impl
+  taking `StageContext` + opts + `AgentRunner` (or `AgentSession` for
+  multi-turn). Both consumers wrap it; behavior parity is the contract.
+- Stage Step factory? cli adopts via thin wrappers in
+  `cli/src/pipeline/steps/*.step.ts`; dashboard via per-stage delegate
+  in `dashboard/server/pipeline-runner.ts:runOneStage`. Either way the
+  underlying body is the function in `stages/`.
 
 ## Related ADRs
 

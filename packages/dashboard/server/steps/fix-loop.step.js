@@ -91,8 +91,48 @@ export async function runFixLoop(opts) {
         }
         const issuesBlock = repoSection.slice(0, 4000);
         const priorId = opts.priorByRepo.get(repoName);
+        const followUp = `Validation still failing in "${repoName}" after your last fix (attempt ${opts.attempt}). Issues:\n\n${issuesBlock}\n\nFix the remaining errors and re-run tests.`;
+        const initialPrompt = `The validation stage found issues in "${repoName}" that need to be fixed (attempt ${opts.attempt}):\n\n${issuesBlock}\n\nFix ALL build errors, lint errors, and test failures in this repo. Run the build and tests again to verify. Do NOT make git commits.`;
+        // AgentSession path — preferred. Resumes prior session via sendInput
+        // when one exists for this repo + attempt > 1.
+        if (opts.agentSession) {
+            if (priorId && opts.attempt > 1) {
+                const r = await opts.agentSession.sendInput(priorId, followUp);
+                return {
+                    artifact: r.output,
+                    cost: r.costUsd ?? 0,
+                    inputTokens: r.inputTokens ?? 0,
+                    outputTokens: r.outputTokens ?? 0,
+                    cacheReadTokens: r.cacheReadTokens ?? 0,
+                    cacheWriteTokens: r.cacheWriteTokens ?? 0,
+                };
+            }
+            const r = await opts.agentSession.start({
+                persona: 'engineer',
+                projectPrompt: opts.buildRepoProjectPromptForBuildStage(repoName),
+                userPrompt: initialPrompt,
+                workingDir: repoPath,
+                stage: `fix-${opts.attempt}`,
+                model: opts.model,
+                allowedTools: opts.allowedTools,
+                disallowedTools: [...disallowedToolsForPersona('engineer')],
+                maxOutputTokens: opts.maxOutputTokens,
+                repoName,
+            });
+            opts.priorByRepo.set(repoName, r.sessionId);
+            return {
+                artifact: r.output,
+                cost: r.costUsd ?? 0,
+                inputTokens: r.inputTokens ?? 0,
+                outputTokens: r.outputTokens ?? 0,
+                cacheReadTokens: r.cacheReadTokens ?? 0,
+                cacheWriteTokens: r.cacheWriteTokens ?? 0,
+            };
+        }
+        if (!opts.agentManager) {
+            throw new Error('runFixLoop requires either agentSession or agentManager');
+        }
         if (priorId && opts.attempt > 1 && opts.agentManager.getAgent(priorId)) {
-            const followUp = `Validation still failing in "${repoName}" after your last fix (attempt ${opts.attempt}). Issues:\n\n${issuesBlock}\n\nFix the remaining errors and re-run tests.`;
             opts.agentManager.sendInput(priorId, followUp);
             return waitForAgent({
                 agentId: priorId,
@@ -103,7 +143,6 @@ export async function runFixLoop(opts) {
                 sleep: opts.sleep,
             });
         }
-        const prompt = `The validation stage found issues in "${repoName}" that need to be fixed (attempt ${opts.attempt}):\n\n${issuesBlock}\n\nFix ALL build errors, lint errors, and test failures in this repo. Run the build and tests again to verify. Do NOT make git commits.`;
         const result = await spawnAndWait({
             agentManager: opts.agentManager,
             spec: {
@@ -111,8 +150,8 @@ export async function runFixLoop(opts) {
                 persona: 'engineer',
                 project: opts.project,
                 stage: `fix-${opts.attempt}:${repoName}`,
-                prompt,
-                model: opts.model,
+                prompt: initialPrompt,
+                model: opts.model ?? '',
                 cwd: repoPath,
                 projectPrompt: opts.buildRepoProjectPromptForBuildStage(repoName),
                 permissionMode: 'bypassPermissions',
@@ -150,10 +189,48 @@ export async function runFixLoop(opts) {
 }
 async function runFixLoopSingle(opts) {
     const issuesBlock = opts.validateArtifact.slice(0, 6000);
+    const followUp = `Validation still failing after your last fix (attempt ${opts.attempt}). Issues:\n\n${issuesBlock}\n\nFix the remaining errors and re-run tests.`;
+    const initialPrompt = `The validation stage found issues that need to be fixed (attempt ${opts.attempt}):\n\n${issuesBlock}\n\nFix ALL build errors, lint errors, and test failures. Run the build and tests again to verify. Do NOT make git commits.`;
+    // AgentSession path — preferred. Resume prior session when one exists.
+    if (opts.agentSession) {
+        if (opts.priorSingleId && opts.attempt > 1) {
+            const r = await opts.agentSession.sendInput(opts.priorSingleId, followUp);
+            return {
+                artifact: r.output,
+                cost: r.costUsd ?? 0,
+                newSingleId: opts.priorSingleId,
+                inputTokens: r.inputTokens ?? 0,
+                outputTokens: r.outputTokens ?? 0,
+                cacheReadTokens: r.cacheReadTokens ?? 0,
+                cacheWriteTokens: r.cacheWriteTokens ?? 0,
+            };
+        }
+        const r = await opts.agentSession.start({
+            persona: 'engineer',
+            projectPrompt: opts.buildProjectPromptForBuildStage(),
+            userPrompt: initialPrompt,
+            workingDir: opts.workspaceDir,
+            stage: `fix-${opts.attempt}`,
+            model: opts.model,
+            disallowedTools: [...disallowedToolsForPersona('engineer')],
+            maxOutputTokens: opts.maxOutputTokens,
+        });
+        return {
+            artifact: r.output,
+            cost: r.costUsd ?? 0,
+            newSingleId: r.sessionId,
+            inputTokens: r.inputTokens ?? 0,
+            outputTokens: r.outputTokens ?? 0,
+            cacheReadTokens: r.cacheReadTokens ?? 0,
+            cacheWriteTokens: r.cacheWriteTokens ?? 0,
+        };
+    }
+    if (!opts.agentManager) {
+        throw new Error('runFixLoopSingle requires either agentSession or agentManager');
+    }
     if (opts.priorSingleId
         && opts.attempt > 1
         && opts.agentManager.getAgent(opts.priorSingleId)) {
-        const followUp = `Validation still failing after your last fix (attempt ${opts.attempt}). Issues:\n\n${issuesBlock}\n\nFix the remaining errors and re-run tests.`;
         opts.agentManager.sendInput(opts.priorSingleId, followUp);
         const result = await waitForAgent({
             agentId: opts.priorSingleId,
@@ -173,7 +250,6 @@ async function runFixLoopSingle(opts) {
             cacheWriteTokens: result.cacheWriteTokens,
         };
     }
-    const prompt = `The validation stage found issues that need to be fixed (attempt ${opts.attempt}):\n\n${issuesBlock}\n\nFix ALL build errors, lint errors, and test failures. Run the build and tests again to verify. Do NOT make git commits.`;
     let newSingleId = null;
     const result = await spawnAndWait({
         agentManager: opts.agentManager,
@@ -182,8 +258,8 @@ async function runFixLoopSingle(opts) {
             persona: 'engineer',
             project: opts.project,
             stage: `fix-${opts.attempt}`,
-            prompt,
-            model: opts.model,
+            prompt: initialPrompt,
+            model: opts.model ?? '',
             cwd: opts.workspaceDir,
             projectPrompt: opts.buildProjectPromptForBuildStage(),
             permissionMode: 'bypassPermissions',

@@ -33,13 +33,21 @@ import {
   buildClarifySynthesisPrompt,
   formatQAPairs,
   parseClarifyQuestions,
-  type ClarifyQAPair,
-} from './clarify.step.js';
+} from '@esankhan3/anvil-core-pipeline';
+import type { ClarifyQAPair } from '@esankhan3/anvil-core-pipeline';
 import type { AgentManager } from '@esankhan3/anvil-agent-core';
 import type { Step, StepContext } from '@esankhan3/anvil-core-pipeline';
 
 export interface RunClarifyForProjectOptions {
-  agentManager: AgentManager;
+  /**
+   * Multi-turn agent surface. When supplied, the explore + synthesize
+   * phases route through `agentSession.start` / `sendInput` — chain
+   * fallback and empty-output throws are baked in by the underlying
+   * runner. When omitted, falls back to direct `agentManager` calls.
+   */
+  agentSession?: import('@esankhan3/anvil-core-pipeline').AgentSession;
+  /** Legacy direct path — used when `agentSession` is omitted. */
+  agentManager?: AgentManager;
   /** Project slug — forwarded to the spawn config. */
   project: string;
   /** Working directory for the explore-phase agent (project workspace). */
@@ -139,29 +147,67 @@ const CLARIFY_DISALLOWED_TOOLS: readonly string[] = [
 export async function runClarifyForProject(
   opts: RunClarifyForProjectOptions,
 ): Promise<RunClarifyForProjectResult> {
-  // Phase A — explore.
-  const explore = await spawnAndWait({
-    agentManager: opts.agentManager,
-    spec: {
-      name: `clarifier-${opts.project}`,
+  // Phase A — explore. Prefer the multi-turn AgentSession path when
+  // available; fall back to direct AgentManager spawning for callers
+  // that haven't migrated yet.
+  let explore: {
+    agentId: string;
+    artifact: string;
+    cost: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  };
+  if (opts.agentSession) {
+    const r = await opts.agentSession.start({
       persona: 'clarifier',
-      project: opts.project,
-      stage: 'clarify',
-      prompt: opts.explorePrompt,
-      model: opts.model,
-      cwd: opts.workspaceDir,
       projectPrompt: opts.projectPrompt,
-      permissionMode: 'bypassPermissions',
-      disallowedTools: [...CLARIFY_DISALLOWED_TOOLS],
+      userPrompt: opts.explorePrompt,
+      workingDir: opts.workspaceDir,
+      stage: 'clarify',
+      model: opts.model,
       allowedTools: opts.allowedTools,
+      disallowedTools: [...CLARIFY_DISALLOWED_TOOLS],
       maxOutputTokens: opts.maxOutputTokens,
-    },
-    isCancelled: opts.isCancelled,
-    onSpawn: opts.onAgentSpawned,
-    onTruncation: opts.onTruncation,
-    pollIntervalMs: opts.pollIntervalMs,
-    sleep: opts.sleep,
-  });
+    });
+    explore = {
+      agentId: r.sessionId,
+      artifact: r.output,
+      cost: r.costUsd ?? 0,
+      inputTokens: r.inputTokens ?? 0,
+      outputTokens: r.outputTokens ?? 0,
+      cacheReadTokens: r.cacheReadTokens ?? 0,
+      cacheWriteTokens: r.cacheWriteTokens ?? 0,
+    };
+    opts.onAgentSpawned?.(explore.agentId);
+  } else {
+    if (!opts.agentManager) {
+      throw new Error('runClarifyForProject requires either agentSession or agentManager');
+    }
+    explore = await spawnAndWait({
+      agentManager: opts.agentManager,
+      spec: {
+        name: `clarifier-${opts.project}`,
+        persona: 'clarifier',
+        project: opts.project,
+        stage: 'clarify',
+        prompt: opts.explorePrompt,
+        model: opts.model,
+        cwd: opts.workspaceDir,
+        projectPrompt: opts.projectPrompt,
+        permissionMode: 'bypassPermissions',
+        disallowedTools: [...CLARIFY_DISALLOWED_TOOLS],
+        allowedTools: opts.allowedTools,
+        maxOutputTokens: opts.maxOutputTokens,
+      },
+      isCancelled: opts.isCancelled,
+      onSpawn: opts.onAgentSpawned,
+      onTruncation: opts.onTruncation,
+      pollIntervalMs: opts.pollIntervalMs,
+      sleep: opts.sleep,
+    });
+  }
 
   let totalCost = explore.cost;
 
@@ -247,16 +293,38 @@ export async function runClarifyForProject(
   opts.onSynthesizeStart?.();
 
   const synthesisPrompt = buildClarifySynthesisPrompt(formatQAPairs(qaPairs));
-  opts.agentManager.sendInput(explore.agentId, synthesisPrompt);
-
-  const synthesize = await waitForAgent({
-    agentId: explore.agentId,
-    agentManager: opts.agentManager,
-    isCancelled: opts.isCancelled,
-    onTruncation: opts.onTruncation,
-    pollIntervalMs: opts.pollIntervalMs,
-    sleep: opts.sleep,
-  });
+  let synthesize: {
+    artifact: string;
+    cost: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  };
+  if (opts.agentSession) {
+    const r = await opts.agentSession.sendInput(explore.agentId, synthesisPrompt);
+    synthesize = {
+      artifact: r.output,
+      cost: r.costUsd ?? 0,
+      inputTokens: r.inputTokens ?? 0,
+      outputTokens: r.outputTokens ?? 0,
+      cacheReadTokens: r.cacheReadTokens ?? 0,
+      cacheWriteTokens: r.cacheWriteTokens ?? 0,
+    };
+  } else {
+    if (!opts.agentManager) {
+      throw new Error('runClarifyForProject synthesize phase requires either agentSession or agentManager');
+    }
+    opts.agentManager.sendInput(explore.agentId, synthesisPrompt);
+    synthesize = await waitForAgent({
+      agentId: explore.agentId,
+      agentManager: opts.agentManager,
+      isCancelled: opts.isCancelled,
+      onTruncation: opts.onTruncation,
+      pollIntervalMs: opts.pollIntervalMs,
+      sleep: opts.sleep,
+    });
+  }
 
   totalCost += synthesize.cost;
 

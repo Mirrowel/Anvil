@@ -124,6 +124,11 @@ export class AgentManager extends EventEmitter {
           state.startedAt = this.now();
           state.finishedAt = this.now();
           appendOutput(state, hit.output);
+          // Cached output is by definition the final artifact — older
+          // checkpoints captured `state.output` (which was previously
+          // transcript+result mixed). Either way, it's the closest thing
+          // we have to the canonical artifact for cached replays.
+          state.finalAnswer = hit.output;
           if (hit.cost) state.cost = hit.cost;
           this.processes.set(agentId, { process: proc, spec });
           this.nextTickImpl(() => {

@@ -87,6 +87,39 @@ export async function spawnAndWait(
   };
 }
 
+/**
+ * Reconstruct an UpstreamError-shaped exception from the stringified
+ * error stored in `AgentState.error`. The bridge stringifies the
+ * adapter's thrown error before we ever see it (see
+ * `language-model-bridge.ts:259`), losing the structured shape. We
+ * parse the canonical UpstreamError format `<provider> <status>: <body>`
+ * and rehydrate a duck-typed UpstreamError so `runWithChainFallback`'s
+ * retryable check (`name === 'UpstreamError' && retryable === true`)
+ * walks the chain instead of failing the stage on first attempt.
+ *
+ * Without this, the claude-cli silent-empty bug surfaces as a single
+ * non-retryable plain-Error and chain-fallback never kicks in.
+ */
+function rehydrateAgentError(raw: string | null): Error {
+  const msg = raw ?? 'Agent failed';
+  const m = msg.match(/^([\w-]+)\s+(\d{3}):/);
+  if (!m) return new Error(msg);
+  const provider = m[1];
+  const status = Number(m[2]);
+  const retryable = status === 429 || status === 502 || status === 503 || status === 504;
+  const err = new Error(msg) as Error & {
+    name: string;
+    status: number;
+    retryable: boolean;
+    provider: string;
+  };
+  err.name = 'UpstreamError';
+  err.status = status;
+  err.retryable = retryable;
+  err.provider = provider;
+  return err;
+}
+
 export interface WaitForAgentOptions {
   agentId: string;
   agentManager: AgentManager;
@@ -128,8 +161,12 @@ export async function waitForAgent(
       if (current.cost.stopReason === 'max_tokens') {
         opts.onTruncation?.(current.name, current.cost.outputTokens);
       }
+      // Prefer finalAnswer (canonical artifact from the adapter's
+      // terminal `result` event) over output (streaming transcript).
+      // Fall back to output for cache-hit replays from before the field
+      // existed and any path that doesn't fire a structured result.
       return {
-        artifact: current.output,
+        artifact: current.finalAnswer || current.output,
         cost: current.cost.totalUsd,
         inputTokens: current.cost.inputTokens,
         outputTokens: current.cost.outputTokens,
@@ -138,7 +175,7 @@ export async function waitForAgent(
       };
     }
     if (current.status === 'error' || current.status === 'killed') {
-      throw new Error(current.error ?? 'Agent failed');
+      throw rehydrateAgentError(current.error);
     }
     await sleep(pollMs);
   }
