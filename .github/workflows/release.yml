@@ -27,7 +27,18 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install
-        run: npm ci
+        # `npm ci` famously skips platform-specific optional deps
+        # (npm/cli#4828) — rollup's `@rollup/rollup-linux-x64-gnu` is the
+        # canonical victim, and a missing native binary crashes vite mid-build.
+        # We did publish 0.1.2 with no bundled dashboard because of this.
+        # Two-step: ci for reproducibility, then a targeted install of the
+        # platform native rollup binary so vite/rollup can boot.
+        run: |
+          npm ci
+          npm install --no-save --omit=dev --include=optional @rollup/rollup-linux-x64-gnu
+
+      - name: Verify rollup native binary present
+        run: node -e "require('@rollup/rollup-linux-x64-gnu')"
 
       # The cli's build script transitively builds dashboard (vite + tsc)
       # and bundles it into dist/dashboard. Building the cli last therefore
@@ -45,6 +56,13 @@ jobs:
 
       - name: Build cli (also builds dashboard)
         run: npm -w @esankhan3/anvil-cli run build
+
+      # Hard guard so a silently-broken dashboard build (the 0.1.2 incident)
+      # never makes it onto npm again.
+      - name: Verify dashboard bundle landed
+        run: |
+          test -f packages/cli/dist/dashboard/dist/index.html || { echo "::error::dist/dashboard/dist/index.html missing — refusing to publish"; exit 1; }
+          test -f packages/cli/dist/dashboard/server/dashboard-server.js || { echo "::error::dist/dashboard/server/dashboard-server.js missing — refusing to publish"; exit 1; }
 
       - name: Publish changed packages to npm
         env:

@@ -1,6 +1,6 @@
 {
   "name": "@esankhan3/anvil-cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Anvil — AI-powered feature development pipeline (CLI + dashboard)",
   "type": "module",
   "license": "MIT",
@@ -135,7 +135,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "npm --prefix ../dashboard run build && tsc -b && node ./scripts/bundle-dashboard.mjs && cp src/templates/*.yaml dist/templates/ 2>/dev/null; mkdir -p dist/personas/prompts && cp src/personas/prompts/*.md dist/personas/prompts/ 2>/dev/null; true",
+    "build": "npm --prefix ../dashboard run build && tsc -b && node ./scripts/bundle-dashboard.mjs && (mkdir -p dist/templates && cp src/templates/*.yaml dist/templates/ 2>/dev/null || true) && (mkdir -p dist/personas/prompts && cp src/personas/prompts/*.md dist/personas/prompts/ 2>/dev/null || true)",
     "dev": "tsc -b --watch",
     "test": "echo 'cli has no per-workspace node:test files (knowledge tests moved to @anvil/knowledge-core; hooks integration test runs via root jest)'"
   },

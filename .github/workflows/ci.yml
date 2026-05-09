@@ -35,7 +35,13 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        # See npm/cli#4828 — npm ci skips platform-specific optional deps
+        # of rollup, which makes vite crash mid-build with a cryptic
+        # "Cannot find module @rollup/rollup-linux-x64-gnu". The follow-up
+        # install pulls just that one native binary back in.
+        run: |
+          npm ci
+          npm install --no-save --omit=dev --include=optional @rollup/rollup-linux-x64-gnu
 
       # Build leaf packages first so downstream tsc projects can resolve them.
       - name: Build agent-core
@@ -55,6 +61,13 @@ jobs:
 
       - name: Build CLI (transitively builds dashboard)
         run: npm -w @esankhan3/anvil-cli run build
+
+      # Safety net so we never publish another empty-dashboard cli.
+      # Verifies the bundled assets actually landed in dist/dashboard/.
+      - name: Verify dashboard bundle landed
+        run: |
+          test -f packages/cli/dist/dashboard/dist/index.html || { echo "::error::dist/dashboard/dist/index.html missing — vite build must have failed silently"; exit 1; }
+          test -f packages/cli/dist/dashboard/server/dashboard-server.js || { echo "::error::dist/dashboard/server/dashboard-server.js missing — server build must have failed"; exit 1; }
 
       - name: Build Code Search MCP
         run: cd packages/code-search-mcp && node build.mjs
