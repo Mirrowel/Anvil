@@ -1,6 +1,6 @@
 {
   "name": "@esankhan3/anvil-cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Anvil — AI-powered feature development pipeline (CLI + dashboard)",
   "type": "module",
   "license": "MIT",
