@@ -35,7 +35,10 @@ jobs:
         # platform native rollup binary so vite/rollup can boot.
         run: |
           npm ci
-          npm install --no-save --omit=dev --include=optional @rollup/rollup-linux-x64-gnu
+          # --no-save keeps the lockfile clean; omitting --omit=dev so we
+          # don't accidentally prune existing dev-deps (e.g. @types/*)
+          # that npm ci just installed.
+          npm install --no-save --include=optional @rollup/rollup-linux-x64-gnu
 
       - name: Verify rollup native binary present
         run: node -e "require('@rollup/rollup-linux-x64-gnu')"

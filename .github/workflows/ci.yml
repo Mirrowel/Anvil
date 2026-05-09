@@ -41,7 +41,9 @@ jobs:
         # install pulls just that one native binary back in.
         run: |
           npm ci
-          npm install --no-save --omit=dev --include=optional @rollup/rollup-linux-x64-gnu
+          # --no-save keeps the lockfile clean; omitting --omit=dev so
+          # we don't prune existing dev-deps that npm ci just installed.
+          npm install --no-save --include=optional @rollup/rollup-linux-x64-gnu
 
       # Build leaf packages first so downstream tsc projects can resolve them.
       - name: Build agent-core
