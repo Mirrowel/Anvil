@@ -25,35 +25,39 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Build leaf packages first so downstream tsc projects can resolve them.
       - name: Build agent-core
-        run: npm -w @anvil/agent-core run build
+        run: npm -w @esankhan3/anvil-agent-core run build
 
       - name: Build knowledge-core
-        run: npm -w @anvil/knowledge-core run build
+        run: npm -w @esankhan3/anvil-knowledge-core run build
 
-      - name: Build CLI
-        run: cd packages/cli && npx tsc -b
+      - name: Build memory-core
+        run: npm -w @esankhan3/anvil-memory-core run build
 
-      - name: Build Dashboard
-        run: cd packages/dashboard && npx vite build
+      - name: Build convention-core
+        run: npm -w @esankhan3/anvil-convention-core run build
 
-      - name: Build Dashboard Server
-        run: cd packages/dashboard && npx esbuild server/dashboard-server.ts --outfile=server/dashboard-server.js --format=esm --platform=node --target=node20 --bundle --external:ws --external:@anvil-dev/cli
+      - name: Build core-pipeline
+        run: npm -w @esankhan3/anvil-core-pipeline run build
+
+      - name: Build CLI (transitively builds dashboard)
+        run: npm -w @esankhan3/anvil-cli run build
 
       - name: Build Code Search MCP
         run: cd packages/code-search-mcp && node build.mjs
 
       - name: Test agent-core
-        run: npm -w @anvil/agent-core test
+        run: npm -w @esankhan3/anvil-agent-core test
 
       - name: Test knowledge-core
-        run: npm -w @anvil/knowledge-core test
+        run: npm -w @esankhan3/anvil-knowledge-core test
 
       - name: Test CLI
-        run: cd packages/cli && npm test
+        run: npm -w @esankhan3/anvil-cli test
 
       - name: Test Dashboard Server
-        run: cd packages/dashboard && npm run test:server
+        run: npm -w @anvil-dev/dashboard run test:server
 
   typecheck:
     runs-on: ubuntu-latest
@@ -64,10 +68,11 @@ jobs:
           node-version: 20
           cache: 'npm'
       - run: npm ci
-      - name: Build agent-core (for type-check deps)
-        run: npm -w @anvil/agent-core run build
-      - name: Build knowledge-core (for type-check deps)
-        run: npm -w @anvil/knowledge-core run build
+      - name: Build leaves (for type-check deps)
+        run: |
+          npm -w @esankhan3/anvil-agent-core run build
+          npm -w @esankhan3/anvil-knowledge-core run build
+          npm -w @esankhan3/anvil-memory-core run build
       - name: Type-check agent-core
         run: cd packages/agent-core && npx tsc --noEmit
       - name: Type-check CLI
