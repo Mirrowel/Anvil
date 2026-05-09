@@ -46,7 +46,11 @@ function readPkg(dir) {
 }
 
 function exec(cmd, opts = {}) {
-  return execSync(cmd, { stdio: ['inherit', 'pipe', 'pipe'], encoding: 'utf-8', ...opts }).trim();
+  // execSync returns null when stdio is 'inherit' (no captured output).
+  // Guard the .trim() so callers that pass stdio:'inherit' (publish step)
+  // don't blow up after a perfectly successful command.
+  const out = execSync(cmd, { stdio: ['inherit', 'pipe', 'pipe'], encoding: 'utf-8', ...opts });
+  return out == null ? '' : out.trim();
 }
 
 function isAlreadyPublished(name, version) {
