@@ -25,7 +25,7 @@ import { registerResources, handleResource } from './resources/resources.js';
 import { getKnowledgeBasePath } from '@esankhan3/anvil-knowledge-core';
 import { indexFromPath } from '@esankhan3/anvil-knowledge-core';
 import { KnowledgeIndexer } from '@esankhan3/anvil-knowledge-core';
-import { discoverRepos, ensureIndexIgnore, SKIP_DIRS } from '@esankhan3/anvil-knowledge-core';
+import { discoverRepos, ensureIndexIgnore, isIndexableFile, SKIP_DIRS } from '@esankhan3/anvil-knowledge-core';
 import { loadServerConfig, type ServerConfig } from './core/env-config.js';
 import { startHttpTransport } from './transports/http-transport.js';
 
@@ -456,7 +456,6 @@ async function stopFileWatcher(ctx: ServerContext): Promise<void> {
 
 function shouldIgnoreWatchPath(ctx: ServerContext, absPath: string, isDirectory: boolean): boolean {
   if (!ctx.directoryPath) return true;
-  if (basename(absPath) === '.gitignore') return true;
   const relPath = relative(ctx.directoryPath, absPath);
   const parts = relPath.split(/[\\/]+/).filter(Boolean);
   if (parts.some((part) => SKIP_DIRS.has(part))) return true;
@@ -470,8 +469,7 @@ function shouldIgnoreWatchPath(ctx: ServerContext, absPath: string, isDirectory:
 
 function watchPathNeedsRefresh(ctx: ServerContext, absPath: string): boolean {
   const name = basename(absPath);
-  if (name === '.gitignore') return false;
-  if (name === 'index.ignore') return true;
+  if (isIndexControlFile(name)) return true;
   const repo = findRepoForPath(ctx, absPath);
   if (!repo) return true;
   if (!existsSync(absPath)) return true;
@@ -578,8 +576,16 @@ function removeFreshWatchFiles(ctx: ServerContext, paths: string[]): void {
   const repos = safeDiscoverRepos(ctx.directoryPath);
   const indexer = new KnowledgeIndexer();
   for (const absPath of paths) {
+    if (isIndexControlFile(basename(absPath))) {
+      ctx.staleWatchFiles.delete(absPath);
+      continue;
+    }
     const repo = findRepoInList(repos, absPath);
     if (!repo) {
+      ctx.staleWatchFiles.delete(absPath);
+      continue;
+    }
+    if (!existsSync(absPath) || !isIndexableFile(repo.path, absPath)) {
       ctx.staleWatchFiles.delete(absPath);
       continue;
     }
@@ -592,6 +598,10 @@ function removeFreshWatchFiles(ctx: ServerContext, paths: string[]): void {
       // Keep the in-memory stale marker if freshness cannot be proven.
     }
   }
+}
+
+function isIndexControlFile(name: string): boolean {
+  return name === '.gitignore' || name === 'index.ignore';
 }
 
 const MAX_HISTORY = 50;

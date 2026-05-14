@@ -33,7 +33,7 @@ const BLACKLISTED_EXTENSIONS = new Set([
 ]);
 
 const BLACKLISTED_FILENAMES = new Set([
-  '.gitignore',
+  '.gitignore', 'index.ignore', 'example.index.ignore',
   'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'cargo.lock',
   'poetry.lock', 'pipfile.lock', 'composer.lock', 'gemfile.lock',
   'copying', 'copying.lesser',
