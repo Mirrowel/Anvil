@@ -13,8 +13,9 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { basename, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { FSWatcher } from 'chokidar';
 
 import { registerSearchTools, handleSearchTool } from './tools/search.js';
@@ -399,7 +400,8 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
   ctx.indexing.debounceMs = debounceMs;
 
   const { watch } = await import('chokidar');
-  const watcher = watch(ctx.directoryPath, {
+  const watchPaths = getWatchRoots(ctx);
+  const watcher = watch(watchPaths, {
     ignoreInitial: true,
     ignored: (path, stats) => shouldIgnoreWatchPath(ctx, resolve(path), stats?.isDirectory() ?? false),
     awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 },
@@ -417,7 +419,12 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
     ctx.staleWatchFiles.add(absPath);
     ctx.indexing.pendingFiles = ctx.pendingWatchFiles.size;
     log(ctx, `[watcher] queued path (${ctx.indexing.pendingFiles} pending): ${absPath}`);
-    scheduleWatchDrain(ctx, debounceMs, before === 0);
+    if (isIndexControlPath(ctx, absPath)) {
+      log(ctx, '[watcher] index ignore control changed — refreshing immediately');
+      scheduleWatchDrain(ctx, 0);
+    } else {
+      scheduleWatchDrain(ctx, debounceMs, before === 0);
+    }
   };
 
   watcher.on('add', onChange);
@@ -425,7 +432,7 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
   watcher.on('unlink', onChange);
   watcher.on('ready', () => log(ctx, `[watcher] ready for ${ctx.directoryPath}`));
   watcher.on('error', (err) => log(ctx, '[watcher] error', err));
-  log(ctx, `[code-search-mcp] File watcher enabled at ${ctx.directoryPath} (debounce ${debounceMs}ms)`);
+  log(ctx, `[code-search-mcp] File watcher enabled at ${ctx.directoryPath} (debounce ${debounceMs}ms, ${watchPaths.length} root(s))`);
 }
 
 function scheduleWatchDrain(ctx: ServerContext, delayMs: number = ctx.indexing.debounceMs, logDebounce: boolean = false): void {
@@ -456,6 +463,7 @@ async function stopFileWatcher(ctx: ServerContext): Promise<void> {
 
 function shouldIgnoreWatchPath(ctx: ServerContext, absPath: string, isDirectory: boolean): boolean {
   if (!ctx.directoryPath) return true;
+  if (isIndexControlPath(ctx, absPath)) return false;
   const relPath = relative(ctx.directoryPath, absPath);
   const parts = relPath.split(/[\\/]+/).filter(Boolean);
   if (parts.some((part) => SKIP_DIRS.has(part))) return true;
@@ -468,8 +476,7 @@ function shouldIgnoreWatchPath(ctx: ServerContext, absPath: string, isDirectory:
 }
 
 function watchPathNeedsRefresh(ctx: ServerContext, absPath: string): boolean {
-  const name = basename(absPath);
-  if (isIndexControlFile(name)) return true;
+  if (isIndexControlPath(ctx, absPath)) return true;
   const repo = findRepoForPath(ctx, absPath);
   if (!repo) return true;
   if (!existsSync(absPath)) return true;
@@ -523,7 +530,7 @@ async function flushWatchedChanges(ctx: ServerContext): Promise<void> {
   ctx.watchTimer = null;
   try {
     while (true) {
-      const pending = [...ctx.pendingWatchFiles];
+      const pending = sortWatchPaths(ctx, [...ctx.pendingWatchFiles]);
       const count = pending.length;
       const followUp = ctx.watchFollowUpNeeded;
       ctx.pendingWatchFiles.clear();
@@ -576,7 +583,7 @@ function removeFreshWatchFiles(ctx: ServerContext, paths: string[]): void {
   const repos = safeDiscoverRepos(ctx.directoryPath);
   const indexer = new KnowledgeIndexer();
   for (const absPath of paths) {
-    if (isIndexControlFile(basename(absPath))) {
+    if (isIndexControlPath(ctx, absPath)) {
       ctx.staleWatchFiles.delete(absPath);
       continue;
     }
@@ -600,8 +607,57 @@ function removeFreshWatchFiles(ctx: ServerContext, paths: string[]): void {
   }
 }
 
-function isIndexControlFile(name: string): boolean {
-  return name === '.gitignore' || name === 'index.ignore';
+function isIndexControlPath(ctx: ServerContext, absPath: string): boolean {
+  if (!ctx.directoryPath) return false;
+  const name = basename(absPath);
+  if (name === '.gitignore' || name === 'index.ignore') return true;
+  const normalized = absPath.replace(/\\/g, '/');
+  if (normalized.endsWith('/.git/info/exclude')) return true;
+  return getGlobalGitIgnorePaths(ctx.directoryPath).some((path) => resolve(path) === absPath);
+}
+
+function sortWatchPaths(ctx: ServerContext, paths: string[]): string[] {
+  return paths.sort((a, b) => Number(isIndexControlPath(ctx, b)) - Number(isIndexControlPath(ctx, a)));
+}
+
+function getWatchRoots(ctx: ServerContext): string[] {
+  if (!ctx.directoryPath) return [];
+  const roots = new Set<string>([ctx.directoryPath]);
+  for (const repo of safeDiscoverRepos(ctx.directoryPath)) {
+    const gitExclude = join(repo.path, '.git', 'info', 'exclude');
+    if (existsSync(gitExclude)) roots.add(gitExclude);
+  }
+  for (const path of getGlobalGitIgnorePaths(ctx.directoryPath)) {
+    if (existsSync(path)) roots.add(path);
+  }
+  return [...roots];
+}
+
+function getGlobalGitIgnorePaths(cwd: string): string[] {
+  const paths: string[] = [];
+  try {
+    const configured = execFileSync('git', ['config', '--get', 'core.excludesFile'], {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000,
+    }).trim();
+    if (configured) paths.push(expandHome(configured));
+  } catch {
+    // No configured global excludes file.
+  }
+  if (process.env.XDG_CONFIG_HOME) paths.push(join(process.env.XDG_CONFIG_HOME, 'git', 'ignore'));
+  if (process.env.USERPROFILE) paths.push(join(process.env.USERPROFILE, '.config', 'git', 'ignore'));
+  if (process.env.HOME) paths.push(join(process.env.HOME, '.config', 'git', 'ignore'));
+  return [...new Set(paths.map((path) => resolve(path)))];
+}
+
+function expandHome(path: string): string {
+  if (isAbsolute(path)) return path;
+  const home = process.env.USERPROFILE || process.env.HOME;
+  if (path === '~') return home ?? path;
+  if (path.startsWith('~/') || path.startsWith('~\\')) return home ? join(home, path.slice(2)) : path;
+  return path;
 }
 
 const MAX_HISTORY = 50;
