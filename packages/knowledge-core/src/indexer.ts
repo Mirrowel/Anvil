@@ -4,7 +4,7 @@ import { join, basename, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { chunkRepo, chunkChangedFiles } from '@esankhan3/anvil-knowledge-core';
-import type { FileIndexEntry } from '@esankhan3/anvil-knowledge-core';
+import type { FileIndexEntry, ChunkDiagnostics } from '@esankhan3/anvil-knowledge-core';
 import { walkDir } from '@esankhan3/anvil-knowledge-core';
 import { buildAstGraph, generateGraphReport, incrementalGraphUpdate } from '@esankhan3/anvil-knowledge-core';
 import { getAllChanges, getChangedFilesList, getDeletedFilesList } from '@esankhan3/anvil-knowledge-core';
@@ -32,7 +32,54 @@ interface RepoIndexMeta {
   lastIndexedAt: string;
   chunkCount: number;
   embeddingProvider: string;
+  embeddingFingerprint?: EmbeddingFingerprint;
   files?: Record<string, FileIndexEntry>;
+}
+
+interface EmbeddingFingerprint {
+  provider: string;
+  model?: string;
+  baseUrl?: string;
+  dimensions: number;
+  documentPrefix?: string;
+  queryPrefix?: string;
+}
+
+function embeddingFingerprintFromProvider(provider: ReturnType<typeof createEmbeddingProvider>): EmbeddingFingerprint {
+  return {
+    provider: provider.name,
+    model: provider.model,
+    baseUrl: provider.baseUrl,
+    dimensions: provider.dimensions,
+    documentPrefix: provider.documentPrefix,
+    queryPrefix: provider.queryPrefix,
+  };
+}
+
+function sameEmbeddingFingerprint(a?: EmbeddingFingerprint, b?: EmbeddingFingerprint): boolean {
+  if (!a || !b) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function metaEmbeddingCompatible(meta: RepoIndexMeta | null, expected: EmbeddingFingerprint): boolean {
+  if (!meta) return true;
+  if (meta.embeddingProvider === 'pending' || meta.embeddingProvider === 'unknown') return true;
+  return sameEmbeddingFingerprint(meta.embeddingFingerprint, expected);
+}
+
+function formatFingerprint(fingerprint?: EmbeddingFingerprint): string {
+  if (!fingerprint) return 'none';
+  return `${fingerprint.provider}/${fingerprint.model ?? 'default'} dim=${fingerprint.dimensions} base=${fingerprint.baseUrl ?? 'default'} docPrefix=${fingerprint.documentPrefix ? 'yes' : 'no'} queryPrefix=${fingerprint.queryPrefix ? 'yes' : 'no'}`;
+}
+
+function formatChunkDiagnostics(diagnostics?: ChunkDiagnostics): string {
+  if (!diagnostics) return 'diagnostics unavailable';
+  return `files considered=${diagnostics.filesConsidered}, chunked=${diagnostics.filesChunked}, unchanged=${diagnostics.filesSkippedUnchanged}, tree-sitter=${diagnostics.treeSitterFiles}, regex=${diagnostics.regexFallbackFiles}, module spans=${diagnostics.moduleSpansAdded}`;
+}
+
+function maxIndexChunks(): number {
+  const raw = Number.parseInt(process.env.CODE_SEARCH_MAX_CHUNKS ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 200_000;
 }
 
 function getRepoSha(repoPath: string): string | null {
@@ -92,6 +139,17 @@ export interface BuildKBResult {
   chunksPath: string;
 }
 
+export interface FreshnessStatus {
+  stale: boolean;
+  reason: string;
+  reposChecked: number;
+  added: number;
+  modified: number;
+  deleted: number;
+  fingerprintMismatches: string[];
+  files: Array<{ repoName: string; filePath: string }>;
+}
+
 export class KnowledgeIndexer {
 
   // ---------------------------------------------------------------------------
@@ -113,10 +171,13 @@ export class KnowledgeIndexer {
     const startTime = Date.now();
     const basePath = getKnowledgeBasePath(project);
     mkdirSync(basePath, { recursive: true });
+    const expectedEmbeddingFingerprint = embeddingFingerprintFromProvider(createEmbeddingProvider(config.embedding));
+    log(`Expected embedding fingerprint: ${formatFingerprint(expectedEmbeddingFingerprint)}`);
 
     // 1. Determine which repos need re-indexing (SHA check)
     const reposToIndex: typeof repos = [];
     const skippedRepos: string[] = [];
+    const fullRebuildReasons = new Map<string, string>();
 
     for (const repo of repos) {
       if (opts?.force) {
@@ -125,6 +186,12 @@ export class KnowledgeIndexer {
         continue;
       }
       const meta = readRepoIndexMeta(basePath, repo.name);
+      if (!metaEmbeddingCompatible(meta, expectedEmbeddingFingerprint)) {
+        fullRebuildReasons.set(repo.name, 'embedding fingerprint changed');
+        log(`Planning ${repo.name}: embedding fingerprint changed -> full rebuild (stored: ${formatFingerprint(meta?.embeddingFingerprint)}, expected: ${formatFingerprint(expectedEmbeddingFingerprint)})`);
+        reposToIndex.push(repo);
+        continue;
+      }
       const diff = detectFileChanges(repo.path, meta?.files);
       if (meta && !diff.fallbackToFull && (diff.added.length + diff.modified.length + diff.deleted.length) === 0) {
         skippedRepos.push(repo.name);
@@ -176,14 +243,15 @@ export class KnowledgeIndexer {
     log(`Chunking ${reposToIndex.length} repos (${skippedRepos.length} skipped — unchanged)...`);
     const allChunks: CodeChunk[] = [];
     const repoStats: Array<{ name: string; chunkCount: number; language: string }> = [];
-    const repoChunkResults = new Map<string, { changedFiles: string[]; deletedFiles: string[]; fileIndex: Record<string, FileIndexEntry> }>();
+    const repoChunkResults = new Map<string, { changedFiles: string[]; deletedFiles: string[]; fileIndex: Record<string, FileIndexEntry>; diagnostics?: ChunkDiagnostics }>();
     const repoDiffs = new Map<string, GitDiff>();
 
     for (const repo of reposToIndex) {
       const meta = opts?.force ? null : readRepoIndexMeta(basePath, repo.name);
+      const forceFullReason = fullRebuildReasons.get(repo.name);
 
       // Use file-level freshness so unstaged/untracked changes are indexed too.
-      const diff = opts?.force ? null : detectFileChanges(repo.path, meta?.files);
+      const diff = opts?.force || forceFullReason ? null : detectFileChanges(repo.path, meta?.files);
       const useIncremental = diff && !diff.fallbackToFull && (diff.added.length + diff.modified.length + diff.deleted.length) > 0;
 
       let result;
@@ -196,14 +264,15 @@ export class KnowledgeIndexer {
         repoDiffs.set(repo.name, diff);
       } else {
         // Full re-chunk (first index or force)
-        log(`  ${repo.name}: full chunk scan (cached files: ${Object.keys(meta?.files ?? {}).length})`);
-        result = await chunkRepo(repo.path, repo.name, project, config.chunking, meta?.files ?? undefined);
+        log(`  ${repo.name}: full chunk scan (${forceFullReason ?? `cached files: ${Object.keys(meta?.files ?? {}).length}`})`);
+        result = await chunkRepo(repo.path, repo.name, project, config.chunking, forceFullReason ? undefined : meta?.files ?? undefined);
       }
 
       allChunks.push(...result.chunks);
       repoChunkResults.set(repo.name, result);
       const totalChunkCount = Object.values(result.fileIndex).reduce((sum: number, f: any) => sum + f.chunkCount, 0);
       log(`  ${repo.name}: chunk result -> ${result.changedFiles.length} changed files, ${result.deletedFiles.length} deleted files, ${result.chunks.length} chunks needing embedding, ${totalChunkCount} indexed chunks total`);
+      log(`  ${repo.name}: chunk diagnostics -> ${formatChunkDiagnostics(result.diagnostics)}`);
       repoStats.push({ name: repo.name, chunkCount: totalChunkCount, language: repo.language });
     }
     for (const name of skippedRepos) {
@@ -211,6 +280,10 @@ export class KnowledgeIndexer {
       repoStats.push({ name, chunkCount: meta?.chunkCount ?? 0, language: '' });
     }
     log(`Chunked ${allChunks.length} chunks from ${reposToIndex.length} repos`);
+    const chunkLimit = maxIndexChunks();
+    if (allChunks.length > chunkLimit) {
+      throw new Error(`too many chunks to index: ${allChunks.length} exceeds CODE_SEARCH_MAX_CHUNKS=${chunkLimit}. Open a narrower directory or raise the limit.`);
+    }
 
     // 4. Structural dedup (WS-6)
     report({ phase: 'dedup', message: 'Deduplicating chunks by structure...', percent: 25, etaSeconds: -1 });
@@ -351,6 +424,7 @@ export class KnowledgeIndexer {
           lastIndexedAt: new Date().toISOString(),
           chunkCount: totalChunkCount,
           embeddingProvider: 'pending',
+          embeddingFingerprint: expectedEmbeddingFingerprint,
           files: result?.fileIndex,
         });
         log(`Saved index metadata for ${repo.name}: ${totalChunkCount} chunks across ${Object.keys(result?.fileIndex ?? {}).length} files at ${sha.slice(0, 7)}`);
@@ -400,6 +474,9 @@ export class KnowledgeIndexer {
     const dbPath = join(basePath, 'lancedb');
     const vectorStore = new VectorStore(dbPath);
     await vectorStore.init();
+    const embedder = createEmbeddingProvider(config.embedding);
+    const embeddingFingerprint = embeddingFingerprintFromProvider(embedder);
+    log(`Embedding with fingerprint: ${formatFingerprint(embeddingFingerprint)}`);
 
     const deletedFiles = this.getDeletedFiles(basePath);
     const changedFiles = this.getChangedFilesByRepo(basePath);
@@ -464,27 +541,13 @@ export class KnowledgeIndexer {
       };
     }
 
-    // Delete chunks for files that were removed or changed; changed files are re-added below.
+    // Prepare replacement targets. Changed files are deleted only after replacement rows are ready.
     const filesToDelete = [
       ...deletedFiles,
       ...[...changedFiles.entries()].flatMap(([repoName, filePaths]) => filePaths.map((filePath) => ({ repoName, filePath }))),
     ];
-    if (filesToDelete.length > 0) {
-      // Group by repo for efficient deletion
-      const byRepo = new Map<string, string[]>();
-      for (const d of filesToDelete) {
-        const list = byRepo.get(d.repoName) ?? [];
-        list.push(d.filePath);
-        byRepo.set(d.repoName, list);
-      }
-      for (const [repoName, filePaths] of byRepo) {
-        log(`Removing chunks for ${filePaths.length} changed/deleted files from ${repoName}: ${filePaths.slice(0, 8).join(', ')}${filePaths.length > 8 ? `, ... ${filePaths.length - 8} more` : ''}`);
-        await vectorStore.deleteFileChunks(project, repoName, filePaths);
-      }
-    }
 
     // Embed only new/changed chunks
-    const embedder = createEmbeddingProvider(config.embedding);
     const isOllama = embedder.name === 'ollama';
     const envBatchSize = parseInt(process.env.CODE_SEARCH_EMBEDDING_BATCH_SIZE ?? '', 10);
     const envBatchDelay = parseInt(process.env.CODE_SEARCH_EMBEDDING_BATCH_DELAY_MS ?? '', 10);
@@ -497,7 +560,7 @@ export class KnowledgeIndexer {
 
     log(`Embedding ${newChunks.length} new chunks with ${embedder.name} (${reusedChunks.length} reused from changed files, ${chunks.length - newChunks.length - reusedChunks.length} cached/unchanged, batch size: ${batchSize}, delay: ${batchDelay}ms)...`);
 
-    const texts = newChunks.map((c) => c.contextualizedContent);
+    const texts = newChunks.map((c) => c.embedText ?? c.contextualizedContent);
     const embeddings: number[][] = [];
     const totalBatches = Math.ceil(texts.length / batchSize);
     let batchesDone = 0;
@@ -533,11 +596,31 @@ export class KnowledgeIndexer {
 
     const embeddedChunks = newChunks.map((chunk, i) => ({ ...chunk, embedding: embeddings[i] }));
 
-    // Add only new chunks to LanceDB (existing ones are preserved)
     report({ phase: 'storing', message: 'Saving new chunks to vector database...', percent: 92, etaSeconds: -1 });
+
+    // Replace old rows only after replacements are ready. VectorStore keeps backups and restores dirty rows if add fails.
     const rowsToStore = [...reusedChunks, ...embeddedChunks];
-    if (rowsToStore.length > 0) {
+    if (filesToDelete.length > 0) {
+      const byRepo = new Map<string, string[]>();
+      for (const d of filesToDelete) {
+        const list = byRepo.get(d.repoName) ?? [];
+        list.push(d.filePath);
+        byRepo.set(d.repoName, list);
+      }
+      for (const [repoName, filePaths] of byRepo) {
+        log(`Replacing chunks for ${filePaths.length} changed/deleted files from ${repoName}: ${filePaths.slice(0, 8).join(', ')}${filePaths.length > 8 ? `, ... ${filePaths.length - 8} more` : ''}`);
+      }
+      try {
+        const summary = await vectorStore.replaceFileChunks(project, filesToDelete, rowsToStore);
+        log(`Vector replacement complete: deletedFiles=${summary.filesDeleted}, rowsAdded=${summary.rowsAdded}, backedUp=${summary.rowsBackedUp}, restored=${summary.rowsRestored}`);
+      } catch (err) {
+        const detail = err instanceof Error ? err.stack || err.message : String(err);
+        log(`Vector replacement failed after preparing ${rowsToStore.length} replacement row(s); stale backups should have been restored when possible: ${detail}`);
+        throw err;
+      }
+    } else if (rowsToStore.length > 0) {
       await vectorStore.addChunks(rowsToStore);
+      log(`Vector append complete: rowsAdded=${rowsToStore.length}`);
     }
     log(`Stored ${embeddedChunks.length} new chunks and reused ${reusedChunks.length} chunks in LanceDB (${deletedFiles.length} removed)`);
 
@@ -549,6 +632,7 @@ export class KnowledgeIndexer {
         try {
           const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
           meta.embeddingProvider = embedder.name;
+          meta.embeddingFingerprint = embeddingFingerprint;
           meta.lastIndexedAt = new Date().toISOString();
           writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
         } catch { /* ok */ }
@@ -605,6 +689,79 @@ export class KnowledgeIndexer {
     const vectorStore = new VectorStore(dbPath);
     await vectorStore.init();
     return vectorStore.markFilesDirty(project, files, dirty);
+  }
+
+  checkFreshness(project: string, directoryPath: string, config: KnowledgeConfig = loadKnowledgeConfig(project)): FreshnessStatus {
+    const basePath = getKnowledgeBasePath(project);
+    const repos = discoverRepos(directoryPath);
+    const expectedEmbeddingFingerprint = embeddingFingerprintFromProvider(createEmbeddingProvider(config.embedding));
+    const result: FreshnessStatus = {
+      stale: false,
+      reason: 'current',
+      reposChecked: repos.length,
+      added: 0,
+      modified: 0,
+      deleted: 0,
+      fingerprintMismatches: [],
+      files: [],
+    };
+
+    for (const repo of repos) {
+      const meta = readRepoIndexMeta(basePath, repo.name);
+      if (!meta) {
+        result.stale = true;
+        result.reason = 'missing index metadata';
+        continue;
+      }
+
+      if (!metaEmbeddingCompatible(meta, expectedEmbeddingFingerprint)) {
+        result.stale = true;
+        result.reason = 'embedding fingerprint mismatch';
+        result.fingerprintMismatches.push(repo.name);
+        for (const filePath of Object.keys(meta.files ?? {})) {
+          result.files.push({ repoName: repo.name, filePath });
+        }
+        continue;
+      }
+
+      const diff = detectFileChanges(repo.path, meta.files);
+      if (diff.fallbackToFull) {
+        result.stale = true;
+        result.reason = 'file metadata unavailable';
+        continue;
+      }
+      result.added += diff.added.length;
+      result.modified += diff.modified.length;
+      result.deleted += diff.deleted.length;
+      for (const filePath of [...diff.modified, ...diff.deleted]) {
+        result.files.push({ repoName: repo.name, filePath });
+      }
+    }
+
+    if (result.added + result.modified + result.deleted > 0) {
+      result.stale = true;
+      result.reason = `${result.added} added, ${result.modified} modified, ${result.deleted} deleted`;
+    }
+
+    return result;
+  }
+
+  fileNeedsRefresh(project: string, repoName: string, repoPath: string, filePath: string): boolean {
+    const meta = readRepoIndexMeta(getKnowledgeBasePath(project), repoName);
+    if (!meta?.files) return true;
+    const cached = meta.files[filePath];
+    if (!cached) return true;
+    const fullPath = join(repoPath, filePath);
+    if (!existsSync(fullPath)) return true;
+    let stat;
+    try {
+      stat = statSync(fullPath);
+    } catch {
+      return true;
+    }
+    if (cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return false;
+    const contentHash = hashFile(fullPath);
+    return !contentHash || cached.contentHash !== contentHash;
   }
 
   // ---------------------------------------------------------------------------

@@ -1,5 +1,12 @@
 import type { CodeChunk, ScoredChunk } from '@esankhan3/anvil-knowledge-core';
 
+export interface ReplaceFileChunksSummary {
+  filesDeleted: number;
+  rowsAdded: number;
+  rowsBackedUp: number;
+  rowsRestored: number;
+}
+
 export class VectorStore {
   private db: any; // lancedb.Connection
   private table: any; // lancedb.Table
@@ -53,6 +60,7 @@ export class VectorStore {
       id: c.id,
       vector: c.embedding, // LanceDB uses 'vector' field for embeddings
       content: c.content,
+      embedText: c.embedText ?? c.contextualizedContent,
       contextualizedContent: c.contextualizedContent,
       contextPrefix: c.contextPrefix,
       filePath: c.filePath,
@@ -110,13 +118,14 @@ export class VectorStore {
   }
 
   /** Full-text BM25 search (LanceDB built-in FTS) */
-  async fullTextSearch(queryText: string, limit: number = 20): Promise<ScoredChunk[]> {
+  async fullTextSearch(queryText: string, limit: number = 20, filter?: string): Promise<ScoredChunk[]> {
     if (!this.table) return [];
     try {
-      const results = await this.table
+      let query = this.table
         .search(queryText, 'fts', 'contextualizedContent')
-        .limit(limit)
-        .toArray();
+        .limit(limit);
+      if (filter) query = query.where(filter);
+      const results = await query.toArray();
       return results.map((r: any) => ({
         chunk: rowToChunk(r),
         score: r._relevance_score ?? 0.5,
@@ -260,6 +269,7 @@ export class VectorStore {
       id: c.id,
       vector: c.embedding,
       content: c.content,
+      embedText: c.embedText ?? c.contextualizedContent,
       contextualizedContent: c.contextualizedContent,
       contextPrefix: c.contextPrefix,
       filePath: c.filePath,
@@ -285,6 +295,57 @@ export class VectorStore {
     }
     // Rebuild FTS index after data changes
     await this.ensureFtsIndex();
+  }
+
+  /** Replace file rows with rollback if add fails after deletion. */
+  async replaceFileChunks(
+    project: string,
+    filesToDelete: Array<{ repoName: string; filePath: string }>,
+    chunksToAdd: Array<CodeChunk & { embedding: number[] }>,
+  ): Promise<ReplaceFileChunksSummary> {
+    if (filesToDelete.length === 0) {
+      await this.addChunks(chunksToAdd);
+      return { filesDeleted: 0, rowsAdded: chunksToAdd.length, rowsBackedUp: 0, rowsRestored: 0 };
+    }
+
+    const backups: Array<CodeChunk & { embedding: number[] }> = [];
+    const byRepo = groupFilesByRepo(filesToDelete);
+    for (const [repoName, filePaths] of byRepo) {
+      for (const filePath of filePaths) {
+        for (const chunk of await this.getChunksByFile(repoName, filePath)) {
+          if (Array.isArray(chunk.embedding)) backups.push(chunk as CodeChunk & { embedding: number[] });
+        }
+      }
+    }
+
+    let restored = 0;
+    try {
+      for (const [repoName, filePaths] of byRepo) {
+        await this.deleteFileChunks(project, repoName, filePaths);
+      }
+      if (chunksToAdd.length > 0) {
+        await this.addChunks(chunksToAdd);
+      } else {
+        await this.ensureFtsIndex();
+      }
+      return {
+        filesDeleted: filesToDelete.length,
+        rowsAdded: chunksToAdd.length,
+        rowsBackedUp: backups.length,
+        rowsRestored: 0,
+      };
+    } catch (err) {
+      if (backups.length > 0) {
+        try {
+          await this.addChunks(backups.map((chunk) => ({ ...chunk, dirty: true })));
+          restored = backups.length;
+        } catch {
+          // Preserve the original failure; rollback failure is best-effort.
+        }
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`replaceFileChunks failed; backedUp=${backups.length}, restored=${restored}, rowsToAdd=${chunksToAdd.length}: ${message}`);
+    }
   }
 
   /** Mark chunks from changed files as possibly stale while debounce/re-embedding is pending. */
@@ -314,6 +375,16 @@ export class VectorStore {
   }
 }
 
+function groupFilesByRepo(files: Array<{ repoName: string; filePath: string }>): Map<string, string[]> {
+  const byRepo = new Map<string, string[]>();
+  for (const file of files) {
+    const list = byRepo.get(file.repoName) ?? [];
+    if (!list.includes(file.filePath)) list.push(file.filePath);
+    byRepo.set(file.repoName, list);
+  }
+  return byRepo;
+}
+
 function rowToChunk(row: any): CodeChunk {
   return {
     id: row.id,
@@ -323,6 +394,7 @@ function rowToChunk(row: any): CodeChunk {
     startLine: row.startLine,
     endLine: row.endLine,
     content: row.content,
+    embedText: row.embedText || undefined,
     contextPrefix: row.contextPrefix,
     contextualizedContent: row.contextualizedContent,
     language: row.language,

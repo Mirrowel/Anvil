@@ -55,7 +55,17 @@ export async function handleSearchTool(
   if (!['search_code', 'search_semantic', 'search_exact'].includes(name)) return null;
 
   if (!ctx.indexReady) {
-    return { content: [{ type: 'text', text: 'Index not ready. Run reindex tool or wait for auto-indexing to complete.' }] };
+    const state = ctx.indexing;
+    const details = [
+      `Index not ready for "${ctx.projectName}".`,
+      `status: ${state.status}`,
+      state.phase ? `phase: ${state.phase}` : null,
+      `percent: ${state.percent}`,
+      state.message ? `message: ${state.message}` : null,
+      state.pendingFiles ? `pending watcher files: ${state.pendingFiles}` : null,
+      state.error ? `last error: ${state.error}` : null,
+    ].filter(Boolean).join('\n');
+    return { content: [{ type: 'text', text: `${details}\nRun index_status for more detail, or wait for auto-indexing to complete.` }] };
   }
 
   try {

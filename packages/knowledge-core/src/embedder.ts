@@ -1,8 +1,126 @@
-import { execSync as execSyncCmd } from 'node:child_process';
 import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from 'node:fs';
 import { join as pathJoin } from 'node:path';
 import { homedir as osHomedir } from 'node:os';
 import type { EmbeddingProvider } from '@esankhan3/anvil-knowledge-core';
+
+const DEFAULT_EMBEDDING_TIMEOUT_MS = 25_000;
+const DEFAULT_EMBEDDING_MAX_RETRIES = 3;
+
+function embeddingTimeoutMs(): number {
+  const raw = Number.parseInt(process.env.CODE_SEARCH_EMBEDDING_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_EMBEDDING_TIMEOUT_MS;
+}
+
+function embeddingMaxRetries(): number {
+  const raw = Number.parseInt(process.env.CODE_SEARCH_EMBEDDING_MAX_RETRIES ?? '', 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_EMBEDDING_MAX_RETRIES;
+}
+
+function retryDelayMs(attempt: number, retryAfter: string | null): number {
+  if (retryAfter) {
+    const seconds = Number.parseFloat(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) return Math.min(60_000, seconds * 1000);
+  }
+  return Math.min(60_000, 500 * 2 ** attempt);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(url: string, init: RequestInit, label: string): Promise<Response> {
+  const maxRetries = embeddingMaxRetries();
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), embeddingTimeoutMs());
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal, redirect: 'error' });
+      if (response.ok) return response;
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === maxRetries) return response;
+      await sleep(retryDelayMs(attempt, response.headers.get('retry-after')));
+    } catch (err) {
+      lastError = err;
+      if (attempt === maxRetries) break;
+      await sleep(retryDelayMs(attempt, null));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw new Error(`${label} request failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
+function validateEmbeddings(vectors: number[][], expectedCount: number, expectedDimensions: number, label: string): number[][] {
+  if (vectors.length !== expectedCount) {
+    throw new Error(`${label} returned ${vectors.length} vectors for ${expectedCount} inputs`);
+  }
+  if (vectors.length === 0) return vectors;
+  const firstDim = vectors[0]?.length ?? 0;
+  if (firstDim === 0) throw new Error(`${label} returned empty embedding vectors`);
+  for (let i = 0; i < vectors.length; i++) {
+    if (vectors[i].length !== firstDim) {
+      throw new Error(`${label} returned inconsistent dimensions: vector 0 has ${firstDim}, vector ${i} has ${vectors[i].length}`);
+    }
+    if (expectedDimensions > 0 && vectors[i].length !== expectedDimensions) {
+      throw new Error(`${label} returned dimension ${vectors[i].length}, expected ${expectedDimensions}`);
+    }
+  }
+  return vectors;
+}
+
+function normalizeBaseUrl(raw: string, label: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch (err) {
+    throw new Error(`${label} base URL is invalid: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${label} base URL must use http or https`);
+  }
+  parsed.pathname = parsed.pathname.replace(/\/$/, '');
+  return parsed.toString().replace(/\/$/, '');
+}
+
+function validateBaseUrlNoPrivateNetwork(raw: string, label: string): void {
+  if (process.env.CODE_SEARCH_ALLOW_PRIVATE_EMBEDDING_URLS === '1') return;
+  const parsed = new URL(raw);
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host === 'localhost.localdomain' || host.endsWith('.localhost')) return;
+  if (host.endsWith('.local')) {
+    throw new Error(`${label} base URL host "${host}" is an mDNS/private-network name. Set CODE_SEARCH_ALLOW_PRIVATE_EMBEDDING_URLS=1 to allow it.`);
+  }
+  if (isPrivateNonLoopbackHost(host)) {
+    throw new Error(`${label} base URL host "${host}" is private or reserved. Set CODE_SEARCH_ALLOW_PRIVATE_EMBEDDING_URLS=1 to allow it.`);
+  }
+}
+
+function isPrivateNonLoopbackHost(host: string): boolean {
+  if (host === '0.0.0.0') return true;
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const octets = ipv4.slice(1).map(Number);
+    if (octets.some((n) => n < 0 || n > 255)) return true;
+    const [a, b] = octets;
+    if (a === 127) return false;
+    return a === 10
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || (a === 169 && b === 254)
+      || (a === 100 && b >= 64 && b <= 127)
+      || a === 0;
+  }
+  if (host === '::1') return false;
+  const compact = host.replace(/^0+/, '').toLowerCase();
+  return compact.startsWith('fe80:')
+    || compact.startsWith('fc')
+    || compact.startsWith('fd')
+    || compact === '::'
+    || compact.startsWith('::ffff:10.')
+    || compact.startsWith('::ffff:192.168.')
+    || /^::ffff:172\.(1[6-9]|2\d|3[0-1])\./.test(compact);
+}
 
 // ---------------------------------------------------------------------------
 // 1. Codestral (Mistral) Embedder
@@ -11,7 +129,7 @@ import type { EmbeddingProvider } from '@esankhan3/anvil-knowledge-core';
 export class CodestralEmbedder implements EmbeddingProvider {
   readonly name = 'codestral';
   readonly dimensions: number;
-  private readonly model: string;
+  readonly model: string;
 
   constructor(options?: { model?: string; dimensions?: number }) {
     this.model = options?.model ?? 'codestral-embed-2505';
@@ -24,43 +142,26 @@ export class CodestralEmbedder implements EmbeddingProvider {
       throw new Error('MISTRAL_API_KEY environment variable is not set');
     }
 
-    const maxRetries = parseInt(process.env.CODE_SEARCH_EMBEDDING_MAX_RETRIES ?? '6', 10);
-    let response: Response | null = null;
-    let body = '';
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      response = await fetch('https://api.mistral.ai/v1/embeddings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: this.model,
-          input: texts,
-          encoding_format: 'float',
-        }),
-      });
+    const response = await fetchWithRetry('https://api.mistral.ai/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        input: texts,
+        encoding_format: 'float',
+      }),
+    }, 'Codestral embedding');
 
-      if (response.ok) break;
-
-      body = await response.text();
-      const retryAfter = response.headers.get('retry-after');
-      const retryable = response.status === 429 || response.status >= 500;
-      if (!retryable || attempt === maxRetries) {
-        throw new Error(`Codestral embedding request failed (${response.status}): ${body}`);
-      }
-
-      const retryAfterMs = retryAfter ? Number(retryAfter) * 1000 : 0;
-      const backoffMs = retryAfterMs || Math.min(60_000, 1000 * 2 ** attempt);
-      await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    }
-
-    if (!response?.ok) {
-      throw new Error(`Codestral embedding request failed: ${body || 'no response'}`);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Codestral embedding request failed (${response.status}): ${body}`);
     }
 
     const json = (await response.json()) as { data: Array<{ embedding: number[] }> };
-    return json.data.map((d) => d.embedding);
+    return validateEmbeddings(json.data.map((d) => d.embedding), texts.length, this.dimensions, 'Codestral embedding');
   }
 
   async embedSingle(text: string): Promise<number[]> {
@@ -76,7 +177,7 @@ export class CodestralEmbedder implements EmbeddingProvider {
 export class VoyageEmbedder implements EmbeddingProvider {
   readonly name = 'voyage';
   readonly dimensions: number;
-  private readonly model: string;
+  readonly model: string;
 
   constructor(options?: { model?: string; dimensions?: number }) {
     this.model = options?.model ?? 'voyage-code-3';
@@ -89,7 +190,7 @@ export class VoyageEmbedder implements EmbeddingProvider {
       throw new Error('VOYAGE_API_KEY environment variable is not set');
     }
 
-    const response = await fetch('https://api.voyageai.com/v1/embeddings', {
+    const response = await fetchWithRetry('https://api.voyageai.com/v1/embeddings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -100,7 +201,7 @@ export class VoyageEmbedder implements EmbeddingProvider {
         input: texts,
         input_type: 'document',
       }),
-    });
+    }, 'Voyage embedding');
 
     if (!response.ok) {
       const body = await response.text();
@@ -108,7 +209,7 @@ export class VoyageEmbedder implements EmbeddingProvider {
     }
 
     const json = (await response.json()) as { data: Array<{ embedding: number[] }> };
-    return json.data.map((d) => d.embedding);
+    return validateEmbeddings(json.data.map((d) => d.embedding), texts.length, this.dimensions, 'Voyage embedding');
   }
 
   async embedSingle(text: string): Promise<number[]> {
@@ -124,7 +225,7 @@ export class VoyageEmbedder implements EmbeddingProvider {
 export class OpenAIEmbedder implements EmbeddingProvider {
   readonly name = 'openai';
   readonly dimensions: number;
-  private readonly model: string;
+  readonly model: string;
 
   constructor(options?: { model?: string; dimensions?: number }) {
     this.model = options?.model ?? 'text-embedding-3-large';
@@ -137,7 +238,7 @@ export class OpenAIEmbedder implements EmbeddingProvider {
       throw new Error('OPENAI_API_KEY environment variable is not set');
     }
 
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
+    const response = await fetchWithRetry('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -148,7 +249,7 @@ export class OpenAIEmbedder implements EmbeddingProvider {
         input: texts,
         dimensions: this.dimensions,
       }),
-    });
+    }, 'OpenAI embedding');
 
     if (!response.ok) {
       const body = await response.text();
@@ -156,7 +257,7 @@ export class OpenAIEmbedder implements EmbeddingProvider {
     }
 
     const json = (await response.json()) as { data: Array<{ embedding: number[] }> };
-    return json.data.map((d) => d.embedding);
+    return validateEmbeddings(json.data.map((d) => d.embedding), texts.length, this.dimensions, 'OpenAI embedding');
   }
 
   async embedSingle(text: string): Promise<number[]> {
@@ -187,14 +288,18 @@ export class OllamaEmbedder implements EmbeddingProvider {
   readonly name = 'ollama';
   readonly dimensions: number;
   readonly model: string;
-  private readonly baseUrl: string;
+  readonly baseUrl: string;
   private readonly prefixes: { document: string; query: string } | null;
+  readonly documentPrefix?: string;
+  readonly queryPrefix?: string;
 
   constructor(options?: { model?: string; dimensions?: number }) {
     this.model = options?.model ?? 'bge-m3';
     this.dimensions = options?.dimensions ?? OLLAMA_MODEL_DIMS[this.model] ?? 1024;
-    this.baseUrl = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
+    this.baseUrl = normalizeBaseUrl(process.env.OLLAMA_HOST ?? 'http://localhost:11434', 'Ollama');
     this.prefixes = OLLAMA_PREFIX_MODELS[this.model] ?? null;
+    this.documentPrefix = this.prefixes?.document;
+    this.queryPrefix = this.prefixes?.query;
   }
 
   /** Embed texts as documents (for indexing) */
@@ -213,11 +318,11 @@ export class OllamaEmbedder implements EmbeddingProvider {
   }
 
   private async _rawEmbed(texts: string[]): Promise<number[][]> {
-    const response = await fetch(`${this.baseUrl}/api/embed`, {
+    const response = await fetchWithRetry(`${this.baseUrl}/api/embed`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: this.model, input: texts }),
-    });
+    }, 'Ollama embedding');
 
     if (!response.ok) {
       const body = await response.text();
@@ -225,7 +330,7 @@ export class OllamaEmbedder implements EmbeddingProvider {
     }
 
     const json = (await response.json()) as { embeddings: number[][] };
-    return json.embeddings;
+    return validateEmbeddings(json.embeddings, texts.length, this.dimensions, 'Ollama embedding');
   }
 }
 
@@ -236,7 +341,7 @@ export class OllamaEmbedder implements EmbeddingProvider {
 export class GeminiOAuthEmbedder implements EmbeddingProvider {
   readonly name = 'gemini-oauth';
   readonly dimensions: number;
-  private readonly model: string;
+  readonly model: string;
 
   constructor(options?: { model?: string; dimensions?: number }) {
     this.model = options?.model ?? 'text-embedding-004';
@@ -260,7 +365,7 @@ export class GeminiOAuthEmbedder implements EmbeddingProvider {
     const results: number[][] = [];
 
     // Gemini embedding API processes one text at a time via batchEmbedContents
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:batchEmbedContents`,
       {
         method: 'POST',
@@ -276,6 +381,7 @@ export class GeminiOAuthEmbedder implements EmbeddingProvider {
           })),
         }),
       },
+      'Gemini embedding',
     );
 
     if (!response.ok) {
@@ -287,7 +393,7 @@ export class GeminiOAuthEmbedder implements EmbeddingProvider {
     for (const emb of json.embeddings) {
       results.push(emb.values);
     }
-    return results;
+    return validateEmbeddings(results, texts.length, this.dimensions, 'Gemini embedding');
   }
 
   async embedSingle(text: string): Promise<number[]> {
@@ -311,25 +417,28 @@ export class GeminiOAuthEmbedder implements EmbeddingProvider {
 export class OpenAICompatibleEmbedder implements EmbeddingProvider {
   readonly name = 'openai-compatible';
   readonly dimensions: number;
-  private readonly model: string;
-  private readonly baseUrl: string;
+  readonly model: string;
+  readonly baseUrl: string;
   private readonly apiKey: string | undefined;
 
   constructor(options?: { model?: string; dimensions?: number; baseUrl?: string; apiKey?: string }) {
-    this.baseUrl = options?.baseUrl || process.env.CODE_SEARCH_EMBEDDING_BASE_URL || '';
+    const baseUrl = options?.baseUrl || process.env.CODE_SEARCH_EMBEDDING_BASE_URL || '';
+    this.baseUrl = baseUrl ? normalizeBaseUrl(baseUrl, 'OpenAI-compatible embedding') : '';
     this.model = options?.model || process.env.CODE_SEARCH_EMBEDDING_MODEL || '';
     this.apiKey = options?.apiKey || process.env.CODE_SEARCH_EMBEDDING_API_KEY;
     this.dimensions = options?.dimensions ?? 1024;
 
     if (!this.baseUrl) throw new Error('Embedding base URL required. Set CODE_SEARCH_EMBEDDING_BASE_URL');
     if (!this.model) throw new Error('Embedding model required. Set CODE_SEARCH_EMBEDDING_MODEL');
+    validateBaseUrlNoPrivateNetwork(this.baseUrl, 'OpenAI-compatible embedding');
   }
 
   async embed(texts: string[]): Promise<number[][]> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
 
-    const response = await fetch(`${this.baseUrl.replace(/\/$/, '')}/v1/embeddings`, {
+    const endpoint = this.baseUrl.endsWith('/v1') ? `${this.baseUrl}/embeddings` : `${this.baseUrl}/v1/embeddings`;
+    const response = await fetchWithRetry(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -338,7 +447,7 @@ export class OpenAICompatibleEmbedder implements EmbeddingProvider {
         dimensions: this.dimensions,
         encoding_format: 'float',
       }),
-    });
+    }, 'OpenAI-compatible embedding');
 
     if (!response.ok) {
       const body = await response.text();
@@ -346,7 +455,7 @@ export class OpenAICompatibleEmbedder implements EmbeddingProvider {
     }
 
     const json = (await response.json()) as { data: Array<{ embedding: number[] }> };
-    return json.data.map((d) => d.embedding);
+    return validateEmbeddings(json.data.map((d) => d.embedding), texts.length, this.dimensions, 'OpenAI-compatible embedding');
   }
 
   async embedSingle(text: string): Promise<number[]> {
@@ -358,19 +467,6 @@ export class OpenAICompatibleEmbedder implements EmbeddingProvider {
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
-
-/**
- * Check if Ollama is running locally.
- */
-function isOllamaRunning(): boolean {
-  try {
-    const host = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
-    execSyncCmd(`curl -s --max-time 2 ${host}/api/tags`, { stdio: 'pipe', timeout: 3000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Check if Gemini CLI is authenticated and has a valid OAuth token.
@@ -410,9 +506,9 @@ export function createEmbeddingProvider(config: {
     case 'custom':
       return new OpenAICompatibleEmbedder(opts);
     case 'auto': {
-      // Auto-detect: custom base URL → local Ollama → API keys → CLI OAuth
+      // Auto-detect: custom base URL → API keys → CLI OAuth → local Ollama.
+      // Ollama availability is validated by the embedding request itself to avoid shelling out.
       if (process.env.CODE_SEARCH_EMBEDDING_BASE_URL) return new OpenAICompatibleEmbedder(opts);
-      if (isOllamaRunning()) return new OllamaEmbedder(opts);
       if (process.env.MISTRAL_API_KEY) return new CodestralEmbedder(opts);
       if (process.env.OPENAI_API_KEY) return new OpenAIEmbedder(opts);
       if (process.env.VOYAGE_API_KEY) return new VoyageEmbedder(opts);
@@ -420,11 +516,7 @@ export function createEmbeddingProvider(config: {
         return new GeminiOAuthEmbedder(opts);
       }
       if (isGeminiCliAuthenticated()) return new GeminiOAuthEmbedder(opts);
-      throw new Error(
-        'No embedding provider available. Install Ollama (brew install ollama && ollama pull nomic-embed-text), ' +
-        'or set an API key (MISTRAL_API_KEY, OPENAI_API_KEY), ' +
-        'or set CODE_SEARCH_EMBEDDING_BASE_URL for a custom provider.',
-      );
+      return new OllamaEmbedder(opts);
     }
     default:
       throw new Error(

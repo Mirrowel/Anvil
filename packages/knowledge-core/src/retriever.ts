@@ -98,8 +98,9 @@ export class HybridRetriever {
         // Routing failed — search all repos
       }
     }
+    const esc = (value: string) => value.replace(/'/g, "''");
     const filter = filterRepos
-      ? `repoName IN (${filterRepos.map((r) => `'${r}'`).join(',')})`
+      ? `repoName IN (${filterRepos.map((r) => `'${esc(r)}'`).join(',')})`
       : undefined;
 
     // ---------------------------------------------------------------
@@ -120,7 +121,7 @@ export class HybridRetriever {
         ? this.vectorStore.vectorSearch(queryEmbedding, { limit: 50, filter })
         : Promise.resolve([] as ScoredChunk[]),
       useBm25
-        ? this.vectorStore.fullTextSearch(query, 50)
+        ? this.vectorStore.fullTextSearch(query, 50, filter)
         : Promise.resolve([] as ScoredChunk[]),
     ]);
 
@@ -188,7 +189,7 @@ export class HybridRetriever {
 
     if (this.reranker && candidatePool.length > 1) {
       try {
-        const documents = candidatePool.map((sc) => sc.chunk.contextualizedContent || sc.chunk.content);
+        const documents = candidatePool.map((sc) => sc.chunk.embedText || sc.chunk.contextualizedContent || sc.chunk.content);
         const ranked = await this.reranker.rerank(query, documents, maxChunks);
         finalChunks = ranked.map((r) => ({
           ...candidatePool[r.index],

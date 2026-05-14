@@ -11,6 +11,14 @@ import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, relative, extname, basename, dirname } from 'node:path';
 import type { CodeChunk } from '@esankhan3/anvil-knowledge-core';
 import { SOURCE_EXTENSIONS, SKIP_DIRS, walkDir, langFromExt, extractImports, isIndexableFile } from './file-walker.js';
+import { parseFile, type TreeSitterEntity } from './tree-sitter-parser.js';
+
+const DEFAULT_MAX_INDEX_FILES = 10_000;
+
+function maxIndexFiles(): number {
+  const raw = Number.parseInt(process.env.CODE_SEARCH_MAX_FILES ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_INDEX_FILES;
+}
 
 // ---------------------------------------------------------------------------
 // Language → boundary patterns
@@ -220,6 +228,64 @@ function buildContextPrefix(
   return lines.join('\n');
 }
 
+function compactSnippet(content: string, maxLines: number, maxChars: number): string {
+  const body = content
+    .split('\n')
+    .slice(0, maxLines)
+    .join('\n')
+    .trim();
+  return body.length > maxChars ? `${body.slice(0, maxChars)}...` : body;
+}
+
+function firstCodeLine(content: string): string | undefined {
+  const line = content.split('\n').map((l) => l.trim()).find(Boolean);
+  if (!line) return undefined;
+  return line.length > 200 ? `${line.slice(0, 200)}...` : line;
+}
+
+function buildEmbedText(args: {
+  relPath: string;
+  lang: string;
+  entityType: CodeChunk['entityType'];
+  entityName?: string;
+  content: string;
+  imports: string[];
+  exports: string[];
+}): string {
+  const parts = [
+    `file:${args.relPath}`,
+    `language:${args.lang}`,
+    `kind:${args.entityType}`,
+  ];
+  if (args.entityName) parts.push(`name:${args.entityName}`);
+  const signature = firstCodeLine(args.content);
+  if (signature) parts.push(`signature:${signature}`);
+  if (args.imports.length > 0) parts.push(`imports:${args.imports.slice(0, 12).join(', ')}`);
+  if (args.exports.length > 0) parts.push(`exports:${args.exports.slice(0, 12).join(', ')}`);
+  const body = compactSnippet(args.content, 15, 500);
+  if (body) parts.push(`body:${body}`);
+  return parts.join('\n');
+}
+
+function uncoveredLineSpans(totalLines: number, covered: Array<{ startLine: number; endLine: number }>): Array<{ startLine: number; endLine: number }> {
+  const sorted = covered
+    .map((span) => ({ startLine: Math.max(1, span.startLine), endLine: Math.min(totalLines, span.endLine) }))
+    .filter((span) => span.startLine <= span.endLine)
+    .sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+  const spans: Array<{ startLine: number; endLine: number }> = [];
+  let cursor = 1;
+  for (const span of sorted) {
+    if (cursor < span.startLine) spans.push({ startLine: cursor, endLine: span.startLine - 1 });
+    cursor = Math.max(cursor, span.endLine + 1);
+  }
+  if (cursor <= totalLines) spans.push({ startLine: cursor, endLine: totalLines });
+  return spans;
+}
+
+function meaningfulLines(lines: string[]): string[] {
+  return lines.filter((line) => line.trim().length > 0);
+}
+
 // ---------------------------------------------------------------------------
 // Chunk a single file
 // ---------------------------------------------------------------------------
@@ -272,13 +338,33 @@ function splitOversizedContent(
   return parts;
 }
 
-function chunkFile(
+function mapTreeSitterEntityType(type: TreeSitterEntity['type']): CodeChunk['entityType'] {
+  switch (type) {
+    case 'function':
+    case 'class':
+    case 'method':
+    case 'interface':
+    case 'type':
+    case 'module':
+      return type;
+    case 'struct':
+      return 'class';
+    case 'enum':
+    case 'trait':
+      return 'type';
+    default:
+      return 'block';
+  }
+}
+
+async function chunkFile(
   filePath: string,
   repoPath: string,
   repoName: string,
   project: string,
   maxTokens: number,
-): CodeChunk[] {
+  diagnostics?: ChunkDiagnostics,
+): Promise<CodeChunk[]> {
   let raw: string;
   try {
     raw = readFileSync(filePath, 'utf-8');
@@ -328,8 +414,19 @@ function chunkFile(
     endLine: number,
     entityType: CodeChunk['entityType'],
     entityName: string | undefined,
+    parentEntity?: string,
   ) => {
     const ctxContent = `${contextPrefix}\n${content}`;
+    const exports = extractExports(content, lang);
+    const embedText = buildEmbedText({
+      relPath,
+      lang,
+      entityType,
+      entityName,
+      content,
+      imports: fileImports,
+      exports,
+    });
     const tokens = Math.ceil(ctxContent.length / 4);
     const id = chunkId(relPath, startLine, endLine);
     chunks.push({
@@ -342,12 +439,14 @@ function chunkFile(
       content,
       contextPrefix,
       contextualizedContent: ctxContent,
+      embedText,
       language: lang,
       entityType,
       entityName,
+      parentEntity,
       tokens,
       imports: fileImports,
-      exports: extractExports(content, lang),
+      exports,
     });
   };
 
@@ -356,10 +455,11 @@ function chunkFile(
     startLine: number,
     entityType: CodeChunk['entityType'],
     entityName: string | undefined,
+    parentEntity?: string,
   ) => {
     const content = contentLines.join('\n');
     if (contextualizedTokens(contextPrefix, content) <= maxTokens) {
-      pushChunk(content, startLine, startLine + contentLines.length - 1, entityType, entityName);
+      pushChunk(content, startLine, startLine + contentLines.length - 1, entityType, entityName, parentEntity);
     } else {
       // Split oversized content into parts that fit
       const parts = splitOversizedContent(contentLines, maxContentChars);
@@ -367,11 +467,42 @@ function chunkFile(
       for (let p = 0; p < parts.length; p++) {
         const partLines = parts[p].split('\n').length;
         const partName = entityName ? `${entityName}$${p + 1}` : undefined;
-        pushChunk(parts[p], lineOffset, lineOffset + partLines - 1, entityType, partName);
+        pushChunk(parts[p], lineOffset, lineOffset + partLines - 1, entityType, partName, parentEntity);
         lineOffset += partLines;
       }
     }
   };
+
+  try {
+    const parsed = await parseFile(filePath, raw, lang);
+    if (parsed?.entities.length) {
+      const covered: Array<{ startLine: number; endLine: number }> = [];
+      if (diagnostics) diagnostics.treeSitterFiles += 1;
+      for (const entity of parsed.entities) {
+        const bodyLines = entity.body.split('\n');
+        covered.push({ startLine: entity.startLine + 1, endLine: entity.endLine + 1 });
+        pushContentWithSplit(
+          bodyLines,
+          entity.startLine + 1,
+          mapTreeSitterEntityType(entity.type),
+          entity.name,
+          entity.parent,
+        );
+      }
+      for (const span of uncoveredLineSpans(lines.length, covered)) {
+        const spanLines = lines.slice(span.startLine - 1, span.endLine);
+        if (meaningfulLines(spanLines).length === 0) continue;
+        const kind = span.startLine === 1 ? 'import' : 'module';
+        if (diagnostics) diagnostics.moduleSpansAdded += 1;
+        pushContentWithSplit(spanLines, span.startLine, kind, kind === 'module' ? basename(filePath, ext) : undefined);
+      }
+      return chunks;
+    }
+  } catch {
+    // Fall through to regex chunking when WASM grammars are unavailable or parsing fails.
+  }
+
+  if (diagnostics) diagnostics.regexFallbackFiles += 1;
 
   // If no boundaries found, treat entire file as one (possibly split) chunk
   if (boundaries.length === 0) {
@@ -436,7 +567,7 @@ function enrichChunkMetadata(chunks: CodeChunk[]): CodeChunk[] {
   return chunks.map((chunk) => {
     const stableKey = stableChunkKey(chunk);
     const contentHash = hashText(chunk.content);
-    const embedHash = hashText(chunk.contextualizedContent);
+    const embedHash = hashText(chunk.embedText ?? chunk.contextualizedContent);
     return { ...chunk, stableKey, contentHash, embedHash };
   });
 }
@@ -446,7 +577,7 @@ function chunkIndexFromChunks(chunks: CodeChunk[]): ChunkIndexEntry[] {
     id: chunk.id,
     stableKey: chunk.stableKey ?? stableChunkKey(chunk),
     contentHash: chunk.contentHash ?? hashText(chunk.content),
-    embedHash: chunk.embedHash ?? hashText(chunk.contextualizedContent),
+    embedHash: chunk.embedHash ?? hashText(chunk.embedText ?? chunk.contextualizedContent),
     startLine: chunk.startLine,
     endLine: chunk.endLine,
     entityType: chunk.entityType,
@@ -476,6 +607,28 @@ export interface ChunkResult {
   deletedFiles: string[];
   /** Updated per-file metadata for saving */
   fileIndex: Record<string, FileIndexEntry>;
+  /** Best-effort diagnostics for logging/debugging */
+  diagnostics?: ChunkDiagnostics;
+}
+
+export interface ChunkDiagnostics {
+  filesConsidered: number;
+  filesChunked: number;
+  filesSkippedUnchanged: number;
+  treeSitterFiles: number;
+  regexFallbackFiles: number;
+  moduleSpansAdded: number;
+}
+
+function createChunkDiagnostics(filesConsidered: number): ChunkDiagnostics {
+  return {
+    filesConsidered,
+    filesChunked: 0,
+    filesSkippedUnchanged: 0,
+    treeSitterFiles: 0,
+    regexFallbackFiles: 0,
+    moduleSpansAdded: 0,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +654,11 @@ export async function chunkRepo(
 ): Promise<ChunkResult> {
   const files: string[] = [];
   walkDir(repoPath, files);
+  const diagnostics = createChunkDiagnostics(files.length);
+  const fileLimit = maxIndexFiles();
+  if (files.length > fileLimit) {
+    throw new Error(`too many indexable files in ${repoName}: ${files.length} exceeds CODE_SEARCH_MAX_FILES=${fileLimit}. Open a narrower directory or raise the limit.`);
+  }
 
   const allChunks: CodeChunk[] = [];
   const changedFiles: string[] = [];
@@ -523,12 +681,14 @@ export async function chunkRepo(
     // Check cache — skip chunking if file is unchanged
     if (cachedFiles?.[relPath]?.contentHash === contentHash) {
       fileIndex[relPath] = cachedFiles[relPath];
+      diagnostics.filesSkippedUnchanged += 1;
       continue;
     }
 
     // File is new or changed — chunk it
     changedFiles.push(relPath);
-    const chunks = enrichChunkMetadata(chunkFile(file, repoPath, repoName, project, config.maxTokens));
+    diagnostics.filesChunked += 1;
+    const chunks = enrichChunkMetadata(await chunkFile(file, repoPath, repoName, project, config.maxTokens, diagnostics));
     allChunks.push(...chunks);
     fileIndex[relPath] = fileIndexEntry(file, contentHash, chunks);
   }
@@ -543,7 +703,7 @@ export async function chunkRepo(
     }
   }
 
-  return { chunks: allChunks, changedFiles, deletedFiles, fileIndex };
+  return { chunks: allChunks, changedFiles, deletedFiles, fileIndex, diagnostics };
 }
 
 // ---------------------------------------------------------------------------
@@ -564,6 +724,7 @@ export async function chunkChangedFiles(
   const allChunks: CodeChunk[] = [];
   const changedFiles: string[] = [];
   const fileIndex: Record<string, FileIndexEntry> = {};
+  const diagnostics = createChunkDiagnostics(diff.added.length + diff.modified.length);
 
   // Only chunk added + modified files
   for (const relPath of [...diff.added, ...diff.modified]) {
@@ -579,8 +740,9 @@ export async function chunkChangedFiles(
     } catch { continue; }
 
     changedFiles.push(relPath);
+    diagnostics.filesChunked += 1;
     const contentHash = hashText(contents);
-    const chunks = enrichChunkMetadata(chunkFile(fullPath, repoPath, repoName, project, config.maxTokens));
+    const chunks = enrichChunkMetadata(await chunkFile(fullPath, repoPath, repoName, project, config.maxTokens, diagnostics));
     allChunks.push(...chunks);
     fileIndex[relPath] = fileIndexEntry(fullPath, contentHash, chunks);
   }
@@ -590,5 +752,6 @@ export async function chunkChangedFiles(
     changedFiles,
     deletedFiles: [...diff.deleted],
     fileIndex,
+    diagnostics,
   };
 }

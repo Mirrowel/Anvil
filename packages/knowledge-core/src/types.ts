@@ -9,6 +9,7 @@ export interface CodeChunk {
   content: string;               // raw source code
   contextPrefix: string;         // structural context (file path, scope chain, imports)
   contextualizedContent: string; // contextPrefix + '\n' + content (what gets embedded)
+  embedText?: string;            // compact semantic text used for embeddings when present
   language: string;
   entityType: 'function' | 'class' | 'method' | 'interface' | 'type' | 'module' | 'import' | 'block';
   entityName?: string;           // function/class/method name
@@ -96,6 +97,10 @@ export interface IndexStats {
 export interface EmbeddingProvider {
   readonly name: string;
   readonly dimensions: number;
+  readonly model?: string;
+  readonly baseUrl?: string;
+  readonly documentPrefix?: string;
+  readonly queryPrefix?: string;
   embed(texts: string[]): Promise<number[][]>;
   embedSingle(text: string): Promise<number[]>;
 }

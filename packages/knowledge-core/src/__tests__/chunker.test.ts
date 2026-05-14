@@ -155,6 +155,52 @@ describe('chunkRepo', () => {
     assert.ok(chunk.tokens > 0, 'Chunk should have token estimate');
     assert.ok(chunk.contextPrefix.length > 0, 'Chunk should have context prefix');
     assert.ok(chunk.contextualizedContent.length > chunk.content.length, 'Contextualized content should include prefix');
+    assert.ok(chunk.embedText?.includes('file:meta.ts'), 'Chunk should have compact embedding text with file path');
+    assert.ok(chunk.embedText?.includes('kind:function'), 'Chunk should have compact embedding text with kind');
+  });
+
+  it('preserves module-level setup around tree-sitter entity chunks', async () => {
+    const code = [
+      'import express from "express";',
+      'const app = express();',
+      'app.use(express.json());',
+      '',
+      'export function handler() {',
+      '  return app;',
+      '}',
+      '',
+      'app.listen(3000);',
+    ].join('\n');
+    writeFileSync(join(tempDir, 'server.ts'), code);
+
+    const result = await chunkRepo(tempDir, 'test-repo', 'test-project', { maxTokens: 512 });
+
+    assert.ok(result.chunks.some((c) => c.entityName === 'handler'), 'Should include tree-sitter function chunk');
+    assert.ok(
+      result.chunks.some((c) => c.content.includes('app.use(express.json())')),
+      'Should preserve uncovered module setup before function',
+    );
+    assert.ok(
+      result.chunks.some((c) => c.content.includes('app.listen(3000)')),
+      'Should preserve uncovered module setup after function',
+    );
+  });
+
+  it('honors CODE_SEARCH_MAX_FILES guardrail', async () => {
+    const previous = process.env.CODE_SEARCH_MAX_FILES;
+    process.env.CODE_SEARCH_MAX_FILES = '1';
+    try {
+      writeFileSync(join(tempDir, 'a.ts'), 'export const a = 1;');
+      writeFileSync(join(tempDir, 'b.ts'), 'export const b = 2;');
+
+      await assert.rejects(
+        () => chunkRepo(tempDir, 'test-repo', 'test-project', { maxTokens: 512 }),
+        /too many indexable files/,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.CODE_SEARCH_MAX_FILES;
+      else process.env.CODE_SEARCH_MAX_FILES = previous;
+    }
   });
 
   it('returns changedFiles and fileIndex', async () => {

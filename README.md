@@ -70,13 +70,22 @@ and deleted files are detected. Changed files are re-chunked locally, but only
 new or changed chunks are sent to the embedding provider; unchanged chunks from
 the same file reuse their existing vectors.
 
+On startup, an existing index is checked against file metadata and the active
+embedding fingerprint. If it is stale, stale results stay available while a
+background refresh runs.
+
 Keep `CODE_SEARCH_REINDEX_INTERVAL=1m` or similar as a polling fallback if you
 want periodic verification in addition to the watcher.
 
 Useful environment variables:
 
 - `CODE_SEARCH_DATA_DIR` - where indexes are stored.
+- `CODE_SEARCH_MAX_FILES` - max source files per repo before indexing aborts (default `10000`).
+- `CODE_SEARCH_MAX_FILE_SIZE` - max source file size in bytes (default `2000000`).
+- `CODE_SEARCH_MAX_CHUNKS` - max chunks before indexing aborts (default `200000`).
 - `EMBEDDING_PROVIDER` - embedding backend, such as `codestral`, `openai`, `ollama`, or `auto`.
+- `CODE_SEARCH_EMBEDDING_TIMEOUT_MS` - HTTP embedding request timeout (default `25000`).
+- `CODE_SEARCH_EMBEDDING_MAX_RETRIES` - retry count for retryable embedding failures (default `3`).
 - `EMBEDDING_API_KEY` - generic API key bridged to provider-specific variables.
 - `RERANKER_PROVIDER` - reranker backend, or `none`.
 

@@ -79,6 +79,10 @@ results remain searchable but are marked as possibly stale when returned.
 After the debounce, only changed/new chunks are embedded; unchanged
 chunks from edited files reuse their stored vectors.
 
+Startup also checks file freshness and the active embedding fingerprint before
+declaring a cached index current. If stale, the server keeps existing results
+available while a background refresh runs.
+
 ### Serve
 ```sh
 code-search-mcp --serve --port 4000 --auth api-key
@@ -251,6 +255,11 @@ Everything is `CODE_SEARCH_*` env vars, single source of truth in
 | `CODE_SEARCH_API_KEY` | API key for proxy or serve modes |
 | `CODE_SEARCH_DATA_DIR` | Override `~/.anvil/knowledge-base` |
 | `CODE_SEARCH_REINDEX_INTERVAL` | `30m` / `1h` / `6h` / `0` |
+| `CODE_SEARCH_MAX_FILES` | Max source files per repo, default `10000` |
+| `CODE_SEARCH_MAX_FILE_SIZE` | Max source file bytes, default `2000000` |
+| `CODE_SEARCH_MAX_CHUNKS` | Max chunks before aborting, default `200000` |
+| `CODE_SEARCH_EMBEDDING_TIMEOUT_MS` | Embedding HTTP timeout, default `25000` |
+| `CODE_SEARCH_EMBEDDING_MAX_RETRIES` | Retry count for retryable embedding failures, default `3` |
 | `EMBEDDING_PROVIDER` | `auto` / `voyage` / `openai` / `ollama` / … |
 | `EMBEDDING_API_KEY` | Bridged to provider-specific var |
 | `RERANKER_PROVIDER` | `ollama` / `cohere` / `voyage` / `none` |

@@ -52,11 +52,12 @@ boundaries. No more chunks that cut a function in half. Regex
 fallback for languages without a grammar so nothing is unindexed.
 
 ### Incremental by default
-The indexer reads `git rev-parse HEAD`, diffs against the last
-indexed SHA, and re-chunks only what changed. Deleted files get
-removed from the vector store. Embedding is independently
-incremental — it diffs new chunk IDs against LanceDB and only
-embeds the deltas. Big repos stay fast forever.
+The indexer compares the current indexable file set against persisted
+mtime, size, and content hashes, so unstaged, staged, untracked, and
+deleted files are detected without relying on commits. Deleted files get
+removed from the vector store. Embedding is independently incremental:
+changed files are re-chunked, unchanged chunk vectors are reused, and
+only new or changed embedding text is sent to the provider.
 
 ### Ignore-aware indexing
 Indexing starts from source-like files, then applies each repo's
@@ -83,8 +84,12 @@ Freshness is file-based instead of commit-based. The indexer compares the
 current indexable file set against `index_meta.json` using mtime, size, and
 content hashes, so unstaged and untracked edits are picked up. Changed files are
 re-chunked locally, but embedding requests are only made for chunks whose
-`contextualizedContent` hash changed. Unchanged chunks in the same file keep
+`embedText` hash changed. Unchanged chunks in the same file keep
 their existing vectors and are reinserted with updated line metadata.
+
+Embedding cache reuse is guarded by a provider fingerprint containing backend,
+model, base URL, dimensions, and task prefixes. Changing the embedding backend
+forces a rebuild instead of mixing incompatible vectors.
 
 ### Hybrid retrieval, four phases
 1. **Vector ⫽ BM25 in parallel** — semantic recall + lexical recall.

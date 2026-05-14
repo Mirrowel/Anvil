@@ -24,6 +24,13 @@ export const SKIP_DIRS = new Set([
 
 export const INDEX_IGNORE_FILE = 'index.ignore';
 
+const DEFAULT_MAX_FILE_SIZE_BYTES = 2_000_000;
+
+function maxFileSizeBytes(): number {
+  const raw = Number.parseInt(process.env.CODE_SEARCH_MAX_FILE_SIZE ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_FILE_SIZE_BYTES;
+}
+
 type IgnoreMatcher = ReturnType<typeof ignore>;
 
 interface IndexIgnoreMatcher {
@@ -140,7 +147,7 @@ function walkDirRaw(dir: string, collected: string[]): void {
     }
     if (stat.isDirectory()) {
       walkDirRaw(full, collected);
-    } else if (stat.isFile() && SOURCE_EXTENSIONS.has(extname(entry))) {
+    } else if (stat.isFile() && SOURCE_EXTENSIONS.has(extname(entry)) && stat.size <= maxFileSizeBytes()) {
       collected.push(full);
     }
   }

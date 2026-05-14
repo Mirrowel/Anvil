@@ -276,7 +276,11 @@ export async function startServer(
   if (reindexIntervalMs > 0 && ctx.directoryPath) {
     log(ctx, `[code-search-mcp] Auto-reindex every ${Math.round(reindexIntervalMs / 60_000)}m`);
     setInterval(async () => {
-      if (!ctx.directoryPath || ctx.indexing.status === 'indexing') return;
+      if (!ctx.directoryPath) return;
+      if (ctx.indexing.status === 'indexing') {
+        log(ctx, `[auto-reindex] skipped: indexing already running (${ctx.indexing.phase ?? 'unknown phase'})`);
+        return;
+      }
       try {
         await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'auto-reindex' });
       } catch (err) {
@@ -348,6 +352,10 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
       log(ctx, `[watcher] ignored non-indexable path: ${absPath}`);
       return;
     }
+    if (!watchPathNeedsRefresh(ctx, absPath)) {
+      log(ctx, `[watcher] ignored unchanged path event: ${absPath}`);
+      return;
+    }
     const before = ctx.pendingWatchFiles.size;
     ctx.pendingWatchFiles.add(absPath);
     ctx.indexing.pendingFiles = ctx.pendingWatchFiles.size;
@@ -374,6 +382,20 @@ function isPotentialIndexPath(ctx: ServerContext, absPath: string): boolean {
   if (name === '.gitignore' || name === 'index.ignore') return true;
   try {
     return existsSync(absPath) && isIndexableFile(findRepoForPath(ctx, absPath)?.path ?? ctx.directoryPath, absPath);
+  } catch {
+    return true;
+  }
+}
+
+function watchPathNeedsRefresh(ctx: ServerContext, absPath: string): boolean {
+  const name = basename(absPath);
+  if (name === '.gitignore' || name === 'index.ignore') return true;
+  const repo = findRepoForPath(ctx, absPath);
+  if (!repo) return true;
+  if (!existsSync(absPath)) return true;
+  const filePath = relative(repo.path, absPath);
+  try {
+    return new KnowledgeIndexer().fileNeedsRefresh(ctx.projectName, repo.name, repo.path, filePath);
   } catch {
     return true;
   }
@@ -538,6 +560,24 @@ async function autoIndex(ctx: ServerContext): Promise<void> {
         if (providerReady && vectorReady && embedded) {
           ctx.indexReady = true;
           log(ctx, `[code-search-mcp] Index loaded for "${ctx.projectName}" (${stats.totalChunks} chunks, ${stats.embeddingProvider})`);
+          if (ctx.directoryPath) {
+            const freshness = new KnowledgeIndexer().checkFreshness(ctx.projectName, ctx.directoryPath);
+            if (!freshness.stale) return;
+
+            ctx.indexing.message = `Existing index is stale: ${freshness.reason}. Refreshing in background...`;
+            ctx.indexing.lastRefreshSummary = `stale: ${freshness.reason}`;
+            log(ctx, `[code-search-mcp] Existing index is stale (${freshness.reason}); reposChecked=${freshness.reposChecked}, added=${freshness.added}, modified=${freshness.modified}, deleted=${freshness.deleted}, fingerprintMismatches=${freshness.fingerprintMismatches.join(',') || 'none'}; keeping stale results available and refreshing...`);
+            if (freshness.files.length > 0) {
+              try {
+                const marked = await new KnowledgeIndexer().markFilesDirty(ctx.projectName, freshness.files, true);
+                log(ctx, `[code-search-mcp] Startup freshness marked ${marked} chunk(s) dirty across ${freshness.files.length} file(s)`);
+              } catch (err) {
+                log(ctx, '[code-search-mcp] Startup freshness dirty marking failed', err);
+              }
+            }
+            await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'startup-refresh' });
+            return;
+          }
           return;
         }
 
