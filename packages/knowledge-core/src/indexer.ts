@@ -794,7 +794,12 @@ export class KnowledgeIndexer {
     // Phase 1: Build KB (fast)
     const build = await this.buildKB(project, repos, config, opts);
     if (build.unchanged) {
-      return this.getStats(project);
+      const stats = await this.getStats(project);
+      if (stats.embeddingProvider === 'pending') {
+        opts?.onProgress?.('Index metadata is pending embedding — resuming embed phase');
+        return this.embedChunks(project, config, opts);
+      }
+      return stats;
     }
 
     // Phase 2: Embed (slow)

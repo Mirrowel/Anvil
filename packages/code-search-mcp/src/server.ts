@@ -13,7 +13,7 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import type { FSWatcher } from 'chokidar';
 
@@ -25,7 +25,7 @@ import { registerResources, handleResource } from './resources/resources.js';
 import { getKnowledgeBasePath } from '@esankhan3/anvil-knowledge-core';
 import { indexFromPath } from '@esankhan3/anvil-knowledge-core';
 import { KnowledgeIndexer } from '@esankhan3/anvil-knowledge-core';
-import { discoverRepos, isIndexableFile, ensureIndexIgnore, SKIP_DIRS } from '@esankhan3/anvil-knowledge-core';
+import { discoverRepos, ensureIndexIgnore, SKIP_DIRS } from '@esankhan3/anvil-knowledge-core';
 import { loadServerConfig, type ServerConfig } from './core/env-config.js';
 import { startHttpTransport } from './transports/http-transport.js';
 
@@ -64,7 +64,10 @@ export interface ServerContext {
   startIndexing: () => Promise<{ started: boolean; message: string }>;
   watcher: FSWatcher | null;
   pendingWatchFiles: Set<string>;
+  staleWatchFiles: Set<string>;
   watchTimer: NodeJS.Timeout | null;
+  watchDrainRunning: boolean;
+  watchFollowUpNeeded: boolean;
 }
 
 function projectNameFromPath(path: string): string {
@@ -193,7 +196,10 @@ export async function startServer(
     startIndexing: async () => startManualIndex(ctx),
     watcher: null,
     pendingWatchFiles: new Set(),
+    staleWatchFiles: new Set(),
     watchTimer: null,
+    watchDrainRunning: false,
+    watchFollowUpNeeded: false,
     indexing: {
       status: 'idle',
       phase: null,
@@ -408,14 +414,10 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
     }
     const before = ctx.pendingWatchFiles.size;
     ctx.pendingWatchFiles.add(absPath);
+    ctx.staleWatchFiles.add(absPath);
     ctx.indexing.pendingFiles = ctx.pendingWatchFiles.size;
     log(ctx, `[watcher] queued path (${ctx.indexing.pendingFiles} pending): ${absPath}`);
-    await markPendingFilesDirty(ctx);
-    if (ctx.watchTimer) clearTimeout(ctx.watchTimer);
-    if (before === 0) log(ctx, `[watcher] debounce started (${debounceMs}ms)`);
-    ctx.watchTimer = setTimeout(() => {
-      void flushWatchedChanges(ctx);
-    }, debounceMs);
+    scheduleWatchDrain(ctx, debounceMs, before === 0);
   };
 
   watcher.on('add', onChange);
@@ -426,14 +428,25 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
   log(ctx, `[code-search-mcp] File watcher enabled at ${ctx.directoryPath} (debounce ${debounceMs}ms)`);
 }
 
+function scheduleWatchDrain(ctx: ServerContext, delayMs: number = ctx.indexing.debounceMs, logDebounce: boolean = false): void {
+  if (ctx.watchTimer) clearTimeout(ctx.watchTimer);
+  if (logDebounce) log(ctx, `[watcher] debounce started (${delayMs}ms)`);
+  ctx.watchTimer = setTimeout(() => {
+    void flushWatchedChanges(ctx);
+  }, delayMs);
+}
+
 async function stopFileWatcher(ctx: ServerContext): Promise<void> {
   if (ctx.watchTimer) {
     clearTimeout(ctx.watchTimer);
     ctx.watchTimer = null;
   }
   ctx.pendingWatchFiles.clear();
+  ctx.staleWatchFiles.clear();
   ctx.indexing.pendingFiles = 0;
   ctx.indexing.watcherEnabled = false;
+  ctx.watchDrainRunning = false;
+  ctx.watchFollowUpNeeded = false;
   if (!ctx.watcher) return;
 
   const watcher = ctx.watcher;
@@ -444,24 +457,15 @@ async function stopFileWatcher(ctx: ServerContext): Promise<void> {
 function shouldIgnoreWatchPath(ctx: ServerContext, absPath: string, isDirectory: boolean): boolean {
   if (!ctx.directoryPath) return true;
   if (basename(absPath) === '.gitignore') return true;
-  if (!existsSync(absPath)) return false;
-
-  let directory = isDirectory;
-  if (!directory) {
-    try {
-      directory = statSync(absPath).isDirectory();
-    } catch {
-      return false;
-    }
-  }
-
+  const relPath = relative(ctx.directoryPath, absPath);
+  const parts = relPath.split(/[\\/]+/).filter(Boolean);
+  if (parts.some((part) => SKIP_DIRS.has(part))) return true;
   const name = basename(absPath);
-  if (directory) return SKIP_DIRS.has(name);
-  try {
-    return !isIndexableFile(findRepoForPath(ctx, absPath)?.path ?? ctx.directoryPath, absPath);
-  } catch {
-    return false;
-  }
+  if (isDirectory) return SKIP_DIRS.has(name);
+  // Keep this predicate cheap: chokidar calls it during startup discovery for
+  // many paths. Full indexability checks can invoke git/read file bytes and are
+  // deferred to actual change handling instead.
+  return false;
 }
 
 function watchPathNeedsRefresh(ctx: ServerContext, absPath: string): boolean {
@@ -481,44 +485,21 @@ function watchPathNeedsRefresh(ctx: ServerContext, absPath: string): boolean {
 
 function findRepoForPath(ctx: ServerContext, absPath: string): { name: string; path: string; language: string } | null {
   if (!ctx.directoryPath) return null;
-  try {
-    const repos = discoverRepos(ctx.directoryPath);
-    return repos
-      .filter((repo) => absPath.startsWith(repo.path))
-      .sort((a, b) => b.path.length - a.path.length)[0] ?? null;
-  } catch {
-    return null;
-  }
+  return findRepoInList(safeDiscoverRepos(ctx.directoryPath), absPath);
 }
 
-async function markPendingFilesDirty(ctx: ServerContext): Promise<void> {
-  const files = filesForRepos(ctx, [...ctx.pendingWatchFiles]);
-  if (files.length === 0) return;
+function safeDiscoverRepos(directoryPath: string): Array<{ name: string; path: string; language: string }> {
   try {
-    const marked = await new KnowledgeIndexer().markFilesDirty(ctx.projectName, files, true);
-    log(ctx, `[watcher] marked ${marked} chunk(s) dirty across ${files.length} file(s)`);
-  } catch (err) {
-    log(ctx, '[watcher] failed to mark files dirty', err);
-  }
-}
-
-function filesForRepos(ctx: ServerContext, paths: string[]): Array<{ repoName: string; filePath: string }> {
-  if (!ctx.directoryPath) return [];
-  let repos: Array<{ name: string; path: string; language: string }> = [];
-  try {
-    repos = discoverRepos(ctx.directoryPath);
+    return discoverRepos(directoryPath);
   } catch {
     return [];
   }
-  const result: Array<{ repoName: string; filePath: string }> = [];
-  for (const absPath of paths) {
-    const repo = repos
-      .filter((candidate) => absPath.startsWith(candidate.path))
-      .sort((a, b) => b.path.length - a.path.length)[0];
-    if (!repo) continue;
-    result.push({ repoName: repo.name, filePath: relative(repo.path, absPath) });
-  }
-  return result;
+}
+
+function findRepoInList(repos: Array<{ name: string; path: string; language: string }>, absPath: string): { name: string; path: string; language: string } | null {
+  return repos
+    .filter((repo) => absPath === repo.path || absPath.startsWith(`${repo.path}\\`) || absPath.startsWith(`${repo.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0] ?? null;
 }
 
 async function flushWatchedChanges(ctx: ServerContext): Promise<void> {
@@ -526,34 +507,90 @@ async function flushWatchedChanges(ctx: ServerContext): Promise<void> {
     log(ctx, '[watcher] flush skipped: no directory path');
     return;
   }
+  if (ctx.watchDrainRunning) {
+    ctx.watchFollowUpNeeded = true;
+    log(ctx, '[watcher] flush coalesced: watcher drain already running');
+    return;
+  }
   if (ctx.indexing.status === 'indexing') {
-    log(ctx, `[watcher] flush delayed: index already running (${ctx.indexing.phase ?? 'unknown phase'})`);
-    if (ctx.watchTimer) clearTimeout(ctx.watchTimer);
-    ctx.watchTimer = setTimeout(() => {
-      void flushWatchedChanges(ctx);
-    }, ctx.indexing.debounceMs);
+    ctx.watchFollowUpNeeded = true;
+    log(ctx, `[watcher] flush queued: index already running (${ctx.indexing.phase ?? 'unknown phase'})`);
     return;
   }
   if (!ctx.indexReady) {
     log(ctx, '[watcher] flush skipped: index is not initialized');
     return;
   }
-  const count = ctx.pendingWatchFiles.size;
-  if (count === 0) {
-    log(ctx, '[watcher] flush skipped: no pending files');
-    return;
-  }
-  const pending = [...ctx.pendingWatchFiles];
-  ctx.pendingWatchFiles.clear();
-  ctx.indexing.pendingFiles = 0;
+  ctx.watchDrainRunning = true;
+  ctx.watchTimer = null;
   try {
-    log(ctx, `[watcher] flushing ${count} path(s): ${pending.slice(0, 12).join(', ')}${pending.length > 12 ? `, ... ${pending.length - 12} more` : ''}`);
-    await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'watch-reindex' });
-    ctx.indexing.lastRefresh = new Date().toISOString();
-    ctx.indexing.lastRefreshSummary = `${count} watched path(s)`;
-    log(ctx, `[watcher] refresh complete for ${count} path(s)`);
+    while (true) {
+      const pending = [...ctx.pendingWatchFiles];
+      const count = pending.length;
+      const followUp = ctx.watchFollowUpNeeded;
+      ctx.pendingWatchFiles.clear();
+      ctx.watchFollowUpNeeded = false;
+      ctx.indexing.pendingFiles = 0;
+
+      if (count === 0 && !followUp) {
+        log(ctx, '[watcher] flush skipped: no pending files');
+        return;
+      }
+
+      if (ctx.indexing.status === 'indexing') {
+        ctx.watchFollowUpNeeded = true;
+        log(ctx, `[watcher] drain paused: index already running (${ctx.indexing.phase ?? 'unknown phase'})`);
+        return;
+      }
+
+      if (count > 0) {
+        log(ctx, `[watcher] flushing ${count} path(s): ${pending.slice(0, 12).join(', ')}${pending.length > 12 ? `, ... ${pending.length - 12} more` : ''}`);
+      } else {
+        log(ctx, '[watcher] running follow-up refresh after concurrent changes');
+      }
+
+      await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'watch-reindex' });
+      ctx.indexing.lastRefresh = new Date().toISOString();
+      ctx.indexing.lastRefreshSummary = count > 0 ? `${count} watched path(s)` : 'follow-up refresh';
+      removeFreshWatchFiles(ctx, pending);
+      log(ctx, `[watcher] refresh complete for ${count} path(s)`);
+
+      if (ctx.pendingWatchFiles.size === 0 && !ctx.watchFollowUpNeeded) return;
+      log(ctx, `[watcher] continuing drain: ${ctx.pendingWatchFiles.size} pending path(s), followUp=${ctx.watchFollowUpNeeded}`);
+    }
   } catch (err) {
     log(ctx, '[watcher] reindex failed', err);
+  } finally {
+    ctx.watchDrainRunning = false;
+    ctx.indexing.pendingFiles = ctx.pendingWatchFiles.size;
+    if (ctx.pendingWatchFiles.size > 0 || ctx.watchFollowUpNeeded) {
+      if (ctx.watchTimer) clearTimeout(ctx.watchTimer);
+      ctx.watchTimer = setTimeout(() => {
+        void flushWatchedChanges(ctx);
+      }, ctx.indexing.debounceMs);
+      log(ctx, `[watcher] rescheduled drain (${ctx.indexing.debounceMs}ms): ${ctx.pendingWatchFiles.size} pending path(s), followUp=${ctx.watchFollowUpNeeded}`);
+    }
+  }
+}
+
+function removeFreshWatchFiles(ctx: ServerContext, paths: string[]): void {
+  if (!ctx.directoryPath || paths.length === 0) return;
+  const repos = safeDiscoverRepos(ctx.directoryPath);
+  const indexer = new KnowledgeIndexer();
+  for (const absPath of paths) {
+    const repo = findRepoInList(repos, absPath);
+    if (!repo) {
+      ctx.staleWatchFiles.delete(absPath);
+      continue;
+    }
+    const filePath = relative(repo.path, absPath);
+    try {
+      if (!indexer.fileNeedsRefresh(ctx.projectName, repo.name, repo.path, filePath)) {
+        ctx.staleWatchFiles.delete(absPath);
+      }
+    } catch {
+      // Keep the in-memory stale marker if freshness cannot be proven.
+    }
   }
 }
 
@@ -614,6 +651,10 @@ async function trackedIndex(
     pushHistory(ctx, 'complete', ctx.indexing.message);
     log(ctx, `[${label}] ${ctx.indexing.message}`);
     await startFileWatcher(ctx);
+    if (!ctx.watchDrainRunning && (ctx.pendingWatchFiles.size > 0 || ctx.watchFollowUpNeeded)) {
+      log(ctx, `[${label}] watcher has ${ctx.pendingWatchFiles.size} pending path(s), scheduling follow-up drain`);
+      scheduleWatchDrain(ctx, 0);
+    }
 
     return stats;
   } catch (err) {
@@ -676,17 +717,25 @@ async function initializeExistingIndex(ctx: ServerContext): Promise<void> {
             ctx.indexing.message = `Existing index is stale: ${freshness.reason}. Refreshing in background...`;
             ctx.indexing.lastRefreshSummary = `stale: ${freshness.reason}`;
             log(ctx, `[code-search-mcp] Existing index is stale (${freshness.reason}); reposChecked=${freshness.reposChecked}, added=${freshness.added}, modified=${freshness.modified}, deleted=${freshness.deleted}, fingerprintMismatches=${freshness.fingerprintMismatches.join(',') || 'none'}; keeping stale results available and refreshing...`);
-            if (freshness.files.length > 0) {
-              try {
-                const marked = await new KnowledgeIndexer().markFilesDirty(ctx.projectName, freshness.files, true);
-                log(ctx, `[code-search-mcp] Startup freshness marked ${marked} chunk(s) dirty across ${freshness.files.length} file(s)`);
-              } catch (err) {
-                log(ctx, '[code-search-mcp] Startup freshness dirty marking failed', err);
-              }
-            }
             await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'startup-refresh' });
             return;
           }
+          return;
+        }
+
+        if (ctx.directoryPath && vectorReady && stats.embeddingProvider === 'pending') {
+          ctx.indexReady = true;
+          log(ctx, `[code-search-mcp] Existing index for "${ctx.projectName}" has pending embeddings; attempting automatic recovery...`);
+          await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'startup-recovery' });
+          return;
+        }
+
+        if (ctx.directoryPath && hasLanceDB && hasGraph) {
+          log(ctx,
+            `[code-search-mcp] Existing index for "${ctx.projectName}" is incomplete ` +
+            `(chunks=${stats.totalChunks}, provider=${stats.embeddingProvider || 'unknown'}). Attempting repair refresh...`,
+          );
+          await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'startup-repair' });
           return;
         }
 

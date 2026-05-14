@@ -99,7 +99,8 @@ export async function handleSearchTool(
     }).join('\n\n');
 
     const warning = result.graphContext.startsWith('Warning:') ? `${result.graphContext.split('\n\n')[0]}\n\n` : '';
-    return { content: [{ type: 'text', text: `${warning}Found ${result.chunks.length} results for "${query}" (${result.totalTokens} tokens):\n\n${text}` }] };
+    const watcherWarning = ctx.staleWatchFiles.size > 0 ? `Warning: ${ctx.staleWatchFiles.size} watched file(s) changed and may not be indexed yet.\n\n` : '';
+    return { content: [{ type: 'text', text: `${warning}${watcherWarning}Found ${result.chunks.length} results for "${query}" (${result.totalTokens} tokens):\n\n${text}` }] };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { content: [{ type: 'text', text: `Search failed: ${msg}` }] };

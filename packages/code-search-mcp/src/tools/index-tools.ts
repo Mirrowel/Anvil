@@ -59,6 +59,8 @@ export async function handleIndexTool(
         `- **Log file:** ${ctx.logFile ?? 'n/a'}`,
         `- **Watcher:** ${ctx.indexing.watcherEnabled ? `enabled (${ctx.indexing.debounceMs}ms debounce)` : 'disabled'}`,
         `- **Pending watched files:** ${ctx.indexing.pendingFiles}`,
+        `- **Possibly stale watched files:** ${ctx.staleWatchFiles.size}`,
+        `- **Watcher drain:** ${ctx.watchDrainRunning ? 'running' : ctx.watchFollowUpNeeded ? 'follow-up queued' : 'idle'}`,
         `- **Last watched refresh:** ${ctx.indexing.lastRefresh ?? 'never'}`,
         `- **Last watched summary:** ${ctx.indexing.lastRefreshSummary ?? 'n/a'}`,
         `- **Next step:** ${manualHint}`,
