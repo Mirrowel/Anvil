@@ -58,6 +58,21 @@ The report compares source-like files found in the tree with the files that
 would be indexed, including `.gitignore` exclusions and `index.ignore`
 overrides.
 
+## Freshness
+
+Local MCP mode watches files by default (`CODE_SEARCH_WATCH=1`). Changed files
+are marked dirty immediately so search results remain available but include a
+possible-stale warning. After `CODE_SEARCH_WATCH_DEBOUNCE` (`10s` default), the
+server refreshes the index.
+
+Refresh is file-hash based, not commit based, so unstaged, staged, untracked,
+and deleted files are detected. Changed files are re-chunked locally, but only
+new or changed chunks are sent to the embedding provider; unchanged chunks from
+the same file reuse their existing vectors.
+
+Keep `CODE_SEARCH_REINDEX_INTERVAL=1m` or similar as a polling fallback if you
+want periodic verification in addition to the watcher.
+
 Useful environment variables:
 
 - `CODE_SEARCH_DATA_DIR` - where indexes are stored.

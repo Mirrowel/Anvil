@@ -12,7 +12,8 @@ import {
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
+import type { FSWatcher } from 'chokidar';
 
 import { registerSearchTools, handleSearchTool } from './tools/search.js';
 import { registerGraphTools, handleGraphTool } from './tools/graph.js';
@@ -22,6 +23,7 @@ import { registerResources, handleResource } from './resources/resources';
 import { getKnowledgeBasePath } from '@esankhan3/anvil-knowledge-core';
 import { indexFromPath } from '@esankhan3/anvil-knowledge-core';
 import { KnowledgeIndexer } from '@esankhan3/anvil-knowledge-core';
+import { discoverRepos, isIndexableFile } from '@esankhan3/anvil-knowledge-core';
 import { loadServerConfig, type ServerConfig } from './core/env-config.js';
 import { startHttpTransport } from './transports/http-transport.js';
 
@@ -40,6 +42,11 @@ export interface IndexingState {
     type: 'start' | 'progress' | 'complete' | 'error';
     message: string;
   }>;
+  watcherEnabled: boolean;
+  debounceMs: number;
+  pendingFiles: number;
+  lastRefresh: string | null;
+  lastRefreshSummary: string | null;
 }
 
 export interface ServerContext {
@@ -50,6 +57,9 @@ export interface ServerContext {
   indexing: IndexingState;
   logFile: string | null;
   autoIndexTask: Promise<void> | null;
+  watcher: FSWatcher | null;
+  pendingWatchFiles: Set<string>;
+  watchTimer: NodeJS.Timeout | null;
 }
 
 function projectNameFromPath(path: string): string {
@@ -142,6 +152,9 @@ export async function startServer(
     startedAt: Date.now(),
     logFile: initLogFile(projectName),
     autoIndexTask: null,
+    watcher: null,
+    pendingWatchFiles: new Set(),
+    watchTimer: null,
     indexing: {
       status: 'idle',
       phase: null,
@@ -152,6 +165,11 @@ export async function startServer(
       lastSuccess: null,
       lastDurationMs: 0,
       history: [],
+      watcherEnabled: false,
+      debounceMs: 10_000,
+      pendingFiles: 0,
+      lastRefresh: null,
+      lastRefreshSummary: null,
     },
   };
 
@@ -170,6 +188,8 @@ export async function startServer(
   ctx.autoIndexTask = autoIndex(ctx).catch((err) => {
     log(ctx, `[code-search-mcp] Background auto-index task failed`, err);
   });
+
+  await startFileWatcher(ctx);
 
   // --- Start transport ---
   if (config.transport === 'stdio') {
@@ -285,6 +305,154 @@ function parseReindexInterval(): number {
   return unit === 'h' ? value * 60 * 60_000 : value * 60_000;
 }
 
+function parseDurationEnv(name: string, fallbackMs: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallbackMs;
+  const match = raw.match(/^(\d+)(ms|s|m)?$/);
+  if (!match) {
+    console.error(`[code-search-mcp] Invalid ${name}="${raw}" — use "500ms", "10s", or "1m". Falling back to ${fallbackMs}ms.`);
+    return fallbackMs;
+  }
+  const value = parseInt(match[1], 10);
+  const unit = match[2] ?? 'ms';
+  if (unit === 'm') return value * 60_000;
+  if (unit === 's') return value * 1000;
+  return value;
+}
+
+async function startFileWatcher(ctx: ServerContext): Promise<void> {
+  if (!ctx.directoryPath) {
+    log(ctx, '[watcher] disabled: no directory path configured');
+    return;
+  }
+  const enabled = (process.env.CODE_SEARCH_WATCH ?? '1').trim() !== '0';
+  if (!enabled) {
+    log(ctx, '[watcher] disabled by CODE_SEARCH_WATCH=0');
+    return;
+  }
+  const debounceMs = parseDurationEnv('CODE_SEARCH_WATCH_DEBOUNCE', 10_000);
+  ctx.indexing.watcherEnabled = true;
+  ctx.indexing.debounceMs = debounceMs;
+
+  const { watch } = await import('chokidar');
+  const watcher = watch(ctx.directoryPath, {
+    ignoreInitial: true,
+    ignored: /(^|[\\/])(\.git|node_modules|dist|build|\.anvil|\.opencode)([\\/]|$)/,
+    awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 },
+  });
+  ctx.watcher = watcher;
+
+  const onChange = async (path: string) => {
+    const absPath = resolve(path);
+    if (!isPotentialIndexPath(ctx, absPath)) {
+      log(ctx, `[watcher] ignored non-indexable path: ${absPath}`);
+      return;
+    }
+    const before = ctx.pendingWatchFiles.size;
+    ctx.pendingWatchFiles.add(absPath);
+    ctx.indexing.pendingFiles = ctx.pendingWatchFiles.size;
+    log(ctx, `[watcher] queued path (${ctx.indexing.pendingFiles} pending): ${absPath}`);
+    await markPendingFilesDirty(ctx);
+    if (ctx.watchTimer) clearTimeout(ctx.watchTimer);
+    if (before === 0) log(ctx, `[watcher] debounce started (${debounceMs}ms)`);
+    ctx.watchTimer = setTimeout(() => {
+      void flushWatchedChanges(ctx);
+    }, debounceMs);
+  };
+
+  watcher.on('add', onChange);
+  watcher.on('change', onChange);
+  watcher.on('unlink', onChange);
+  watcher.on('ready', () => log(ctx, `[watcher] ready for ${ctx.directoryPath}`));
+  watcher.on('error', (err) => log(ctx, '[watcher] error', err));
+  log(ctx, `[code-search-mcp] File watcher enabled at ${ctx.directoryPath} (debounce ${debounceMs}ms)`);
+}
+
+function isPotentialIndexPath(ctx: ServerContext, absPath: string): boolean {
+  if (!ctx.directoryPath) return false;
+  const name = basename(absPath);
+  if (name === '.gitignore' || name === 'index.ignore') return true;
+  try {
+    return existsSync(absPath) && isIndexableFile(findRepoForPath(ctx, absPath)?.path ?? ctx.directoryPath, absPath);
+  } catch {
+    return true;
+  }
+}
+
+function findRepoForPath(ctx: ServerContext, absPath: string): { name: string; path: string; language: string } | null {
+  if (!ctx.directoryPath) return null;
+  try {
+    const repos = discoverRepos(ctx.directoryPath);
+    return repos
+      .filter((repo) => absPath.startsWith(repo.path))
+      .sort((a, b) => b.path.length - a.path.length)[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function markPendingFilesDirty(ctx: ServerContext): Promise<void> {
+  const files = filesForRepos(ctx, [...ctx.pendingWatchFiles]);
+  if (files.length === 0) return;
+  try {
+    const marked = await new KnowledgeIndexer().markFilesDirty(ctx.projectName, files, true);
+    log(ctx, `[watcher] marked ${marked} chunk(s) dirty across ${files.length} file(s)`);
+  } catch (err) {
+    log(ctx, '[watcher] failed to mark files dirty', err);
+  }
+}
+
+function filesForRepos(ctx: ServerContext, paths: string[]): Array<{ repoName: string; filePath: string }> {
+  if (!ctx.directoryPath) return [];
+  let repos: Array<{ name: string; path: string; language: string }> = [];
+  try {
+    repos = discoverRepos(ctx.directoryPath);
+  } catch {
+    return [];
+  }
+  const result: Array<{ repoName: string; filePath: string }> = [];
+  for (const absPath of paths) {
+    const repo = repos
+      .filter((candidate) => absPath.startsWith(candidate.path))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    if (!repo) continue;
+    result.push({ repoName: repo.name, filePath: relative(repo.path, absPath) });
+  }
+  return result;
+}
+
+async function flushWatchedChanges(ctx: ServerContext): Promise<void> {
+  if (!ctx.directoryPath) {
+    log(ctx, '[watcher] flush skipped: no directory path');
+    return;
+  }
+  if (ctx.indexing.status === 'indexing') {
+    log(ctx, `[watcher] flush delayed: index already running (${ctx.indexing.phase ?? 'unknown phase'})`);
+    if (ctx.watchTimer) clearTimeout(ctx.watchTimer);
+    ctx.watchTimer = setTimeout(() => {
+      void flushWatchedChanges(ctx);
+    }, ctx.indexing.debounceMs);
+    return;
+  }
+  const count = ctx.pendingWatchFiles.size;
+  if (count === 0) {
+    log(ctx, '[watcher] flush skipped: no pending files');
+    return;
+  }
+  const pending = [...ctx.pendingWatchFiles];
+  ctx.pendingWatchFiles.clear();
+  ctx.indexing.pendingFiles = 0;
+  try {
+    log(ctx, `[watcher] flushing ${count} path(s): ${pending.slice(0, 12).join(', ')}${pending.length > 12 ? `, ... ${pending.length - 12} more` : ''}`);
+    await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'watch-reindex' });
+    ctx.indexing.lastRefresh = new Date().toISOString();
+    ctx.indexing.lastRefreshSummary = `${count} watched path(s)`;
+    log(ctx, `[watcher] refresh complete for ${count} path(s)`);
+  } catch (err) {
+    log(ctx, '[watcher] reindex failed', err);
+  }
+}
+
 const MAX_HISTORY = 50;
 
 function pushHistory(ctx: ServerContext, type: 'start' | 'progress' | 'complete' | 'error', message: string): void {
@@ -323,6 +491,12 @@ async function trackedIndex(
         ctx.indexing.phase = p.phase;
         ctx.indexing.percent = p.percent;
         ctx.indexing.message = p.message;
+        const details = [
+          p.reposProcessed !== undefined && p.reposTotal !== undefined ? `repos ${p.reposProcessed}/${p.reposTotal}` : null,
+          p.chunksProcessed !== undefined && p.chunksTotal !== undefined ? `chunks ${p.chunksProcessed}/${p.chunksTotal}` : null,
+          p.etaSeconds !== undefined ? `eta ${p.etaSeconds}s` : null,
+        ].filter(Boolean).join(', ');
+        log(ctx, `[${label}] progress ${p.percent}% phase=${p.phase}${details ? ` (${details})` : ''}: ${p.message}`);
       },
     });
 

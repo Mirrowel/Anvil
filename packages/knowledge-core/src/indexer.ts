@@ -1,9 +1,11 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { join, basename } from 'node:path';
+import { join, basename, relative } from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { chunkRepo, chunkChangedFiles } from '@esankhan3/anvil-knowledge-core';
 import type { FileIndexEntry } from '@esankhan3/anvil-knowledge-core';
+import { walkDir } from '@esankhan3/anvil-knowledge-core';
 import { buildAstGraph, generateGraphReport, incrementalGraphUpdate } from '@esankhan3/anvil-knowledge-core';
 import { getAllChanges, getChangedFilesList, getDeletedFilesList } from '@esankhan3/anvil-knowledge-core';
 import type { GitDiff } from '@esankhan3/anvil-knowledge-core';
@@ -22,7 +24,7 @@ import { computeStructuralHashes, deduplicateByStructure } from '@esankhan3/anvi
 import { createQueryRouter } from '@esankhan3/anvil-knowledge-core';
 
 // ---------------------------------------------------------------------------
-// SHA-based staleness detection
+// File-based staleness detection
 // ---------------------------------------------------------------------------
 
 interface RepoIndexMeta {
@@ -118,15 +120,23 @@ export class KnowledgeIndexer {
 
     for (const repo of repos) {
       if (opts?.force) {
+        log(`Planning ${repo.name}: force=true -> full rebuild`);
         reposToIndex.push(repo);
         continue;
       }
-      const currentSha = getRepoSha(repo.path);
       const meta = readRepoIndexMeta(basePath, repo.name);
-      if (meta && currentSha && meta.lastIndexedSha === currentSha) {
+      const diff = detectFileChanges(repo.path, meta?.files);
+      if (meta && !diff.fallbackToFull && (diff.added.length + diff.modified.length + diff.deleted.length) === 0) {
         skippedRepos.push(repo.name);
-        log(`Skipping ${repo.name} — unchanged (${currentSha.slice(0, 7)})`);
+        log(`Skipping ${repo.name} — unchanged`);
       } else {
+        if (!meta) {
+          log(`Planning ${repo.name}: no index metadata -> full build`);
+        } else if (diff.fallbackToFull) {
+          log(`Planning ${repo.name}: file metadata unavailable -> full scan`);
+        } else {
+          log(`Planning ${repo.name}: ${diff.added.length} added, ${diff.modified.length} modified, ${diff.deleted.length} deleted`);
+        }
         reposToIndex.push(repo);
       }
     }
@@ -172,25 +182,28 @@ export class KnowledgeIndexer {
     for (const repo of reposToIndex) {
       const meta = opts?.force ? null : readRepoIndexMeta(basePath, repo.name);
 
-      // Use git diff for incremental change detection (O(1) via git's Merkle DAG)
-      const diff = opts?.force ? null : (meta?.lastIndexedSha ? getAllChanges(repo.path, meta.lastIndexedSha) : null);
+      // Use file-level freshness so unstaged/untracked changes are indexed too.
+      const diff = opts?.force ? null : detectFileChanges(repo.path, meta?.files);
       const useIncremental = diff && !diff.fallbackToFull && (diff.added.length + diff.modified.length + diff.deleted.length) > 0;
 
       let result;
       if (useIncremental) {
         const changedCount = diff.added.length + diff.modified.length;
         const deletedCount = diff.deleted.length;
-        log(`  ${repo.name}: git diff → ${changedCount} changed, ${deletedCount} deleted (incremental)`);
+        log(`  ${repo.name}: file diff → ${changedCount} changed, ${deletedCount} deleted (incremental)`);
         result = await chunkChangedFiles(repo.path, repo.name, project, config.chunking, diff);
+        result.fileIndex = mergeFileIndex(meta?.files, result.fileIndex, diff.deleted);
         repoDiffs.set(repo.name, diff);
       } else {
         // Full re-chunk (first index or force)
+        log(`  ${repo.name}: full chunk scan (cached files: ${Object.keys(meta?.files ?? {}).length})`);
         result = await chunkRepo(repo.path, repo.name, project, config.chunking, meta?.files ?? undefined);
       }
 
       allChunks.push(...result.chunks);
       repoChunkResults.set(repo.name, result);
       const totalChunkCount = Object.values(result.fileIndex).reduce((sum: number, f: any) => sum + f.chunkCount, 0);
+      log(`  ${repo.name}: chunk result -> ${result.changedFiles.length} changed files, ${result.deletedFiles.length} deleted files, ${result.chunks.length} chunks needing embedding, ${totalChunkCount} indexed chunks total`);
       repoStats.push({ name: repo.name, chunkCount: totalChunkCount, language: repo.language });
     }
     for (const name of skippedRepos) {
@@ -325,6 +338,7 @@ export class KnowledgeIndexer {
     }
     const deletedPath = join(basePath, 'deleted_files.json');
     writeFileSync(deletedPath, JSON.stringify(allDeletedFiles));
+    log(`Saved deleted file manifest: ${allDeletedFiles.length} file(s)`);
 
     // 12. Save per-repo metadata
     for (const repo of reposToIndex) {
@@ -339,6 +353,7 @@ export class KnowledgeIndexer {
           embeddingProvider: 'pending',
           files: result?.fileIndex,
         });
+        log(`Saved index metadata for ${repo.name}: ${totalChunkCount} chunks across ${Object.keys(result?.fileIndex ?? {}).length} files at ${sha.slice(0, 7)}`);
       }
     }
 
@@ -386,21 +401,53 @@ export class KnowledgeIndexer {
     const vectorStore = new VectorStore(dbPath);
     await vectorStore.init();
 
-    // Determine which chunks actually need embedding by checking existing IDs
+    const deletedFiles = this.getDeletedFiles(basePath);
+    const changedFiles = this.getChangedFilesByRepo(basePath);
+    const changedFileCount = [...changedFiles.values()].reduce((sum, files) => sum + files.length, 0);
+    log(`Embedding plan input: ${chunks.length} chunk(s), ${changedFileCount} changed file(s), ${deletedFiles.length} deleted file(s)`);
+    const reusableByKey = new Map<string, CodeChunk & { embedding: number[] }>();
+    const changedFileKeys = new Set<string>();
+
+    for (const [repoName, filePaths] of changedFiles) {
+      for (const filePath of filePaths) {
+        changedFileKeys.add(`${repoName}\0${filePath}`);
+        for (const existing of await vectorStore.getChunksByFile(repoName, filePath)) {
+          if (!existing.embedding || !existing.stableKey || !existing.embedHash) continue;
+          reusableByKey.set(`${repoName}\0${filePath}\0${existing.stableKey}\0${existing.embedHash}`, existing as CodeChunk & { embedding: number[] });
+        }
+      }
+    }
+    log(`Loaded ${reusableByKey.size} reusable vector candidate(s) from changed files`);
+
     const existingIds = new Set<string>();
     try {
       const stats = await vectorStore.getStats();
       if (stats && stats.rowCount > 0) {
-        // Load existing chunk IDs from the store
         const existingChunks = await vectorStore.getChunkIds(project);
         for (const id of existingChunks) existingIds.add(id);
       }
     } catch { /* first run — no existing data */ }
 
-    const newChunks = chunks.filter((c) => !existingIds.has(c.id));
-    const deletedFiles = this.getDeletedFiles(basePath);
+    const reusedChunks: Array<CodeChunk & { embedding: number[] }> = [];
+    const newChunks: CodeChunk[] = [];
 
-    if (newChunks.length === 0 && deletedFiles.length === 0) {
+    for (const chunk of chunks) {
+      const fileKey = `${chunk.repoName}\0${chunk.filePath}`;
+      if (!changedFileKeys.has(fileKey)) {
+        if (!existingIds.has(chunk.id)) newChunks.push(chunk);
+        continue;
+      }
+      const reuseKey = `${chunk.repoName}\0${chunk.filePath}\0${chunk.stableKey ?? ''}\0${chunk.embedHash ?? ''}`;
+      const reusable = reusableByKey.get(reuseKey);
+      if (reusable) {
+        reusedChunks.push({ ...chunk, embedding: reusable.embedding, dirty: false });
+      } else {
+        newChunks.push({ ...chunk, dirty: false });
+      }
+    }
+    log(`Embedding diff: ${newChunks.length} chunk(s) need embedding, ${reusedChunks.length} chunk(s) reuse existing vectors`);
+
+    if (newChunks.length === 0 && reusedChunks.length === 0 && deletedFiles.length === 0) {
       log('All chunks already embedded — nothing to do.');
       report({ phase: 'done', message: 'All chunks already embedded', percent: 100, etaSeconds: 0 });
       const repoNames = [...new Set(chunks.map((c) => c.repoName))];
@@ -417,17 +464,21 @@ export class KnowledgeIndexer {
       };
     }
 
-    // Delete chunks for files that were removed — use file path matching, not chunk IDs
-    if (deletedFiles.length > 0) {
+    // Delete chunks for files that were removed or changed; changed files are re-added below.
+    const filesToDelete = [
+      ...deletedFiles,
+      ...[...changedFiles.entries()].flatMap(([repoName, filePaths]) => filePaths.map((filePath) => ({ repoName, filePath }))),
+    ];
+    if (filesToDelete.length > 0) {
       // Group by repo for efficient deletion
       const byRepo = new Map<string, string[]>();
-      for (const d of deletedFiles) {
+      for (const d of filesToDelete) {
         const list = byRepo.get(d.repoName) ?? [];
         list.push(d.filePath);
         byRepo.set(d.repoName, list);
       }
       for (const [repoName, filePaths] of byRepo) {
-        log(`Removing chunks for ${filePaths.length} deleted files from ${repoName}...`);
+        log(`Removing chunks for ${filePaths.length} changed/deleted files from ${repoName}: ${filePaths.slice(0, 8).join(', ')}${filePaths.length > 8 ? `, ... ${filePaths.length - 8} more` : ''}`);
         await vectorStore.deleteFileChunks(project, repoName, filePaths);
       }
     }
@@ -444,7 +495,7 @@ export class KnowledgeIndexer {
       ? envBatchDelay
       : isOllama ? 50 : 100;
 
-    log(`Embedding ${newChunks.length} new chunks with ${embedder.name} (${chunks.length - newChunks.length} cached, batch size: ${batchSize})...`);
+    log(`Embedding ${newChunks.length} new chunks with ${embedder.name} (${reusedChunks.length} reused from changed files, ${chunks.length - newChunks.length - reusedChunks.length} cached/unchanged, batch size: ${batchSize}, delay: ${batchDelay}ms)...`);
 
     const texts = newChunks.map((c) => c.contextualizedContent);
     const embeddings: number[][] = [];
@@ -484,10 +535,11 @@ export class KnowledgeIndexer {
 
     // Add only new chunks to LanceDB (existing ones are preserved)
     report({ phase: 'storing', message: 'Saving new chunks to vector database...', percent: 92, etaSeconds: -1 });
-    if (embeddedChunks.length > 0) {
-      await vectorStore.addChunks(embeddedChunks);
+    const rowsToStore = [...reusedChunks, ...embeddedChunks];
+    if (rowsToStore.length > 0) {
+      await vectorStore.addChunks(rowsToStore);
     }
-    log(`Stored ${embeddedChunks.length} new chunks in LanceDB (${deletedFiles.length} removed)`);
+    log(`Stored ${embeddedChunks.length} new chunks and reused ${reusedChunks.length} chunks in LanceDB (${deletedFiles.length} removed)`);
 
     // Update metadata
     const repoNames = [...new Set(chunks.map((c) => c.repoName))];
@@ -528,6 +580,31 @@ export class KnowledgeIndexer {
     } catch {
       return [];
     }
+  }
+
+  private getChangedFilesByRepo(basePath: string): Map<string, string[]> {
+    const changed = new Map<string, string[]>();
+    const chunksPath = join(basePath, 'chunks.json');
+    if (!existsSync(chunksPath)) return changed;
+    try {
+      const chunks = JSON.parse(readFileSync(chunksPath, 'utf-8')) as CodeChunk[];
+      for (const chunk of chunks) {
+        const list = changed.get(chunk.repoName) ?? [];
+        if (!list.includes(chunk.filePath)) list.push(chunk.filePath);
+        changed.set(chunk.repoName, list);
+      }
+    } catch {
+      return changed;
+    }
+    return changed;
+  }
+
+  async markFilesDirty(project: string, files: Array<{ repoName: string; filePath: string }>, dirty: boolean = true): Promise<number> {
+    const basePath = getKnowledgeBasePath(project);
+    const dbPath = join(basePath, 'lancedb');
+    const vectorStore = new VectorStore(dbPath);
+    await vectorStore.init();
+    return vectorStore.markFilesDirty(project, files, dirty);
   }
 
   // ---------------------------------------------------------------------------
@@ -677,6 +754,60 @@ export async function buildKBFromPath(
   log(`Discovered ${repos.length} repos`);
   const indexer = new KnowledgeIndexer();
   return indexer.buildKB(projectName, repos, loadKnowledgeConfig(projectName), opts);
+}
+
+function hashFile(path: string): string | null {
+  try {
+    return createHash('sha256').update(readFileSync(path, 'utf-8')).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+function detectFileChanges(repoPath: string, cachedFiles?: Record<string, FileIndexEntry>): GitDiff {
+  if (!cachedFiles) return { added: [], modified: [], deleted: [], renamed: [], fallbackToFull: true };
+  const files: string[] = [];
+  walkDir(repoPath, files);
+  const current = new Set(files.map((file) => relative(repoPath, file)));
+  const added: string[] = [];
+  const modified: string[] = [];
+  const deleted: string[] = [];
+
+  for (const file of files) {
+    const relPath = relative(repoPath, file);
+    const cached = cachedFiles[relPath];
+    if (!cached) {
+      added.push(relPath);
+      continue;
+    }
+    let stat;
+    try {
+      stat = statSync(file);
+    } catch {
+      deleted.push(relPath);
+      continue;
+    }
+    if (cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) continue;
+    const contentHash = hashFile(file);
+    if (!contentHash || cached.contentHash !== contentHash) modified.push(relPath);
+  }
+
+  for (const relPath of Object.keys(cachedFiles)) {
+    if (!current.has(relPath)) deleted.push(relPath);
+  }
+
+  return { added, modified, deleted, renamed: [], fallbackToFull: false };
+}
+
+function mergeFileIndex(
+  previous: Record<string, FileIndexEntry> | undefined,
+  changed: Record<string, FileIndexEntry>,
+  deleted: string[],
+): Record<string, FileIndexEntry> {
+  const merged: Record<string, FileIndexEntry> = { ...(previous ?? {}) };
+  for (const relPath of deleted) delete merged[relPath];
+  for (const [relPath, entry] of Object.entries(changed)) merged[relPath] = entry;
+  return merged;
 }
 
 /**

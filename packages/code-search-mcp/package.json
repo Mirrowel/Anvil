@@ -20,7 +20,8 @@
   "dependencies": {
     "@esankhan3/anvil-agent-core": "^0.1.0",
     "@esankhan3/anvil-knowledge-core": "^0.1.0",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "chokidar": "^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.2"

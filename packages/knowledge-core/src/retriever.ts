@@ -127,11 +127,11 @@ export class HybridRetriever {
     // Single-source shortcuts — no fusion needed
     if (mode === 'vector') {
       const selected = packWithinBudget(vectorResults, maxTokens, maxChunks);
-      return { chunks: selected, graphContext: '', totalTokens: sumTokens(selected), query };
+      return { chunks: selected, graphContext: dirtyContext(selected), totalTokens: sumTokens(selected), query };
     }
     if (mode === 'bm25') {
       const selected = packWithinBudget(bm25Results, maxTokens, maxChunks);
-      return { chunks: selected, graphContext: '', totalTokens: sumTokens(selected), query };
+      return { chunks: selected, graphContext: dirtyContext(selected), totalTokens: sumTokens(selected), query };
     }
 
     // ---------------------------------------------------------------
@@ -207,7 +207,9 @@ export class HybridRetriever {
     const selected = packWithinBudget(finalChunks, maxTokens, maxChunks);
 
     // Graph context (architecture summary for LLM prompt)
-    const graphContext = useGraph && this.graph ? (this.graph.exportForPrompt(2000) ?? '') : '';
+    const baseGraphContext = useGraph && this.graph ? (this.graph.exportForPrompt(2000) ?? '') : '';
+    const staleContext = dirtyContext(selected);
+    const graphContext = [staleContext, baseGraphContext].filter(Boolean).join('\n\n');
 
     return {
       chunks: selected,
@@ -363,4 +365,10 @@ function packWithinBudget(chunks: ScoredChunk[], maxTokens: number, maxChunks?: 
 
 function sumTokens(chunks: ScoredChunk[]): number {
   return chunks.reduce((sum, sc) => sum + sc.chunk.tokens, 0);
+}
+
+function dirtyContext(chunks: ScoredChunk[]): string {
+  const dirtyFiles = [...new Set(chunks.filter((sc) => sc.chunk.dirty).map((sc) => `${sc.chunk.repoName}/${sc.chunk.filePath}`))];
+  if (dirtyFiles.length === 0) return '';
+  return `Warning: Some retrieved chunks may be stale because their files changed and re-indexing is pending: ${dirtyFiles.join(', ')}`;
 }

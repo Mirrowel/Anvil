@@ -17,6 +17,10 @@ export interface CodeChunk {
   imports: string[];             // imported symbols
   exports: string[];             // exported symbols
   embedding?: number[];          // vector (populated during indexing)
+  stableKey?: string;            // semantic identity within a file, stable across line shifts
+  contentHash?: string;          // hash of raw chunk content
+  embedHash?: string;            // hash of contextualizedContent (embedding input)
+  dirty?: boolean;               // file changed since this row was embedded; result may be stale
 }
 
 // Cross-repo relationship detected from code analysis

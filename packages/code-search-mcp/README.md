@@ -72,6 +72,13 @@ npm run index:file-report -- /path/to/repos
 Use the report to see the raw source tree, the effective index file
 set, `.gitignore` exclusions, and `index.ignore` overrides.
 
+Local mode also starts a debounced file watcher by default. Set
+`CODE_SEARCH_WATCH=0` to disable it or `CODE_SEARCH_WATCH_DEBOUNCE=10s`
+to tune the quiet period after edits. During the debounce window, old
+results remain searchable but are marked as possibly stale when returned.
+After the debounce, only changed/new chunks are embedded; unchanged
+chunks from edited files reuse their stored vectors.
+
 ### Serve
 ```sh
 code-search-mcp --serve --port 4000 --auth api-key

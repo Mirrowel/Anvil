@@ -65,6 +65,10 @@ export class VectorStore {
       startLine: c.startLine,
       endLine: c.endLine,
       tokens: c.tokens,
+      stableKey: c.stableKey ?? '',
+      contentHash: c.contentHash ?? '',
+      embedHash: c.embedHash ?? '',
+      dirty: c.dirty ?? false,
     }));
 
     if (!this.table) {
@@ -174,19 +178,14 @@ export class VectorStore {
   async getChunksByFile(
     repoName: string,
     filePath: string,
-  ): Promise<Array<{ id: string; content: string; entityName: string; tokens: number }>> {
+  ): Promise<Array<CodeChunk & { embedding?: number[] }>> {
     if (!this.table) return [];
     const esc = (s: string) => s.replace(/'/g, "''");
     try {
       const results = await this.table
         .filter(`repoName = '${esc(repoName)}' AND filePath = '${esc(filePath)}'`)
         .toArray();
-      return results.map((r: any) => ({
-        id: r.id,
-        content: r.content,
-        entityName: r.entityName || '',
-        tokens: r.tokens || 0,
-      }));
+      return results.map((r: any) => ({ ...rowToChunk(r), embedding: r.vector }));
     } catch {
       return [];
     }
@@ -273,6 +272,10 @@ export class VectorStore {
       startLine: c.startLine,
       endLine: c.endLine,
       tokens: c.tokens,
+      stableKey: c.stableKey ?? '',
+      contentHash: c.contentHash ?? '',
+      embedHash: c.embedHash ?? '',
+      dirty: c.dirty ?? false,
     }));
 
     if (!this.table) {
@@ -282,6 +285,32 @@ export class VectorStore {
     }
     // Rebuild FTS index after data changes
     await this.ensureFtsIndex();
+  }
+
+  /** Mark chunks from changed files as possibly stale while debounce/re-embedding is pending. */
+  async markFilesDirty(project: string, files: Array<{ repoName: string; filePath: string }>, dirty: boolean = true): Promise<number> {
+    if (!this.table || files.length === 0) return 0;
+    const byRepo = new Map<string, string[]>();
+    for (const file of files) {
+      const list = byRepo.get(file.repoName) ?? [];
+      list.push(file.filePath);
+      byRepo.set(file.repoName, list);
+    }
+
+    let marked = 0;
+    for (const [repoName, filePaths] of byRepo) {
+      const existing = new Map<string, CodeChunk & { embedding?: number[] }>();
+      for (const filePath of filePaths) {
+        for (const chunk of await this.getChunksByFile(repoName, filePath)) {
+          existing.set(chunk.id, { ...chunk, dirty });
+        }
+      }
+      if (existing.size === 0) continue;
+      await this.deleteFileChunks(project, repoName, filePaths);
+      await this.addChunks([...existing.values()].filter((chunk): chunk is CodeChunk & { embedding: number[] } => Array.isArray(chunk.embedding)));
+      marked += existing.size;
+    }
+    return marked;
   }
 }
 
@@ -301,6 +330,10 @@ function rowToChunk(row: any): CodeChunk {
     entityName: row.entityName || undefined,
     parentEntity: row.parentEntity || undefined,
     tokens: row.tokens,
+    stableKey: row.stableKey || undefined,
+    contentHash: row.contentHash || undefined,
+    embedHash: row.embedHash || undefined,
+    dirty: row.dirty === true,
     imports: [],
     exports: [],
   };

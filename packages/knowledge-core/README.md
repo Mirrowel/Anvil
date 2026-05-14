@@ -78,6 +78,14 @@ Inspect the effective file set before changing filters:
 npm run index:file-report -- /path/to/repo-or-workspace
 ```
 
+### Chunk-level embedding reuse
+Freshness is file-based instead of commit-based. The indexer compares the
+current indexable file set against `index_meta.json` using mtime, size, and
+content hashes, so unstaged and untracked edits are picked up. Changed files are
+re-chunked locally, but embedding requests are only made for chunks whose
+`contextualizedContent` hash changed. Unchanged chunks in the same file keep
+their existing vectors and are reinserted with updated line metadata.
+
 ### Hybrid retrieval, four phases
 1. **Vector ⫽ BM25 in parallel** — semantic recall + lexical recall.
 2. **Reciprocal Rank Fusion** — combine without one dominating.

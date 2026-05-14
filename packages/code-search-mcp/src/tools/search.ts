@@ -84,10 +84,12 @@ export async function handleSearchTool(
 
     const text = result.chunks.map((sc, i) => {
       const c = sc.chunk;
-      return `### ${i + 1}. ${c.repoName}/${c.filePath}:${c.startLine} (score: ${sc.score.toFixed(3)}, source: ${sc.source})\n\`\`\`${c.language}\n${c.content}\n\`\`\``;
+      const stale = c.dirty ? ' — POSSIBLY STALE: file changed; re-index pending' : '';
+      return `### ${i + 1}. ${c.repoName}/${c.filePath}:${c.startLine} (score: ${sc.score.toFixed(3)}, source: ${sc.source}${stale})\n\`\`\`${c.language}\n${c.content}\n\`\`\``;
     }).join('\n\n');
 
-    return { content: [{ type: 'text', text: `Found ${result.chunks.length} results for "${query}" (${result.totalTokens} tokens):\n\n${text}` }] };
+    const warning = result.graphContext.startsWith('Warning:') ? `${result.graphContext.split('\n\n')[0]}\n\n` : '';
+    return { content: [{ type: 'text', text: `${warning}Found ${result.chunks.length} results for "${query}" (${result.totalTokens} tokens):\n\n${text}` }] };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { content: [{ type: 'text', text: `Search failed: ${msg}` }] };

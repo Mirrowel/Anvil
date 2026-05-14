@@ -7,7 +7,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, relative, extname, basename, dirname } from 'node:path';
 import type { CodeChunk } from '@esankhan3/anvil-knowledge-core';
 import { SOURCE_EXTENSIONS, SKIP_DIRS, walkDir, langFromExt, extractImports, isIndexableFile } from './file-walker.js';
@@ -405,7 +405,66 @@ function chunkFile(
 
 export interface FileIndexEntry {
   contentHash: string;
+  mtimeMs?: number;
+  size?: number;
   chunkCount: number;
+  chunks?: ChunkIndexEntry[];
+}
+
+export interface ChunkIndexEntry {
+  id: string;
+  stableKey: string;
+  contentHash: string;
+  embedHash: string;
+  startLine: number;
+  endLine: number;
+  entityType: CodeChunk['entityType'];
+  entityName?: string;
+}
+
+function hashText(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+function stableChunkKey(chunk: Pick<CodeChunk, 'entityType' | 'entityName' | 'parentEntity' | 'startLine'>): string {
+  const name = chunk.entityName ?? `line:${chunk.startLine}`;
+  const parent = chunk.parentEntity ?? '';
+  return `${chunk.entityType}:${parent}:${name}`;
+}
+
+function enrichChunkMetadata(chunks: CodeChunk[]): CodeChunk[] {
+  return chunks.map((chunk) => {
+    const stableKey = stableChunkKey(chunk);
+    const contentHash = hashText(chunk.content);
+    const embedHash = hashText(chunk.contextualizedContent);
+    return { ...chunk, stableKey, contentHash, embedHash };
+  });
+}
+
+function chunkIndexFromChunks(chunks: CodeChunk[]): ChunkIndexEntry[] {
+  return chunks.map((chunk) => ({
+    id: chunk.id,
+    stableKey: chunk.stableKey ?? stableChunkKey(chunk),
+    contentHash: chunk.contentHash ?? hashText(chunk.content),
+    embedHash: chunk.embedHash ?? hashText(chunk.contextualizedContent),
+    startLine: chunk.startLine,
+    endLine: chunk.endLine,
+    entityType: chunk.entityType,
+    entityName: chunk.entityName,
+  }));
+}
+
+function fileIndexEntry(filePath: string, contentHash: string, chunks: CodeChunk[]): FileIndexEntry {
+  let mtimeMs: number | undefined;
+  let size: number | undefined;
+  try {
+    const stat = statSync(filePath);
+    mtimeMs = stat.mtimeMs;
+    size = stat.size;
+  } catch {
+    // File may have disappeared between read and metadata capture.
+  }
+  return { contentHash, mtimeMs, size, chunkCount: chunks.length, chunks: chunkIndexFromChunks(chunks) };
 }
 
 export interface ChunkResult {
@@ -459,7 +518,7 @@ export async function chunkRepo(
     } catch {
       continue;
     }
-    const contentHash = createHash('sha256').update(contents).digest('hex');
+    const contentHash = hashText(contents);
 
     // Check cache — skip chunking if file is unchanged
     if (cachedFiles?.[relPath]?.contentHash === contentHash) {
@@ -469,9 +528,9 @@ export async function chunkRepo(
 
     // File is new or changed — chunk it
     changedFiles.push(relPath);
-    const chunks = chunkFile(file, repoPath, repoName, project, config.maxTokens);
+    const chunks = enrichChunkMetadata(chunkFile(file, repoPath, repoName, project, config.maxTokens));
     allChunks.push(...chunks);
-    fileIndex[relPath] = { contentHash, chunkCount: chunks.length };
+    fileIndex[relPath] = fileIndexEntry(file, contentHash, chunks);
   }
 
   // Detect deleted files (in cache but no longer on disk)
@@ -520,10 +579,10 @@ export async function chunkChangedFiles(
     } catch { continue; }
 
     changedFiles.push(relPath);
-    const contentHash = createHash('sha256').update(contents).digest('hex');
-    const chunks = chunkFile(fullPath, repoPath, repoName, project, config.maxTokens);
+    const contentHash = hashText(contents);
+    const chunks = enrichChunkMetadata(chunkFile(fullPath, repoPath, repoName, project, config.maxTokens));
     allChunks.push(...chunks);
-    fileIndex[relPath] = { contentHash, chunkCount: chunks.length };
+    fileIndex[relPath] = fileIndexEntry(fullPath, contentHash, chunks);
   }
 
   return {
