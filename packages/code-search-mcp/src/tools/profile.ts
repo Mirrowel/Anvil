@@ -11,8 +11,8 @@ export function registerProfileTools(opts?: { profilingEnabled?: boolean }) {
     {
       name: 'list_repos',
       description: opts?.profilingEnabled === false
-        ? 'List indexed repos. Profiling is disabled, so role/domain/description fields are unavailable.'
-        : 'List all indexed repos with their role, domain, and description.',
+        ? 'List repositories discovered or indexed in the current MCP project. Profiling is disabled, so LLM-generated role, domain, and description fields are unavailable. Use this to learn the valid repo names to pass to search filters and graph tools. The MCP already knows the current project path; no path input is needed.'
+        : 'List all indexed repos in the current MCP project with their LLM-generated role, domain, and short description when available. Use this first when you need valid repo names for repos filters, graph tools, profile lookup, or impact analysis. Requires the index to be ready. The MCP already knows the current project path; no path input is needed.',
       inputSchema: {
         type: 'object' as const,
         properties: {},
@@ -26,11 +26,11 @@ export function registerProfileTools(opts?: { profilingEnabled?: boolean }) {
     ...tools,
     {
       name: 'get_repo_profile',
-      description: 'Get the LLM-generated profile for a repo — role, domain, tech stack, exposed/consumed endpoints.',
+      description: 'Get the LLM-generated profile for one indexed repo in the current MCP project. Returns the repo role, domain, description, technologies, entry points, exposed interfaces, and consumed dependencies when profiling is enabled. Use this to quickly understand what a repo does before searching or editing it. Requires the index to be ready and profiling to be enabled. Expects a repo name, not a filesystem path.',
       inputSchema: {
         type: 'object' as const,
         properties: {
-          repo: { type: 'string', description: 'Repository name' },
+          repo: { type: 'string', description: 'Required. Indexed repo name exactly as shown by list_repos or index_status. Do not provide a local path for the current project.' },
         },
         required: ['repo'],
       },

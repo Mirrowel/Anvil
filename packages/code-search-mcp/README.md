@@ -100,32 +100,41 @@ Eleven tools across four categories. Every one of them maps to a
 function in `@anvil/knowledge-core` — you're getting the same
 retrieval pipeline that powers the Anvil dashboard.
 
+Agents should treat these MCP code-search tools as the default way to
+discover and understand code in the current project. The MCP is already
+scoped to the project/folder it was launched for, so tools do not need a
+filesystem path unless you intentionally run a separate MCP instance for
+another folder. Use local `grep`/`rg` only when you need raw exhaustive
+line matches for a small exact-text lookup, especially inside files you
+already know.
+
 ### Search
 | Tool | What it does |
 |---|---|
-| `search_code` | Hybrid retrieval — vector + BM25 + graph + rerank |
-| `search_semantic` | Vector-only (paraphrases, intent) |
-| `search_exact` | BM25-only (identifiers, error codes) |
+| `search_code` | Best overall/default search. Hybrid retrieval across indexed repos: vector semantic search + BM25 exact matching + graph expansion + reranking. Use for natural-language questions, identifiers, architecture discovery, feature tracing, and cross-repo investigations. |
+| `search_semantic` | Vector-only search for meaning, paraphrases, and intent. Use when you do not know exact names. It can miss literal identifiers; use `search_code` when unsure. |
+| `search_exact` | BM25-only keyword search. Use for exact identifiers, strings, file path fragments, routes, error codes, config keys, and log text. It does not understand natural language, synonyms, or intent. |
 
 ### Graph
 | Tool | What it does |
 |---|---|
-| `get_repo_graph` | Single-repo AST graph |
-| `get_cross_repo_edges` | Inter-repo edges (Kafka, HTTP, gRPC, shared types, …) |
-| `find_callers` | Who calls this function |
-| `find_dependencies` | What this function calls |
-| `impact_analysis` | What breaks if this changes |
+| `get_repo_graph` | Summarizes the AST graph for one indexed repo: discovered functions, classes, methods, types, imports, and relationship counts. Expects a repo name, not a path. |
+| `get_cross_repo_edges` | Shows inter-repo edges such as Kafka, HTTP, gRPC/protobuf, shared types, databases, env vars, workspace deps, Docker/Kubernetes, and inferred service relationships. |
+| `find_callers` | Finds graph entities that call or reference a target function/method/symbol. Useful before changing or deleting code. Returns graph node identifiers; use `search_code` for snippets. |
+| `find_dependencies` | Finds what a target function/method/symbol calls, imports, references, or depends on. Returns graph node identifiers; use `search_code` for snippets. |
+| `impact_analysis` | Given a repo name and repo-relative file path, reports entities in scope, incoming dependents, and affected repos. Use before refactors or shared API/type changes. |
 
 ### Profiles
 | Tool | What it does |
 |---|---|
-| `list_repos` | All indexed repos with profiles |
-| `get_repo_profile` | Single repo's tech stack, structure, key entry points |
+| `list_repos` | Lists indexed repos in the current project. Use this to get exact repo names for search filters, graph tools, profiles, and impact analysis. |
+| `get_repo_profile` | Returns one repo's generated role, domain, description, tech stack, entry points, exposed interfaces, and consumed dependencies when profiling is enabled. |
 
 ### Index
 | Tool | What it does |
 |---|---|
-| `index_status` | Last indexed SHA, chunk count, embedding provider |
+| `index_status` | Reports whether the current project index is ready, idle/running/errored, progress, watcher state, stale-file warnings, log file, chunks, embedding provider, last indexed time, and indexed repos. |
+| `index_start` | Starts indexing the current MCP project path. It does not accept a path. Poll `index_status` about every 30 seconds until Ready is `yes` and Indexing is `idle`. |
 
 Plus four MCP resources via `code-search://`:
 `repos`, `system-graph`, `repo/{name}/profile`, `repo/{name}/graph`.

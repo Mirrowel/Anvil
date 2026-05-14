@@ -11,7 +11,7 @@ export function registerIndexTools() {
   return [
     {
       name: 'index_status',
-      description: 'Get current index stats — chunk count, embedding provider, repos indexed, last indexed time.',
+      description: 'Report whether the current MCP project index is ready and whether indexing is idle, running, or errored. Shows progress, phase, messages, watcher state, stale-file warnings, log file path, chunk count, embedding provider, last indexed time, and indexed repos. Call this before search, graph, profile, or resource tools if results are missing or the index may not be ready. No input is expected; the MCP already knows the current project path.',
       inputSchema: {
         type: 'object' as const,
         properties: {},
@@ -19,7 +19,7 @@ export function registerIndexTools() {
     },
     {
       name: 'index_start',
-      description: 'Start indexing the current project. Use index_status to monitor progress until indexing completes.',
+      description: 'Start indexing the current MCP project path configured when this server was launched. Use this when index_status says Ready is no, when the index is stale, or when search/graph/profile tools say the index is not ready. This tool does not accept a path; the current folder/project is already known by the MCP. To index a different folder, start or configure the MCP for that folder instead. After calling, poll index_status about every 30 seconds until Ready is yes and Indexing is idle, or stop if status becomes error.',
       inputSchema: {
         type: 'object' as const,
         properties: {},

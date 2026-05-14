@@ -15,58 +15,58 @@ export function registerGraphTools() {
   return [
     {
       name: 'get_repo_graph',
-      description: 'Get the AST knowledge graph for a repo — entities (functions, classes, types) and their relationships (calls, imports, inheritance).',
+      description: 'Summarize the AST knowledge graph for one indexed repo in the current project. Shows graph size and a sample of discovered entities such as functions, classes, methods, types, imports, and related symbols. Use this to understand what the index knows about a repo before asking caller, dependency, or impact questions. Requires the index to be ready. This tool expects a repo name, not a filesystem path; the MCP already knows the current project folder.',
       inputSchema: {
         type: 'object' as const,
         properties: {
-          repo: { type: 'string', description: 'Repository name' },
+          repo: { type: 'string', description: 'Required. Indexed repo name exactly as shown by list_repos or index_status. Do not provide a local path for the current project.' },
         },
         required: ['repo'],
       },
     },
     {
       name: 'get_cross_repo_edges',
-      description: 'Get connections between repos — shared deps, Kafka topics, HTTP routes, database tables, gRPC services, etc.',
+      description: 'List cross-repo relationships discovered in the current indexed project. Edges may come from shared dependencies, imports, HTTP routes, Kafka topics, gRPC/protobuf, database tables, environment variables, workspace links, Docker or Kubernetes config, and inferred service relationships. Use this to understand how repos depend on or communicate with each other. Requires the index to be ready. No path input is needed because the MCP is already scoped to the current project.',
       inputSchema: {
         type: 'object' as const,
         properties: {
-          repo: { type: 'string', description: 'Filter to edges involving this repo (optional)' },
+          repo: { type: 'string', description: 'Optional. Indexed repo name to filter for edges where this repo is the source or target. Omit to list cross-repo edges across the whole current project.' },
         },
       },
     },
     {
       name: 'find_callers',
-      description: 'Find all functions/methods that call a given function. Uses the AST graph.',
+      description: 'Find functions, methods, or graph entities that call or reference a target function-like entity in the current indexed project. Uses incoming edges from the AST/system graph, so it can surface callers across repos when the graph contains those relationships. Best for answering "who calls this?" before changing or deleting code. Requires the index to be ready. Results are graph node identifiers, not full source snippets; use search_code afterward for implementation context.',
       inputSchema: {
         type: 'object' as const,
         properties: {
-          function: { type: 'string', description: 'Function name to find callers of' },
-          repo: { type: 'string', description: 'Limit search to this repo (optional)' },
+          function: { type: 'string', description: 'Required. Function, method, class member, or symbol name to match. Partial names are allowed but may match multiple entities; use a more specific name if results are broad.' },
+          repo: { type: 'string', description: 'Optional. Indexed repo name to limit the target entity search. Omit to find matching targets across all repos in the current project.' },
         },
         required: ['function'],
       },
     },
     {
       name: 'find_dependencies',
-      description: 'Find what a function depends on — calls, imports, type references.',
+      description: 'Find what a target function-like entity calls, imports, references, or otherwise depends on in the current indexed project. Uses outgoing edges from the AST/system graph and can include cross-repo dependencies when present. Best for understanding what code must stay available for a function before refactoring it. Requires the index to be ready. Results are graph node identifiers; use search_code for source snippets.',
       inputSchema: {
         type: 'object' as const,
         properties: {
-          function: { type: 'string', description: 'Function name' },
-          repo: { type: 'string', description: 'Limit to this repo (optional)' },
+          function: { type: 'string', description: 'Required. Function, method, class member, or symbol name to match. Partial names are allowed but may match multiple entities.' },
+          repo: { type: 'string', description: 'Optional. Indexed repo name to limit the target entity search. Omit to search all repos in the current project.' },
         },
         required: ['function'],
       },
     },
     {
       name: 'impact_analysis',
-      description: 'Analyze what would be affected if a file or entity is changed. Traces callers, dependents, and cross-repo connections.',
+      description: 'Analyze what may be affected by changing a file or a specific entity in the current indexed project. Finds indexed entities in the file, incoming dependent edges, and affected repos, including cross-repo dependents when graph data exists. Use before refactors, API changes, deleting code, or modifying shared types/config. Requires the index to be ready. Expects a repo name and a repo-relative file path, not an absolute local path; the MCP already knows the project folder.',
       inputSchema: {
         type: 'object' as const,
         properties: {
-          file: { type: 'string', description: 'File path (relative to repo root)' },
-          entity: { type: 'string', description: 'Specific entity name (optional — if omitted, analyzes all entities in the file)' },
-          repo: { type: 'string', description: 'Repository name' },
+          file: { type: 'string', description: 'Required. File path relative to the repo root, using forward slashes when possible, for example src/server.ts. Do not pass an absolute filesystem path for the current project.' },
+          entity: { type: 'string', description: 'Optional. Specific function, method, class, type, or symbol name within the file. Omit to analyze all indexed entities in the file.' },
+          repo: { type: 'string', description: 'Required. Indexed repo name that contains the file, exactly as shown by list_repos or index_status.' },
         },
         required: ['file', 'repo'],
       },
