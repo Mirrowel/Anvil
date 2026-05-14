@@ -130,10 +130,8 @@ so memory drift detection and chunk dedup speak the same language.
                        ranked chunks + graph context
 ```
 
-Two consumers, one stack: `@esankhan3/anvil-cli` indexes via
-`anvil index` and retrieves during pipelines;
-`@esankhan3/code-search-mcp` exposes the same retriever as MCP
-tools that any agent can call.
+One engine, one retained consumer: `@esankhan3/code-search-mcp` exposes
+the retriever as MCP tools that any agent can call.
 
 ---
 
@@ -176,9 +174,8 @@ SHA as a load-bearing input.
 Pluggable embedders + rerankers. Swap any layer without rewriting
 the rest.
 
-**Two surfaces, one engine.** CLI users get retrieval through
-pipelines; MCP users get it through tool calls. The retrieval
-pipeline is the same code path.
+**One focused surface.** MCP users get retrieval through tool calls, and
+the indexing/retrieval pipeline stays concentrated in this package.
 
 ---
 

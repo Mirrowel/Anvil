@@ -1,9 +1,9 @@
 # CLAUDE.md — `@anvil/knowledge-core`
 
 Guidance for Claude Code when working inside `packages/knowledge-core/`. The
-shared knowledge stack consumed by `@esankhan3/anvil-cli` and
-`@esankhan3/code-search-mcp`. Owns chunking, AST parsing, embeddings, vector
-store, hybrid retrieval, project graph, structural hashing, repo profiling.
+knowledge stack consumed by `@esankhan3/code-search-mcp`. Owns chunking, AST
+parsing, embeddings, vector store, hybrid retrieval, project graph,
+structural hashing, repo profiling.
 
 ## What this package owns
 

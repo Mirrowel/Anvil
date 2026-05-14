@@ -40,12 +40,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/esanmohammad/Anvil.git",
+    "url": "https://github.com/Mirrowel/Anvil.git",
     "directory": "packages/knowledge-core"
   },
-  "homepage": "https://github.com/esanmohammad/Anvil/tree/main/packages/knowledge-core#readme",
+  "homepage": "https://github.com/Mirrowel/Anvil/tree/main/packages/knowledge-core#readme",
   "bugs": {
-    "url": "https://github.com/esanmohammad/Anvil/issues"
+    "url": "https://github.com/Mirrowel/Anvil/issues"
   },
   "publishConfig": {
     "access": "public"

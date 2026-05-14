@@ -1,12 +1,11 @@
 /**
  * Shared upstream-error contract for all `ModelAdapter` implementations.
  *
- * The dashboard's `runStageWithFallback` (in
- * `packages/dashboard/server/pipeline-runner.ts`) duck-types this shape
- * — `name === 'UpstreamError' && retryable === true` — to decide whether
- * to burn the current model and re-resolve the chain. Adapters that
- * throw plain `Error` lose chain-fallback even when the failure is
- * obviously transient (429 quota, 503 outage).
+ * Callers duck-type this shape — `name === 'UpstreamError' &&
+ * retryable === true` — to decide whether to burn the current model and
+ * re-resolve the chain. Adapters that throw plain `Error` lose
+ * chain-fallback even when the failure is obviously transient (429
+ * quota, 503 outage).
  *
  * The class is provider-agnostic on purpose. CLI adapters (claude,
  * gemini-cli) don't get an HTTP status — pass `synthesizeStatusFromCli`
@@ -36,13 +35,11 @@ export class UpstreamError extends Error {
 }
 
 /**
- * Default retryable-status map. Matches what the dashboard's
- * `runStageWithFallback` checks. Adapters can pass an explicit
+ * Default retryable-status map. Adapters can pass an explicit
  * `retryable` override when they need finer control (e.g. Anthropic's
- * "Credit balance too low" is 400 with a specific body — not
- * retryable to a different model from the SAME provider, but the
- * dashboard should still fall back to a DIFFERENT provider in the
- * chain, so we mark it retryable=true with a synthetic 402).
+ * "Credit balance too low" is 400 with a specific body and should fall
+ * back to a different provider in the chain, so we mark it retryable=true
+ * with a synthetic 402).
  */
 export function isRetryableStatus(status: number): boolean {
   return status === 408 ||  // Request Timeout

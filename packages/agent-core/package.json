@@ -20,9 +20,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -b && mkdir -p dist/data && cp src/data/model-prices.json dist/data/",
+    "build": "tsc -b && node -e \"const fs=require('node:fs'); fs.mkdirSync('dist/data',{recursive:true}); fs.copyFileSync('src/data/model-prices.json','dist/data/model-prices.json');\"",
     "dev": "tsc -b --watch",
-    "test": "tsc -b && mkdir -p dist/data && cp src/data/model-prices.json dist/data/ && node --test dist/__tests__/*.test.js dist/agent/session/__tests__/*.test.js dist/checkpoint/__tests__/*.test.js",
+    "test": "tsc -b && node -e \"const fs=require('node:fs'); fs.mkdirSync('dist/data',{recursive:true}); fs.copyFileSync('src/data/model-prices.json','dist/data/model-prices.json');\" && node --test dist/__tests__/*.test.js dist/agent/session/__tests__/*.test.js dist/checkpoint/__tests__/*.test.js",
     "refresh-cost-table": "node scripts/refresh-cost-table.mjs"
   },
   "dependencies": {
@@ -48,12 +48,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/esanmohammad/Anvil.git",
+    "url": "https://github.com/Mirrowel/Anvil.git",
     "directory": "packages/agent-core"
   },
-  "homepage": "https://github.com/esanmohammad/Anvil/tree/main/packages/agent-core#readme",
+  "homepage": "https://github.com/Mirrowel/Anvil/tree/main/packages/agent-core#readme",
   "bugs": {
-    "url": "https://github.com/esanmohammad/Anvil/issues"
+    "url": "https://github.com/Mirrowel/Anvil/issues"
   },
   "publishConfig": {
     "access": "public"

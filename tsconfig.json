@@ -10,18 +10,11 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "paths": {
-      "@anvil-dev/cli": ["./packages/cli/src"],
-      "@anvil-dev/dashboard": ["./packages/dashboard/src"]
-    }
+    "paths": {}
   },
   "references": [
     { "path": "packages/agent-core" },
     { "path": "packages/knowledge-core" },
-    { "path": "packages/memory-core" },
-    { "path": "packages/convention-core" },
-    { "path": "packages/core-pipeline" },
-    { "path": "packages/cli" },
-    { "path": "packages/dashboard" }
+    { "path": "packages/code-search-mcp" }
   ]
 }

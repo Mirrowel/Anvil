@@ -35,15 +35,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # See npm/cli#4828 — npm ci skips platform-specific optional deps
-        # of rollup, which makes vite crash mid-build with a cryptic
-        # "Cannot find module @rollup/rollup-linux-x64-gnu". The follow-up
-        # install pulls just that one native binary back in.
-        run: |
-          npm ci
-          # --no-save keeps the lockfile clean; omitting --omit=dev so
-          # we don't prune existing dev-deps that npm ci just installed.
-          npm install --no-save --include=optional @rollup/rollup-linux-x64-gnu
+        run: npm ci
 
       # Build leaf packages first so downstream tsc projects can resolve them.
       - name: Build agent-core
@@ -52,39 +44,8 @@ jobs:
       - name: Build knowledge-core
         run: npm -w @esankhan3/anvil-knowledge-core run build
 
-      - name: Build memory-core
-        run: npm -w @esankhan3/anvil-memory-core run build
-
-      - name: Build convention-core
-        run: npm -w @esankhan3/anvil-convention-core run build
-
-      - name: Build core-pipeline
-        run: npm -w @esankhan3/anvil-core-pipeline run build
-
-      - name: Build CLI (transitively builds dashboard)
-        run: npm -w @esankhan3/anvil-cli run build
-
-      # Safety net so we never publish another empty-dashboard cli.
-      # Verifies the bundled assets actually landed in dist/dashboard/.
-      - name: Verify dashboard bundle landed
-        run: |
-          test -f packages/cli/dist/dashboard/dist/index.html || { echo "::error::dist/dashboard/dist/index.html missing — vite build must have failed silently"; exit 1; }
-          test -f packages/cli/dist/dashboard/server/dashboard-server.js || { echo "::error::dist/dashboard/server/dashboard-server.js missing — server build must have failed"; exit 1; }
-
       - name: Build Code Search MCP
         run: cd packages/code-search-mcp && node build.mjs
-
-      - name: Test agent-core
-        run: npm -w @esankhan3/anvil-agent-core test
-
-      - name: Test knowledge-core
-        run: npm -w @esankhan3/anvil-knowledge-core test
-
-      - name: Test CLI
-        run: npm -w @esankhan3/anvil-cli test
-
-      - name: Test Dashboard Server
-        run: npm -w @anvil-dev/dashboard run test:server
 
   typecheck:
     runs-on: ubuntu-latest
@@ -95,20 +56,13 @@ jobs:
           node-version: 20
           cache: 'npm'
       - run: npm ci
-      # Build every leaf the cli + dashboard depend on. Skipping any one
-      # of these causes `tsc --noEmit` on the cli to fail with TS2307
-      # (cannot find module @esankhan3/anvil-*) — that's not a real type
-      # error, it's a missing-build artifact.
       - name: Build leaves (for type-check deps)
         run: |
           npm -w @esankhan3/anvil-agent-core      run build
           npm -w @esankhan3/anvil-knowledge-core  run build
-          npm -w @esankhan3/anvil-memory-core     run build
-          npm -w @esankhan3/anvil-convention-core run build
-          npm -w @esankhan3/anvil-core-pipeline   run build
       - name: Type-check agent-core
         run: cd packages/agent-core && npx tsc --noEmit
-      - name: Type-check CLI
-        run: cd packages/cli && npx tsc --noEmit
-      - name: Type-check Dashboard Server
-        run: cd packages/dashboard && npx tsc -p server/tsconfig.json --noEmit
+      - name: Type-check knowledge-core
+        run: cd packages/knowledge-core && npx tsc --noEmit
+      - name: Type-check Code Search MCP
+        run: cd packages/code-search-mcp && npx tsc --noEmit

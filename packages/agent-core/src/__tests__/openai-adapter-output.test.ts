@@ -8,10 +8,8 @@
  *     on the returned `ModelAdapterResult`.
  *   - Natural finishes (`'stop'`) are passed through unchanged.
  *
- * Ported from packages/dashboard/server/__tests__/output-token-ceiling.test.ts
- * during the Phase 1 dashboard adapter consolidation — the behavior moved
- * from dashboard's local `ApiAdapter` into the agent-core adapter that the
- * dashboard now bridges to.
+ * Covers behavior that belongs in the shared OpenAI adapter rather than in
+ * individual consumers.
  */
 
 import { describe, it } from 'node:test';

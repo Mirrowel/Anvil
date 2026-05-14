@@ -8,7 +8,7 @@ compiles today.
 
 ```
                 ┌──────────────────────────────────────────────────────┐
-                │ Consumers: @esankhan3/anvil-cli, code-search-mcp     │
+                │ Consumer: code-search-mcp                            │
                 └──────────────────────────────────────────────────────┘
                                         │
                                         ▼

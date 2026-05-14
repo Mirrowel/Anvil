@@ -170,10 +170,8 @@ describe('synthesizeStatusFromCli — CLI subprocess stderr classification', () 
   });
 });
 
-describe('Dashboard duck-type compatibility', () => {
-  // Mirror the exact check from
-  // packages/dashboard/server/pipeline-runner.ts:333 — every adapter's
-  // UpstreamError MUST satisfy this so chain-fallback works.
+describe('UpstreamError duck-type compatibility', () => {
+  // Every adapter's UpstreamError MUST satisfy this so chain-fallback works.
   function isRetryableUpstreamError(err: unknown): boolean {
     if (!err || typeof err !== 'object') return false;
     const e = err as { name?: string; retryable?: unknown; status?: unknown };
@@ -184,7 +182,7 @@ describe('Dashboard duck-type compatibility', () => {
     return false;
   }
 
-  it('retryable UpstreamError instances pass the dashboard duck-type', () => {
+  it('retryable UpstreamError instances pass the chain-fallback duck-type', () => {
     const e1 = new UpstreamError(429, 'rate_limit', { provider: 'anthropic' });
     const e2 = new UpstreamError(503, 'overloaded', { provider: 'gemini' });
     const e3 = new UpstreamError(400, 'overloaded_error', { provider: 'anthropic' }); // body-promoted
