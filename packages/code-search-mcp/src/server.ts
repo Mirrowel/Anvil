@@ -23,7 +23,7 @@ import { registerResources, handleResource } from './resources/resources';
 import { getKnowledgeBasePath } from '@esankhan3/anvil-knowledge-core';
 import { indexFromPath } from '@esankhan3/anvil-knowledge-core';
 import { KnowledgeIndexer } from '@esankhan3/anvil-knowledge-core';
-import { discoverRepos, isIndexableFile } from '@esankhan3/anvil-knowledge-core';
+import { discoverRepos, isIndexableFile, ensureIndexIgnore } from '@esankhan3/anvil-knowledge-core';
 import { loadServerConfig, type ServerConfig } from './core/env-config.js';
 import { startHttpTransport } from './transports/http-transport.js';
 
@@ -181,6 +181,13 @@ export async function startServer(
       : `cli → ${config.claudeBin}`;
   log(ctx, `[code-search-mcp] LLM: ${llmInfo}`);
   log(ctx, `[code-search-mcp] Log file: ${ctx.logFile || 'disabled'}`);
+
+  if (ctx.directoryPath) {
+    const created = ensureIndexIgnore(ctx.directoryPath);
+    if (created) {
+      log(ctx, `[code-search-mcp] Created index.ignore from example template in ${ctx.directoryPath}`);
+    }
+  }
 
   // --- Auto-index in the background ---
   // MCP clients expect initialization to complete quickly. Full embedding jobs

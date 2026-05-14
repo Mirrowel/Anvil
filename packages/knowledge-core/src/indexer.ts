@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 
 import { chunkRepo, chunkChangedFiles } from '@esankhan3/anvil-knowledge-core';
 import type { FileIndexEntry, ChunkDiagnostics } from '@esankhan3/anvil-knowledge-core';
-import { walkDir } from '@esankhan3/anvil-knowledge-core';
+import { walkDir, ensureIndexIgnore } from '@esankhan3/anvil-knowledge-core';
 import { buildAstGraph, generateGraphReport, incrementalGraphUpdate } from '@esankhan3/anvil-knowledge-core';
 import { getAllChanges, getChangedFilesList, getDeletedFilesList } from '@esankhan3/anvil-knowledge-core';
 import type { GitDiff } from '@esankhan3/anvil-knowledge-core';
@@ -905,6 +905,7 @@ export async function buildKBFromPath(
   },
 ): Promise<BuildKBResult> {
   const log = opts?.onProgress ?? (() => {});
+  ensureIndexIgnore(directoryPath);
   log(`Scanning ${directoryPath} for repos...`);
   const repos = discoverRepos(directoryPath);
   if (repos.length === 0) throw new Error(`No git repos found in ${directoryPath}`);
@@ -995,6 +996,7 @@ export async function indexFromPath(
   },
 ): Promise<IndexStats> {
   const log = opts?.onProgress ?? (() => {});
+  ensureIndexIgnore(directoryPath);
   log(`Scanning ${directoryPath} for repos...`);
   const repos = discoverRepos(directoryPath);
   if (repos.length === 0) throw new Error(`No git repos found in ${directoryPath}`);

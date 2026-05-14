@@ -258,13 +258,75 @@ describe('chunkRepo', () => {
 
   it('handles non-source files gracefully (skips them)', async () => {
     writeFileSync(join(tempDir, 'readme.md'), '# Hello');
-    writeFileSync(join(tempDir, 'data.json'), '{"key": "value"}');
+    writeFileSync(join(tempDir, 'notes.txt'), 'Hello user-facing prose');
     writeFileSync(join(tempDir, 'code.ts'), 'export const x = 1;');
 
     const result = await chunkRepo(tempDir, 'test-repo', 'test-project', { maxTokens: 512 });
 
-    // Only the .ts file should produce chunks
     const filePaths = result.chunks.map((c) => c.filePath);
-    assert.ok(filePaths.every((p) => p.endsWith('.ts')), 'Only TS files should be chunked');
+    assert.ok(!filePaths.some((p) => p.endsWith('.md')), 'Markdown should be ignored by default');
+    assert.ok(!filePaths.some((p) => p.endsWith('.txt')), 'Text prose should be ignored by default');
+    assert.ok(filePaths.some((p) => p.endsWith('.ts')), 'Source files should still be chunked');
+  });
+
+  it('indexes safe config and schema text files by default', async () => {
+    writeFileSync(join(tempDir, 'package.json'), '{"scripts":{"build":"tsc"}}');
+    writeFileSync(join(tempDir, 'deploy.yaml'), 'apiVersion: v1\nkind: Service\n');
+    writeFileSync(join(tempDir, 'schema.sql'), 'create table users(id integer);');
+    writeFileSync(join(tempDir, 'Dockerfile'), 'FROM node:22\nRUN npm ci\n');
+
+    const result = await chunkRepo(tempDir, 'test-repo', 'test-project', { maxTokens: 512 });
+    const filePaths = result.chunks.map((c) => c.filePath);
+
+    assert.ok(filePaths.includes('package.json'), 'JSON config should be indexed');
+    assert.ok(filePaths.includes('deploy.yaml'), 'YAML config should be indexed');
+    assert.ok(filePaths.includes('schema.sql'), 'SQL files should be indexed');
+    assert.ok(filePaths.includes('Dockerfile'), 'Dockerfile should be indexed');
+  });
+
+  it('ignores binary-looking files even with text-like extension', async () => {
+    writeFileSync(join(tempDir, 'binary.json'), Buffer.from([0, 1, 2, 3, 4, 5, 0, 10]));
+
+    const result = await chunkRepo(tempDir, 'test-repo', 'test-project', { maxTokens: 512 });
+
+    assert.ok(!result.chunks.some((c) => c.filePath === 'binary.json'), 'Binary-looking file should be skipped');
+  });
+
+  it('skips common generated directories by default', async () => {
+    mkdirSync(join(tempDir, 'dist'));
+    mkdirSync(join(tempDir, 'target'));
+    mkdirSync(join(tempDir, '.anvil-kb'));
+    writeFileSync(join(tempDir, 'dist', 'generated.js'), 'export const generated = true;');
+    writeFileSync(join(tempDir, 'target', 'generated.rs'), 'pub fn generated() {}');
+    writeFileSync(join(tempDir, '.anvil-kb', 'chunks.json'), '{"internal":true}');
+    writeFileSync(join(tempDir, 'src.ts'), 'export const kept = true;');
+
+    const result = await chunkRepo(tempDir, 'test-repo', 'test-project', { maxTokens: 512 });
+    const filePaths = result.chunks.map((c) => c.filePath);
+
+    assert.ok(filePaths.includes('src.ts'), 'Root source file should be indexed');
+    assert.ok(!filePaths.some((p) => p.startsWith('dist/')), 'dist should be skipped');
+    assert.ok(!filePaths.some((p) => p.startsWith('target/')), 'target should be skipped');
+    assert.ok(!filePaths.some((p) => p.startsWith('.anvil-kb/')), '.anvil-kb should be skipped');
+  });
+
+  it('ignores .env but indexes .env.example', async () => {
+    writeFileSync(join(tempDir, '.env'), 'SECRET=value');
+    writeFileSync(join(tempDir, '.env.example'), 'SECRET=example');
+
+    const result = await chunkRepo(tempDir, 'test-repo', 'test-project', { maxTokens: 512 });
+    const filePaths = result.chunks.map((c) => c.filePath);
+
+    assert.ok(!filePaths.includes('.env'), '.env should be ignored');
+    assert.ok(filePaths.includes('.env.example'), '.env.example should be indexed');
+  });
+
+  it('allows index.ignore to force-include markdown', async () => {
+    writeFileSync(join(tempDir, 'README.md'), '# API contract\nPOST /forms');
+    writeFileSync(join(tempDir, 'index.ignore'), '!README.md\n');
+
+    const result = await chunkRepo(tempDir, 'test-repo', 'test-project', { maxTokens: 512 });
+
+    assert.ok(result.chunks.some((c) => c.filePath === 'README.md'), 'Force-included markdown should be indexed');
   });
 });

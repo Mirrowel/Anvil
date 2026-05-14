@@ -1,11 +1,7 @@
-import { readdirSync, statSync } from 'node:fs';
-import { extname, join, relative, resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  filterIndexableFiles,
-  getIndexIgnoreDiagnostics,
-  SOURCE_EXTENSIONS,
-  SKIP_DIRS,
+  getIndexFileDiagnostics,
   walkDir,
 } from './file-walker.js';
 
@@ -14,35 +10,14 @@ interface Report {
   rawSourceFiles: string[];
   indexFiles: string[];
   filteredOut: string[];
+  skippedByDirectory: string[];
+  skippedByBlacklist: string[];
+  skippedBySize: string[];
+  skippedAsBinary: string[];
   ignoredByGit: string[];
   ignoredByIndexIgnore: string[];
   whitelistedByIndexIgnore: string[];
-}
-
-function collectRawSourceFiles(dir: string, collected: string[]): void {
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
-    if (SKIP_DIRS.has(entry)) continue;
-    const full = join(dir, entry);
-    let stat;
-    try {
-      stat = statSync(full);
-    } catch {
-      continue;
-    }
-
-    if (stat.isDirectory()) {
-      collectRawSourceFiles(full, collected);
-    } else if (stat.isFile() && SOURCE_EXTENSIONS.has(extname(entry))) {
-      collected.push(full);
-    }
-  }
+  excludedByOrderedIgnore: string[];
 }
 
 function rel(root: string, file: string): string {
@@ -51,14 +26,20 @@ function rel(root: string, file: string): string {
 
 export function buildIndexFileReport(rootPath: string): Report {
   const root = resolve(rootPath);
-  const rawAbs: string[] = [];
   const walkerAbs: string[] = [];
-  collectRawSourceFiles(root, rawAbs);
   walkDir(root, walkerAbs);
 
-  const indexAbs = filterIndexableFiles(root, rawAbs);
-  const rawSourceFiles = rawAbs.map((file) => rel(root, file)).sort();
-  const indexFiles = indexAbs.map((file) => rel(root, file)).sort();
+  const diagnostics = getIndexFileDiagnostics(root);
+  const rawSourceFiles = [
+    ...diagnostics.indexable,
+    ...diagnostics.skippedByBlacklist,
+    ...diagnostics.skippedBySize,
+    ...diagnostics.skippedAsBinary,
+    ...diagnostics.skippedByGitignore,
+    ...diagnostics.skippedByIndexIgnore,
+    ...diagnostics.indexExcludedByOrder,
+  ].sort();
+  const indexFiles = diagnostics.indexable;
   const walkerFiles = walkerAbs.map((file) => rel(root, file)).sort();
   const indexSet = new Set(indexFiles);
   const walkerSet = new Set(walkerFiles);
@@ -69,42 +50,79 @@ export function buildIndexFileReport(rootPath: string): Report {
     throw new Error('walkDir output does not match filterIndexableFiles(raw source files)');
   }
 
-  const diagnostics = getIndexIgnoreDiagnostics(root, rawAbs);
   return {
     root,
     rawSourceFiles,
     indexFiles,
     filteredOut,
-    ignoredByGit: diagnostics.gitIgnored,
-    ignoredByIndexIgnore: diagnostics.indexIgnored,
+    skippedByDirectory: diagnostics.skippedByDirectory,
+    skippedByBlacklist: diagnostics.skippedByBlacklist,
+    skippedBySize: diagnostics.skippedBySize,
+    skippedAsBinary: diagnostics.skippedAsBinary,
+    ignoredByGit: diagnostics.skippedByGitignore,
+    ignoredByIndexIgnore: diagnostics.skippedByIndexIgnore,
     whitelistedByIndexIgnore: diagnostics.indexWhitelisted,
+    excludedByOrderedIgnore: diagnostics.indexExcludedByOrder,
   };
 }
 
-function printSection(title: string, files: string[], max = 200): void {
-  console.log(`\n${title} (${files.length})`);
-  for (const file of files.slice(0, max)) console.log(`  ${file}`);
-  if (files.length > max) console.log(`  ... ${files.length - max} more`);
+import { writeFileSync } from 'node:fs';
+
+function printSection(lines: string[], title: string, files: string[], truncate = true): void {
+  const max = truncate ? 200 : files.length;
+  lines.push(`\n${title} (${files.length})`);
+  for (const file of files.slice(0, max)) lines.push(`  ${file}`);
+  if (truncate && files.length > max) lines.push(`  ... ${files.length - max} more`);
 }
 
 function main(): void {
-  const root = process.argv[2] ? resolve(process.argv[2]) : process.cwd();
-  const asJson = process.argv.includes('--json');
+  const args = process.argv.slice(2);
+  const asJson = args.includes('--json');
+  const outputIdx = args.indexOf('--output');
+  const outputPath = outputIdx !== -1 && args[outputIdx + 1] ? resolve(args[outputIdx + 1]) : null;
+  const rootArg = args.find((a) => !a.startsWith('--') && a !== (outputIdx !== -1 ? args[outputIdx + 1] : ''));
+  const root = rootArg ? resolve(rootArg) : process.cwd();
   const report = buildIndexFileReport(root);
 
   if (asJson) {
-    console.log(JSON.stringify(report, null, 2));
+    const json = JSON.stringify(report, null, 2);
+    if (outputPath) {
+      writeFileSync(outputPath, json, 'utf-8');
+      console.log(`JSON report written to ${outputPath}`);
+    } else {
+      console.log(json);
+    }
     return;
   }
 
-  console.log(`Index file report for ${report.root}`);
-  console.log(`Raw source files: ${report.rawSourceFiles.length}`);
-  console.log(`Index files: ${report.indexFiles.length}`);
-  console.log(`Filtered out: ${report.filteredOut.length}`);
-  printSection('Filtered out', report.filteredOut);
-  printSection('Ignored by .gitignore', report.ignoredByGit);
-  printSection('Ignored by index.ignore', report.ignoredByIndexIgnore);
-  printSection('Whitelisted by index.ignore', report.whitelistedByIndexIgnore);
+  const truncate = !outputPath;
+  const lines: string[] = [];
+
+  lines.push(`Index file report for ${report.root}`);
+  lines.push(`Raw source files: ${report.rawSourceFiles.length}`);
+  lines.push(`Index files: ${report.indexFiles.length}`);
+  lines.push(`Filtered out: ${report.filteredOut.length}`);
+
+  printSection(lines, 'Files to be embedded', report.indexFiles, truncate);
+
+  printSection(lines, 'Filtered out', report.filteredOut, truncate);
+  printSection(lines, 'Skipped directories', report.skippedByDirectory, truncate);
+  printSection(lines, 'Skipped by default blacklist', report.skippedByBlacklist, truncate);
+  printSection(lines, 'Skipped by size', report.skippedBySize, truncate);
+  printSection(lines, 'Skipped as binary', report.skippedAsBinary, truncate);
+  printSection(lines, 'Ignored by .gitignore', report.ignoredByGit, truncate);
+  printSection(lines, 'Ignored by index.ignore', report.ignoredByIndexIgnore, truncate);
+  printSection(lines, 'Re-included by index.ignore (!)', report.whitelistedByIndexIgnore, truncate);
+  printSection(lines, 'Excluded by ordered index.ignore (whitelisted then excluded)', report.excludedByOrderedIgnore, truncate);
+
+  const text = lines.join('\n');
+
+  if (outputPath) {
+    writeFileSync(outputPath, text, 'utf-8');
+    console.log(`Report written to ${outputPath}`);
+  } else {
+    console.log(text);
+  }
 }
 
 const thisFile = fileURLToPath(import.meta.url);

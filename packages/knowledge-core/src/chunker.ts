@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, relative, extname, basename, dirname } from 'node:path';
 import type { CodeChunk } from '@esankhan3/anvil-knowledge-core';
-import { SOURCE_EXTENSIONS, SKIP_DIRS, walkDir, langFromExt, extractImports, isIndexableFile } from './file-walker.js';
+import { SKIP_DIRS, walkDir, langFromExt, extractImports, isIndexableFile } from './file-walker.js';
 import { parseFile, type TreeSitterEntity } from './tree-sitter-parser.js';
 
 const DEFAULT_MAX_INDEX_FILES = 10_000;
@@ -730,8 +730,6 @@ export async function chunkChangedFiles(
   for (const relPath of [...diff.added, ...diff.modified]) {
     const fullPath = join(repoPath, relPath);
     if (!existsSync(fullPath)) continue;
-    const ext = extname(fullPath);
-    if (!SOURCE_EXTENSIONS.has(ext)) continue;
     if (!isIndexableFile(repoPath, fullPath)) continue;
 
     let contents: string;

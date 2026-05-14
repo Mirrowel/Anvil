@@ -1,0 +1,61 @@
+# =============================================================================
+# Anvil — index.ignore configuration
+# =============================================================================
+#
+# This file controls which files are included or excluded from the code index.
+# It uses ORDERED, LAST-MATCH-WINS semantics:
+#
+#   1. Each line is evaluated top-to-bottom.
+#   2. Lines without ! are exclude patterns.
+#   3. Lines starting with ! are include (whitelist) patterns.
+#   4. The LAST matching rule wins for each file.
+#
+# --- How it works with .gitignore and built-in filters ---
+#
+# The index.ignore is evaluated AFTER .gitignore and built-in filters
+# (blacklist extensions, binary detection, size limits). If a file matches
+# ANY rule in this file, the ordered evaluation takes full control:
+#
+#   - If the last matching rule is ! (include), the file IS indexed,
+#     regardless of .gitignore or built-in filters.
+#   - If the last matching rule is an exclude, the file is NOT indexed.
+#
+# Files NOT matched by any rule in this file keep their default status
+# (built-in filters + .gitignore decide).
+#
+# --- Typical workflow ---
+#
+# 1. Add ! patterns to whitelist folders that .gitignore hides
+#    (e.g., !lib/rotator_library/ to include a gitignored library).
+#
+# 2. The DEFAULT EXCLUDES at the bottom of this file will still filter out
+#    __pycache__, .md, .txt, etc. from those whitelisted folders.
+#
+# 3. If you want to override a default (e.g., include a specific .md file),
+#    add a ! line AFTER the defaults section at the very bottom.
+#
+# --- Example ---
+#
+#   # Whitelist the gitignored lib folder
+#   !lib/rotator_library/
+#
+#   # The defaults below will still exclude __pycache__/, *.md, etc.
+#   # But if you want a specific markdown file included:
+#   # !lib/rotator_library/docs/api.md    <-- add AFTER defaults
+#
+# =============================================================================
+# USER INCLUDES — Add your !whitelist patterns here
+# =============================================================================
+
+# (add !path/ patterns above to include gitignored directories)
+
+# =============================================================================
+# DEFAULT EXCLUDES — Last-match-wins means these override any !includes above
+# Do not edit this section — it is auto-generated from built-in filters.
+# =============================================================================
+
+%%DEFAULT_EXCLUDES%%
+
+# =============================================================================
+# USER OVERRIDES — Add ! patterns here to override specific defaults above
+# =============================================================================
