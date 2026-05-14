@@ -19,7 +19,9 @@ trace callers, and analyze impact across all indexed repos.
   index, no embeddings needed.
 - **Local mode** — `--local <path>` or `--local github:org/pattern`.
   Discovers repos under a path (or clones a GitHub org), builds the
-  index, then serves over stdio.
+  index, then serves over stdio. File selection is owned by
+  knowledge-core: `.gitignore` is respected and repo-root `index.ignore`
+  can exclude or force-include indexing-only paths.
 - **Serve mode** — `--serve [--port] [--auth] [--transport]`. Starts an
   HTTP server (Streamable HTTP, default; SSE optional) with `/mcp` +
   `/health` + `/status` + `POST /index` admin endpoints.

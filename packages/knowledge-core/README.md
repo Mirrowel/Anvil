@@ -58,6 +58,26 @@ removed from the vector store. Embedding is independently
 incremental — it diffs new chunk IDs against LanceDB and only
 embeds the deltas. Big repos stay fast forever.
 
+### Ignore-aware indexing
+Indexing starts from source-like files, then applies each repo's
+`.gitignore` so ignored build output, caches, secrets, and local
+artifacts stay out of the knowledge base. Add a repo-root
+`index.ignore` file for indexing-only rules. It uses `.gitignore`
+syntax, with `!pattern` acting as a force-include override when it
+collides with `.gitignore`.
+
+```gitignore
+# index.ignore
+generated/
+!dist/public-api.js
+```
+
+Inspect the effective file set before changing filters:
+
+```sh
+npm run index:file-report -- /path/to/repo-or-workspace
+```
+
 ### Hybrid retrieval, four phases
 1. **Vector ⫽ BM25 in parallel** — semantic recall + lexical recall.
 2. **Reciprocal Rank Fusion** — combine without one dominating.

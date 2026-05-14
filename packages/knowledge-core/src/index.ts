@@ -36,6 +36,7 @@ export * from './project-graph-builder.js';
 export * from './retriever.js';
 export * from './graph-query.js';
 export * from './indexer.js';
+export * from './index-file-report.js';
 
 // `tree-sitter-parser` exports a `computeStructuralHash` that collides with
 // `structural-hasher`'s function of the same name (different signatures, used

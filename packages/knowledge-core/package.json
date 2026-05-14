@@ -22,6 +22,7 @@
   "scripts": {
     "build": "tsc -b",
     "dev": "tsc -b --watch",
+    "index:file-report": "tsc -b && node dist/index-file-report.js",
     "test": "tsc -b && node --test dist/__tests__/*.test.js"
   },
   "dependencies": {
@@ -32,6 +33,7 @@
     "graphology-communities-louvain": "2.0.2",
     "graphology-metrics": "2.4.0",
     "graphology-types": "0.24.8",
+    "ignore": "^7.0.5",
     "tree-sitter-wasms": "0.1.13",
     "web-tree-sitter": "0.26.8"
   },

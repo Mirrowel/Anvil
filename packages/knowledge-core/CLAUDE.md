@@ -12,7 +12,8 @@ structural hashing, repo profiling.
   chunking with regex fallback. Splits at function/class/method boundaries.
 - `walkDir` / `langFromExt` / `extractImports` / `extractNamedImports`
   (`src/file-walker.ts`) — directory walker, language detection, import
-  extraction.
+  extraction, `.gitignore` filtering, and repo-root `index.ignore`
+  overrides.
 - `initTreeSitter` / `parseFile` / `supportedLanguages`
   (`src/tree-sitter-parser.ts`) — `web-tree-sitter` WASM parsing for TS,
   JS, TSX, Go, Python, Rust, Java, PHP.
@@ -154,6 +155,21 @@ else full re-chunk + full graph rebuild. Per-file metadata lives in
 against existing chunk IDs in LanceDB and only embeds the new ones.
 Deleted files are read from `deleted_files.json` (written by `buildKB`)
 and removed from the store.
+
+### Index filtering
+
+`walkDir` collects source-like files, then `filterIndexableFiles` removes
+paths ignored by Git (`git check-ignore --stdin`). A repo-root
+`index.ignore` file is applied afterward with `.gitignore` syntax using
+the `ignore` package. Normal patterns exclude from indexing; `!pattern`
+force-includes paths even when `.gitignore` excludes them. `index.ignore`
+is intentionally a single repo-root file, not nested per-directory files.
+
+Use the diagnostic before changing filter behavior:
+
+```sh
+npm run index:file-report -- /path/to/repo-or-workspace
+```
 
 ### Retrieval contract
 

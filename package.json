@@ -26,6 +26,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "index:file-report": "npm -w @esankhan3/anvil-knowledge-core run index:file-report --",
     "lint": "eslint ."
   },
   "devDependencies": {

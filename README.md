@@ -26,17 +26,37 @@ To build only the MCP binary:
 npm -w @esankhan3/code-search-mcp run build
 ```
 
-## Test
-
-```sh
-npm test
-```
-
 ## Local MCP Usage
 
 ```sh
 code-search-mcp --local /path/to/repo-or-workspace
 ```
+
+## Index Filtering
+
+Indexing respects each repo's `.gitignore` by default, so generated output,
+secrets, caches, and other ignored files are not indexed.
+
+Add an `index.ignore` file at the repo root for indexing-only rules. It uses
+the same syntax as `.gitignore`:
+
+```gitignore
+# Exclude generated clients from search only
+generated/
+
+# Force-include one file even if .gitignore excludes it
+!dist/public-api.js
+```
+
+Use this report before changing filters:
+
+```sh
+npm run index:file-report -- /path/to/repo-or-workspace
+```
+
+The report compares source-like files found in the tree with the files that
+would be indexed, including `.gitignore` exclusions and `index.ignore`
+overrides.
 
 Useful environment variables:
 

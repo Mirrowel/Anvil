@@ -5,8 +5,10 @@
  *           NamedImportSpec, extractNamedImports
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, extname, relative } from 'node:path';
+import ignore from 'ignore';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -17,8 +19,26 @@ export const SOURCE_EXTENSIONS = new Set([
 ]);
 
 export const SKIP_DIRS = new Set([
-  'node_modules', 'dist', 'build', '.git', 'vendor', '__pycache__', '.next',
+  'node_modules', '.git', 'vendor', '__pycache__',
 ]);
+
+export const INDEX_IGNORE_FILE = 'index.ignore';
+
+type IgnoreMatcher = ReturnType<typeof ignore>;
+
+interface IndexIgnoreMatcher {
+  ignored: IgnoreMatcher;
+  whitelisted: IgnoreMatcher;
+}
+
+export interface IndexIgnoreDiagnostics {
+  root: string;
+  indexIgnorePath: string;
+  indexIgnoreExists: boolean;
+  gitIgnored: string[];
+  indexIgnored: string[];
+  indexWhitelisted: string[];
+}
 
 // ---------------------------------------------------------------------------
 // Language mapping
@@ -52,6 +72,57 @@ export function langFromExt(ext: string): string {
 // ---------------------------------------------------------------------------
 
 export function walkDir(dir: string, collected: string[]): void {
+  const files: string[] = [];
+  walkDirRaw(dir, files);
+  const filtered = filterIndexableFiles(dir, files);
+  collected.push(...filtered);
+}
+
+export function getIndexIgnoreDiagnostics(root: string, files: string[]): IndexIgnoreDiagnostics {
+  const relFiles = files.map((file) => toRelPath(root, file));
+  const gitIgnored = getGitIgnoredPaths(root, relFiles);
+  const indexIgnorePath = join(root, INDEX_IGNORE_FILE);
+  const indexIgnore = loadIndexIgnore(indexIgnorePath);
+  const indexIgnored: string[] = [];
+  const indexWhitelisted: string[] = [];
+
+  for (const relPath of relFiles) {
+    if (indexIgnore.ignored.ignores(relPath)) indexIgnored.push(relPath);
+    if (indexIgnore.whitelisted.ignores(relPath)) indexWhitelisted.push(relPath);
+  }
+
+  return {
+    root,
+    indexIgnorePath,
+    indexIgnoreExists: existsSync(indexIgnorePath),
+    gitIgnored: [...gitIgnored].sort(),
+    indexIgnored: indexIgnored.sort(),
+    indexWhitelisted: indexWhitelisted.sort(),
+  };
+}
+
+export function filterIndexableFiles(root: string, files: string[]): string[] {
+  const relByAbs = new Map(files.map((file) => [file, toRelPath(root, file)]));
+  const relFiles = [...relByAbs.values()];
+  const gitIgnored = getGitIgnoredPaths(root, relFiles);
+  const indexIgnore = loadIndexIgnore(join(root, INDEX_IGNORE_FILE));
+
+  return files.filter((file) => {
+    const relPath = relByAbs.get(file);
+    if (!relPath) return false;
+
+    let ignored = gitIgnored.has(relPath);
+    if (indexIgnore.ignored.ignores(relPath)) ignored = true;
+    if (indexIgnore.whitelisted.ignores(relPath)) ignored = false;
+    return !ignored;
+  });
+}
+
+export function isIndexableFile(root: string, file: string): boolean {
+  return filterIndexableFiles(root, [file]).length === 1;
+}
+
+function walkDirRaw(dir: string, collected: string[]): void {
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -68,11 +139,62 @@ export function walkDir(dir: string, collected: string[]): void {
       continue;
     }
     if (stat.isDirectory()) {
-      walkDir(full, collected);
+      walkDirRaw(full, collected);
     } else if (stat.isFile() && SOURCE_EXTENSIONS.has(extname(entry))) {
       collected.push(full);
     }
   }
+}
+
+function getGitIgnoredPaths(root: string, relFiles: string[]): Set<string> {
+  if (relFiles.length === 0) return new Set();
+  try {
+    const output = execFileSync('git', ['check-ignore', '--stdin'], {
+      cwd: root,
+      input: relFiles.join('\n'),
+      encoding: 'utf-8',
+      timeout: 10_000,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    return new Set(output.split('\n').map((line: string) => normalizeRelPath(line)).filter(Boolean));
+  } catch (err: any) {
+    const stdout = typeof err?.stdout === 'string' ? err.stdout : '';
+    return new Set(stdout.split('\n').map((line: string) => normalizeRelPath(line)).filter(Boolean));
+  }
+}
+
+function loadIndexIgnore(ignorePath: string): IndexIgnoreMatcher {
+  const ignored = ignore();
+  const whitelisted = ignore();
+  if (!existsSync(ignorePath)) return { ignored, whitelisted };
+
+  let contents: string;
+  try {
+    contents = readFileSync(ignorePath, 'utf-8');
+  } catch {
+    return { ignored, whitelisted };
+  }
+
+  ignored.add(contents);
+  whitelisted.add(extractWhitelistPatterns(contents));
+  return { ignored, whitelisted };
+}
+
+function extractWhitelistPatterns(contents: string): string[] {
+  return contents
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('!') && !line.startsWith('!!'))
+    .map((line) => line.slice(1))
+    .filter(Boolean);
+}
+
+function toRelPath(root: string, file: string): string {
+  return normalizeRelPath(relative(root, file));
+}
+
+function normalizeRelPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\.\//, '').trim();
 }
 
 // ---------------------------------------------------------------------------

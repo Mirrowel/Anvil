@@ -60,6 +60,18 @@ Discovers every repo under a path (or clones a GitHub org), builds
 the knowledge base, and serves over stdio. Works fully offline if
 your embedder + reranker are local (Ollama).
 
+Local indexing respects each repo's `.gitignore`. To tune search-only
+visibility, add `index.ignore` at the repo root using `.gitignore`
+syntax. Normal patterns exclude files from indexing; `!pattern`
+force-includes a file even when `.gitignore` excludes it.
+
+```sh
+npm run index:file-report -- /path/to/repos
+```
+
+Use the report to see the raw source tree, the effective index file
+set, `.gitignore` exclusions, and `index.ignore` overrides.
+
 ### Serve
 ```sh
 code-search-mcp --serve --port 4000 --auth api-key
