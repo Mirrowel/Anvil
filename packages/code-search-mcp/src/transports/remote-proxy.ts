@@ -24,7 +24,9 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
@@ -147,7 +149,7 @@ export async function startRemoteProxy(config: RemoteProxyConfig): Promise<void>
   // Create local stdio MCP server
   const server = new Server(
     { name: 'code-search-mcp', version: '0.1.0' },
-    { capabilities: { tools: {}, resources: {} } },
+    { capabilities: { tools: {}, resources: {}, prompts: {} } },
   );
 
   // Forward tools/list — fetch from remote
@@ -176,6 +178,35 @@ export async function startRemoteProxy(config: RemoteProxyConfig): Promise<void>
       return {
         content: [{ type: 'text', text: `Remote server error: ${err.message}` }],
         isError: true,
+      };
+    }
+  });
+
+  // Forward prompts/list — clients commonly expose MCP prompts as slash commands.
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    try {
+      const response = await remote.request('prompts/list');
+      return response.result ?? { prompts: [] };
+    } catch (err: any) {
+      console.error(`[proxy] Failed to list prompts: ${err.message}`);
+      return { prompts: [] };
+    }
+  });
+
+  // Forward prompts/get.
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    try {
+      const response = await remote.request('prompts/get', {
+        name: request.params.name,
+        arguments: request.params.arguments ?? {},
+      });
+      return response.result ?? { messages: [] };
+    } catch (err: any) {
+      return {
+        messages: [{
+          role: 'user',
+          content: { type: 'text', text: `Remote server error: ${err.message}` },
+        }],
       };
     }
   });

@@ -77,6 +77,10 @@ export async function handleGraphTool(
 ): Promise<{ content: Array<{ type: string; text: string }> } | null> {
   if (!['get_repo_graph', 'get_cross_repo_edges', 'find_callers', 'find_dependencies', 'impact_analysis'].includes(name)) return null;
 
+  if (!ctx.indexReady) {
+    return { content: [{ type: 'text', text: `Index not ready for "${ctx.projectName}". Run index_start or the /index prompt, then poll index_status until Ready is yes.` }] };
+  }
+
   try {
     // getKnowledgeBasePath imported at top
     const kbPath = getKnowledgeBasePath(ctx.projectName);

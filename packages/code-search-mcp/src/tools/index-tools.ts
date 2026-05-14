@@ -5,13 +5,21 @@
 import type { ServerContext } from '../server.js';
 import { KnowledgeIndexer } from '@esankhan3/anvil-knowledge-core';
 
-const TOOL_NAMES = ['index_status'];
+const TOOL_NAMES = ['index_status', 'index_start'];
 
 export function registerIndexTools() {
   return [
     {
       name: 'index_status',
       description: 'Get current index stats — chunk count, embedding provider, repos indexed, last indexed time.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'index_start',
+      description: 'Start indexing the current project. Use index_status to monitor progress until indexing completes.',
       inputSchema: {
         type: 'object' as const,
         properties: {},
@@ -30,7 +38,14 @@ export async function handleIndexTool(
   try {
     if (name === 'index_status') {
       const indexer = new KnowledgeIndexer();
-      const stats = await indexer.getStats(ctx.projectName);
+      const stats = ctx.indexReady
+        ? await indexer.getStats(ctx.projectName)
+        : { totalChunks: 0, embeddingProvider: 'n/a', lastIndexed: '', repos: [] };
+      const manualHint = !ctx.indexReady && ctx.indexing.status !== 'indexing'
+        ? 'Run `index_start` or the `/index` prompt to initialize indexing for this project.'
+        : ctx.indexing.status === 'indexing'
+          ? 'Indexing is running. Poll `index_status` until Ready is yes and Indexing is idle.'
+          : 'Index is ready. Other code-search tools are available.';
 
       const lines = [
         `# Index Status: ${ctx.projectName}`,
@@ -46,6 +61,7 @@ export async function handleIndexTool(
         `- **Pending watched files:** ${ctx.indexing.pendingFiles}`,
         `- **Last watched refresh:** ${ctx.indexing.lastRefresh ?? 'never'}`,
         `- **Last watched summary:** ${ctx.indexing.lastRefreshSummary ?? 'n/a'}`,
+        `- **Next step:** ${manualHint}`,
         '',
         `- **Chunks:** ${stats.totalChunks.toLocaleString()}`,
         `- **Embedding provider:** ${stats.embeddingProvider}`,
@@ -57,6 +73,21 @@ export async function handleIndexTool(
       ];
 
       return { content: [{ type: 'text', text: lines.join('\n') }] };
+    }
+
+    if (name === 'index_start') {
+      const result = await ctx.startIndexing();
+      return {
+        content: [{
+          type: 'text',
+          text: [
+            result.message,
+            result.started
+              ? 'Indexing may take several minutes. Call index_status every ~30 seconds until Ready is yes and Indexing is idle.'
+              : 'Call index_status for the current state.',
+          ].join('\n'),
+        }],
+      };
     }
 
     return null;

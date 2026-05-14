@@ -65,7 +65,7 @@ export async function handleSearchTool(
       state.pendingFiles ? `pending watcher files: ${state.pendingFiles}` : null,
       state.error ? `last error: ${state.error}` : null,
     ].filter(Boolean).join('\n');
-    return { content: [{ type: 'text', text: `${details}\nRun index_status for more detail, or wait for auto-indexing to complete.` }] };
+    return { content: [{ type: 'text', text: `${details}\nRun index_start or the /index prompt to initialize indexing, then poll index_status until it completes.` }] };
   }
 
   try {

@@ -10,6 +10,8 @@ import { loadAllProfiles } from '@esankhan3/anvil-knowledge-core';
 import { loadProfile } from '@esankhan3/anvil-knowledge-core';
 
 export function registerResources(ctx: ServerContext) {
+  if (!ctx.indexReady) return [];
+
   return [
     {
       uri: `code-search://repos`,
@@ -30,6 +32,16 @@ export async function handleResource(
   uri: string,
   ctx: ServerContext,
 ): Promise<{ contents: Array<{ uri: string; mimeType: string; text: string }> }> {
+  if (!ctx.indexReady) {
+    return {
+      contents: [{
+        uri,
+        mimeType: 'text/plain',
+        text: `Index not ready for "${ctx.projectName}". Run index_start or the /index prompt, then poll index_status until Ready is yes.`,
+      }],
+    };
+  }
+
   try {
     // (imported at top)
     const kbPath = getKnowledgeBasePath(ctx.projectName);

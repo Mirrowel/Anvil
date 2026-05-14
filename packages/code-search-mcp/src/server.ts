@@ -7,7 +7,9 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
@@ -18,8 +20,8 @@ import type { FSWatcher } from 'chokidar';
 import { registerSearchTools, handleSearchTool } from './tools/search.js';
 import { registerGraphTools, handleGraphTool } from './tools/graph.js';
 import { registerProfileTools, handleProfileTool } from './tools/profile.js';
-import { registerIndexTools, handleIndexTool } from './tools/index-tools';
-import { registerResources, handleResource } from './resources/resources';
+import { registerIndexTools, handleIndexTool } from './tools/index-tools.js';
+import { registerResources, handleResource } from './resources/resources.js';
 import { getKnowledgeBasePath } from '@esankhan3/anvil-knowledge-core';
 import { indexFromPath } from '@esankhan3/anvil-knowledge-core';
 import { KnowledgeIndexer } from '@esankhan3/anvil-knowledge-core';
@@ -29,7 +31,7 @@ import { startHttpTransport } from './transports/http-transport.js';
 
 // State shared across tools
 export interface IndexingState {
-  status: 'idle' | 'indexing' | 'error';
+  status: 'uninitialized' | 'idle' | 'indexing' | 'error';
   phase: string | null;       // current phase: profiling, chunking, embedding, etc.
   message: string | null;     // latest progress message
   percent: number;            // 0-100
@@ -57,6 +59,8 @@ export interface ServerContext {
   indexing: IndexingState;
   logFile: string | null;
   autoIndexTask: Promise<void> | null;
+  initialIndexCheckDone: boolean;
+  startIndexing: () => Promise<{ started: boolean; message: string }>;
   watcher: FSWatcher | null;
   pendingWatchFiles: Set<string>;
   watchTimer: NodeJS.Timeout | null;
@@ -93,7 +97,7 @@ function initLogFile(projectName: string): string | null {
 function createMcpServerInstance(ctx: ServerContext) {
   const server = new Server(
     { name: 'code-search-mcp', version: '0.1.0' },
-    { capabilities: { tools: {}, resources: {} } },
+    { capabilities: { tools: {}, resources: {}, prompts: {} } },
   );
 
   const allTools = [
@@ -126,10 +130,41 @@ function createMcpServerInstance(ctx: ServerContext) {
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
   });
 
-  const allResources = registerResources(ctx);
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: [
+      {
+        name: 'index',
+        title: 'Index Project',
+        description: 'Start indexing the current project, then poll index_status until indexing completes.',
+      },
+    ],
+  }));
+
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    if (request.params.name !== 'index') {
+      return { messages: [], description: `Unknown prompt: ${request.params.name}` };
+    }
+
+    return {
+      description: 'Start and monitor project indexing.',
+      messages: [{
+        role: 'user',
+        content: {
+          type: 'text',
+          text: [
+            'Start indexing the current project by calling the `index_start` MCP tool.',
+            'After starting, call `index_status` to monitor progress.',
+            'Indexing can take several minutes. If the agent has a shell/sleep tool available, wait about 30 seconds between status checks instead of polling continuously.',
+            'Keep polling `index_status` until Ready is `yes` and Indexing is `idle`, or stop and report the Error field if status becomes `error`.',
+            'Do not call search, graph, profile, or resource tools until indexing is complete.',
+          ].join('\n'),
+        },
+      }],
+    };
+  });
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-    resources: allResources,
+    resources: registerResources(ctx),
   }));
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
@@ -152,13 +187,15 @@ export async function startServer(
     startedAt: Date.now(),
     logFile: initLogFile(projectName),
     autoIndexTask: null,
+    initialIndexCheckDone: false,
+    startIndexing: async () => startManualIndex(ctx),
     watcher: null,
     pendingWatchFiles: new Set(),
     watchTimer: null,
     indexing: {
       status: 'idle',
       phase: null,
-      message: null,
+      message: 'Checking for an existing index...',
       percent: 0,
       startedAt: null,
       error: null,
@@ -189,11 +226,12 @@ export async function startServer(
     }
   }
 
-  // --- Auto-index in the background ---
-  // MCP clients expect initialization to complete quickly. Full embedding jobs
-  // can take minutes, so serve immediately and expose progress via index_status.
-  ctx.autoIndexTask = autoIndex(ctx).catch((err) => {
-    log(ctx, `[code-search-mcp] Background auto-index task failed`, err);
+  // --- Load/refresh existing indexes in the background ---
+  // First-time indexing is intentionally manual to avoid indexing accidental
+  // workspaces. Existing indexes still load immediately and stale indexes keep
+  // refreshing in the background as before.
+  ctx.autoIndexTask = initializeExistingIndex(ctx).catch((err) => {
+    log(ctx, `[code-search-mcp] Background index initialization task failed`, err);
   });
 
   await startFileWatcher(ctx);
@@ -288,6 +326,10 @@ export async function startServer(
         log(ctx, `[auto-reindex] skipped: indexing already running (${ctx.indexing.phase ?? 'unknown phase'})`);
         return;
       }
+      if (!ctx.indexReady) {
+        log(ctx, '[auto-reindex] skipped: index is not initialized');
+        return;
+      }
       try {
         await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'auto-reindex' });
       } catch (err) {
@@ -355,6 +397,10 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
 
   const onChange = async (path: string) => {
     const absPath = resolve(path);
+    if (!ctx.indexReady) {
+      log(ctx, `[watcher] ignored before index initialization: ${absPath}`);
+      return;
+    }
     if (!isPotentialIndexPath(ctx, absPath)) {
       log(ctx, `[watcher] ignored non-indexable path: ${absPath}`);
       return;
@@ -463,6 +509,10 @@ async function flushWatchedChanges(ctx: ServerContext): Promise<void> {
     }, ctx.indexing.debounceMs);
     return;
   }
+  if (!ctx.indexReady) {
+    log(ctx, '[watcher] flush skipped: index is not initialized');
+    return;
+  }
   const count = ctx.pendingWatchFiles.size;
   if (count === 0) {
     log(ctx, '[watcher] flush skipped: no pending files');
@@ -551,7 +601,30 @@ async function trackedIndex(
   }
 }
 
-async function autoIndex(ctx: ServerContext): Promise<void> {
+async function startManualIndex(ctx: ServerContext): Promise<{ started: boolean; message: string }> {
+  if (ctx.indexReady) {
+    return { started: false, message: `Index is already initialized for "${ctx.projectName}". Use index_status to inspect it.` };
+  }
+  if (!ctx.initialIndexCheckDone) {
+    return { started: false, message: `Still checking whether "${ctx.projectName}" already has an index. Call index_status, then retry index_start if it remains uninitialized.` };
+  }
+  if (ctx.indexing.status === 'indexing') {
+    return { started: false, message: `Indexing is already in progress (phase: ${ctx.indexing.phase ?? 'starting'}). Use index_status to monitor progress.` };
+  }
+  if (!ctx.directoryPath) {
+    return { started: false, message: `Cannot start indexing for "${ctx.projectName}": no project directory is configured for this MCP server.` };
+  }
+
+  ctx.autoIndexTask = trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'manual-index' })
+    .then(() => undefined)
+    .catch((err) => {
+      log(ctx, '[manual-index] failed', err);
+    });
+
+  return { started: true, message: `Indexing started for "${ctx.projectName}" at ${ctx.directoryPath}. Use index_status to monitor progress.` };
+}
+
+async function initializeExistingIndex(ctx: ServerContext): Promise<void> {
   try {
     const kbPath = getKnowledgeBasePath(ctx.projectName);
     const hasLanceDB = existsSync(join(kbPath, 'lancedb'));
@@ -590,24 +663,32 @@ async function autoIndex(ctx: ServerContext): Promise<void> {
 
         log(ctx,
           `[code-search-mcp] Existing index for "${ctx.projectName}" is incomplete ` +
-          `(chunks=${stats.totalChunks}, provider=${stats.embeddingProvider || 'unknown'}). Rebuilding...`,
+          `(chunks=${stats.totalChunks}, provider=${stats.embeddingProvider || 'unknown'}). Waiting for manual index_start.`,
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        log(ctx, `[code-search-mcp] Existing index could not be opened (${msg}). Rebuilding...`, err);
+        log(ctx, `[code-search-mcp] Existing index could not be opened (${msg}). Waiting for manual index_start.`, err);
       }
     }
 
     if (!ctx.directoryPath) {
-      log(ctx, `[code-search-mcp] No index found and no directory path — tools will return empty results`);
+      ctx.indexing.status = 'uninitialized';
+      ctx.indexing.message = 'No existing index found and no directory path is configured. Configure a local project path before running index_start.';
+      log(ctx, `[code-search-mcp] No index found and no directory path — index_start cannot run`);
       return;
     }
 
-    // Build KB + Embed
-    log(ctx, `[code-search-mcp] No index found — building from ${ctx.directoryPath}...`);
-    await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'auto-index' });
-    log(ctx, `[code-search-mcp] Index ready.`);
+    ctx.indexing.status = 'uninitialized';
+    ctx.indexing.phase = null;
+    ctx.indexing.percent = 0;
+    ctx.indexing.message = `No existing index found. Run index_start or the /index prompt to index ${ctx.directoryPath}.`;
+    log(ctx, `[code-search-mcp] No index found for "${ctx.projectName}". Waiting for manual index_start.`);
   } catch (err) {
-    log(ctx, `[code-search-mcp] Auto-index failed`, err);
+    ctx.indexing.status = 'error';
+    ctx.indexing.error = err instanceof Error ? err.message : String(err);
+    ctx.indexing.message = `Index initialization failed: ${ctx.indexing.error}`;
+    log(ctx, `[code-search-mcp] Index initialization failed`, err);
+  } finally {
+    ctx.initialIndexCheckDone = true;
   }
 }
