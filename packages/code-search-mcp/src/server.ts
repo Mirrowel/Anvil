@@ -13,7 +13,7 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import type { FSWatcher } from 'chokidar';
 
@@ -25,7 +25,7 @@ import { registerResources, handleResource } from './resources/resources.js';
 import { getKnowledgeBasePath } from '@esankhan3/anvil-knowledge-core';
 import { indexFromPath } from '@esankhan3/anvil-knowledge-core';
 import { KnowledgeIndexer } from '@esankhan3/anvil-knowledge-core';
-import { discoverRepos, isIndexableFile, ensureIndexIgnore } from '@esankhan3/anvil-knowledge-core';
+import { discoverRepos, isIndexableFile, ensureIndexIgnore, SKIP_DIRS } from '@esankhan3/anvil-knowledge-core';
 import { loadServerConfig, type ServerConfig } from './core/env-config.js';
 import { startHttpTransport } from './transports/http-transport.js';
 
@@ -55,6 +55,7 @@ export interface ServerContext {
   projectName: string;
   directoryPath: string | null;
   indexReady: boolean;
+  profilingEnabled: boolean;
   startedAt: number;
   indexing: IndexingState;
   logFile: string | null;
@@ -103,7 +104,7 @@ function createMcpServerInstance(ctx: ServerContext) {
   const allTools = [
     ...registerSearchTools(),
     ...registerGraphTools(),
-    ...registerProfileTools(),
+    ...registerProfileTools({ profilingEnabled: ctx.profilingEnabled }),
     ...registerIndexTools(),
   ];
 
@@ -184,6 +185,7 @@ export async function startServer(
     projectName,
     directoryPath,
     indexReady: false,
+    profilingEnabled: config.llmMode !== 'none',
     startedAt: Date.now(),
     logFile: initLogFile(projectName),
     autoIndexTask: null,
@@ -233,8 +235,6 @@ export async function startServer(
   ctx.autoIndexTask = initializeExistingIndex(ctx).catch((err) => {
     log(ctx, `[code-search-mcp] Background index initialization task failed`, err);
   });
-
-  await startFileWatcher(ctx);
 
   // --- Start transport ---
   if (config.transport === 'stdio') {
@@ -293,15 +293,18 @@ export async function startServer(
         }
 
         const project = body.project || projectNameFromPath(dirPath);
+        if (ctx.directoryPath && resolve(ctx.directoryPath) !== dirPath) {
+          await stopFileWatcher(ctx);
+        }
+
+        ctx.projectName = project;
+        ctx.directoryPath = dirPath;
+        ctx.logFile = initLogFile(project);
 
         const stats = await trackedIndex(ctx, project, dirPath, {
           force: body.force,
           label: 'admin-index',
         });
-
-        ctx.projectName = project;
-        ctx.directoryPath = dirPath;
-        ctx.logFile = initLogFile(project);
 
         return {
           status: 'ok',
@@ -374,6 +377,8 @@ function parseDurationEnv(name: string, fallbackMs: number): number {
 }
 
 async function startFileWatcher(ctx: ServerContext): Promise<void> {
+  if (ctx.watcher) return;
+  if (!ctx.indexReady) return;
   if (!ctx.directoryPath) {
     log(ctx, '[watcher] disabled: no directory path configured');
     return;
@@ -390,21 +395,13 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
   const { watch } = await import('chokidar');
   const watcher = watch(ctx.directoryPath, {
     ignoreInitial: true,
-    ignored: /(^|[\\/])(\.git|node_modules|dist|build|\.anvil|\.opencode)([\\/]|$)/,
+    ignored: (path, stats) => shouldIgnoreWatchPath(ctx, resolve(path), stats?.isDirectory() ?? false),
     awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 },
   });
   ctx.watcher = watcher;
 
   const onChange = async (path: string) => {
     const absPath = resolve(path);
-    if (!ctx.indexReady) {
-      log(ctx, `[watcher] ignored before index initialization: ${absPath}`);
-      return;
-    }
-    if (!isPotentialIndexPath(ctx, absPath)) {
-      log(ctx, `[watcher] ignored non-indexable path: ${absPath}`);
-      return;
-    }
     if (!watchPathNeedsRefresh(ctx, absPath)) {
       log(ctx, `[watcher] ignored unchanged path event: ${absPath}`);
       return;
@@ -429,20 +426,48 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
   log(ctx, `[code-search-mcp] File watcher enabled at ${ctx.directoryPath} (debounce ${debounceMs}ms)`);
 }
 
-function isPotentialIndexPath(ctx: ServerContext, absPath: string): boolean {
-  if (!ctx.directoryPath) return false;
+async function stopFileWatcher(ctx: ServerContext): Promise<void> {
+  if (ctx.watchTimer) {
+    clearTimeout(ctx.watchTimer);
+    ctx.watchTimer = null;
+  }
+  ctx.pendingWatchFiles.clear();
+  ctx.indexing.pendingFiles = 0;
+  ctx.indexing.watcherEnabled = false;
+  if (!ctx.watcher) return;
+
+  const watcher = ctx.watcher;
+  ctx.watcher = null;
+  await watcher.close();
+}
+
+function shouldIgnoreWatchPath(ctx: ServerContext, absPath: string, isDirectory: boolean): boolean {
+  if (!ctx.directoryPath) return true;
+  if (basename(absPath) === '.gitignore') return true;
+  if (!existsSync(absPath)) return false;
+
+  let directory = isDirectory;
+  if (!directory) {
+    try {
+      directory = statSync(absPath).isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
   const name = basename(absPath);
-  if (name === '.gitignore' || name === 'index.ignore') return true;
+  if (directory) return SKIP_DIRS.has(name);
   try {
-    return existsSync(absPath) && isIndexableFile(findRepoForPath(ctx, absPath)?.path ?? ctx.directoryPath, absPath);
+    return !isIndexableFile(findRepoForPath(ctx, absPath)?.path ?? ctx.directoryPath, absPath);
   } catch {
-    return true;
+    return false;
   }
 }
 
 function watchPathNeedsRefresh(ctx: ServerContext, absPath: string): boolean {
   const name = basename(absPath);
-  if (name === '.gitignore' || name === 'index.ignore') return true;
+  if (name === '.gitignore') return false;
+  if (name === 'index.ignore') return true;
   const repo = findRepoForPath(ctx, absPath);
   if (!repo) return true;
   if (!existsSync(absPath)) return true;
@@ -588,6 +613,7 @@ async function trackedIndex(
     ctx.indexing.message = `Completed: ${stats.totalChunks} chunks, ${stats.repos.length} repos in ${Math.round(stats.indexDurationMs / 1000)}s`;
     pushHistory(ctx, 'complete', ctx.indexing.message);
     log(ctx, `[${label}] ${ctx.indexing.message}`);
+    await startFileWatcher(ctx);
 
     return stats;
   } catch (err) {
@@ -642,7 +668,10 @@ async function initializeExistingIndex(ctx: ServerContext): Promise<void> {
           log(ctx, `[code-search-mcp] Index loaded for "${ctx.projectName}" (${stats.totalChunks} chunks, ${stats.embeddingProvider})`);
           if (ctx.directoryPath) {
             const freshness = new KnowledgeIndexer().checkFreshness(ctx.projectName, ctx.directoryPath);
-            if (!freshness.stale) return;
+            if (!freshness.stale) {
+              await startFileWatcher(ctx);
+              return;
+            }
 
             ctx.indexing.message = `Existing index is stale: ${freshness.reason}. Refreshing in background...`;
             ctx.indexing.lastRefreshSummary = `stale: ${freshness.reason}`;

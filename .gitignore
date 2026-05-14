@@ -44,3 +44,5 @@ tasks/
 !README.md
 !**/README.md
 !docs/**/*.md
+.anvil-kb/
+index.ignore

@@ -6,16 +6,24 @@ import type { ServerContext } from '../server.js';
 import { loadAllProfiles, loadProfile } from '@esankhan3/anvil-knowledge-core';
 import { discoverRepos } from '@esankhan3/anvil-knowledge-core';
 
-export function registerProfileTools() {
-  return [
+export function registerProfileTools(opts?: { profilingEnabled?: boolean }) {
+  const tools = [
     {
       name: 'list_repos',
-      description: 'List all indexed repos with their role, domain, and description.',
+      description: opts?.profilingEnabled === false
+        ? 'List indexed repos. Profiling is disabled, so role/domain/description fields are unavailable.'
+        : 'List all indexed repos with their role, domain, and description.',
       inputSchema: {
         type: 'object' as const,
         properties: {},
       },
     },
+  ];
+
+  if (opts?.profilingEnabled === false) return tools;
+
+  return [
+    ...tools,
     {
       name: 'get_repo_profile',
       description: 'Get the LLM-generated profile for a repo — role, domain, tech stack, exposed/consumed endpoints.',
@@ -44,6 +52,10 @@ export async function handleProfileTool(
   try {
     // imported at top
 
+    if (name === 'get_repo_profile' && !ctx.profilingEnabled) {
+      return { content: [{ type: 'text', text: 'Repo profiling is disabled (CODE_SEARCH_LLM_MODE=none), so get_repo_profile is not available.' }] };
+    }
+
     if (name === 'list_repos') {
       const profiles = loadAllProfiles(ctx.projectName);
       if (profiles.length === 0) {
@@ -52,7 +64,10 @@ export async function handleProfileTool(
           // imported at top
           const repos = discoverRepos(ctx.directoryPath);
           const text = repos.map(r => `- **${r.name}** (${r.language})`).join('\n');
-          return { content: [{ type: 'text', text: `# Repos (${repos.length}, not yet profiled)\n\n${text}` }] };
+          const reason = ctx.profilingEnabled
+            ? 'not yet profiled'
+            : 'profiling disabled: CODE_SEARCH_LLM_MODE=none';
+          return { content: [{ type: 'text', text: `# Repos (${repos.length}, ${reason})\n\n${text}` }] };
         }
         return { content: [{ type: 'text', text: 'No repos found. Run reindex first.' }] };
       }
@@ -68,7 +83,10 @@ export async function handleProfileTool(
       const repo = args.repo as string;
       const profile = loadProfile(ctx.projectName, repo);
       if (!profile) {
-        return { content: [{ type: 'text', text: `No profile found for "${repo}". Run reindex to generate profiles.` }] };
+        const reason = ctx.profilingEnabled
+          ? 'Run reindex to generate profiles.'
+          : 'Profiling is disabled (CODE_SEARCH_LLM_MODE=none).';
+        return { content: [{ type: 'text', text: `No profile found for "${repo}". ${reason}` }] };
       }
 
       const lines = [

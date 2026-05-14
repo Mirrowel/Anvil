@@ -7,6 +7,10 @@ import { join } from 'node:path';
 import type { ServerContext } from '../server.js';
 import { getKnowledgeBasePath } from '@esankhan3/anvil-knowledge-core';
 
+function normalizeGraphPath(value: string): string {
+  return value.replace(/\\/g, '/');
+}
+
 export function registerGraphTools() {
   return [
     {
@@ -180,10 +184,14 @@ export async function handleGraphTool(
       const nodes = sysGraph.nodes ?? [];
 
       // Find all nodes in this file
+      const normalizedFile = normalizeGraphPath(file);
       const fileNodes = nodes.filter((n: any) => {
         const key = n.key ?? '';
-        const matchesFile = key.includes(`${repo}::${file}::`);
-        const matchesEntity = !entity || key.includes(entity);
+        const attrs = n.attributes ?? {};
+        const nodeRepo = attrs.repo ?? key.split('::')[0];
+        const nodeFile = normalizeGraphPath(attrs.file ?? key.slice(`${repo}::`.length).split('::')[0] ?? '');
+        const matchesFile = nodeRepo === repo && nodeFile === normalizedFile;
+        const matchesEntity = !entity || key.includes(entity) || (attrs.label ?? '').includes(entity);
         return matchesFile && matchesEntity;
       });
 

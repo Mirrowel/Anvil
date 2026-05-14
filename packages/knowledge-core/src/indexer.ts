@@ -137,6 +137,7 @@ export interface BuildKBResult {
   durationMs: number;
   /** Chunks saved to disk, ready for embedding */
   chunksPath: string;
+  unchanged?: boolean;
 }
 
 export interface FreshnessStatus {
@@ -211,7 +212,7 @@ export class KnowledgeIndexer {
     if (reposToIndex.length === 0) {
       log('All repos up to date — nothing to build.');
       report({ phase: 'done', message: 'All repos up to date', percent: 100, etaSeconds: 0, skippedRepos });
-      return { project, repos: [], totalChunks: 0, totalTokens: 0, crossRepoEdges: 0, durationMs: 0, chunksPath: join(basePath, 'chunks.json') };
+      return { project, repos: [], totalChunks: 0, totalTokens: 0, crossRepoEdges: 0, durationMs: 0, chunksPath: join(basePath, 'chunks.json'), unchanged: true };
     }
 
     // 2. LLM Repo Profiling (WS-1) — skipped if LLM_MODE=none
@@ -250,7 +251,7 @@ export class KnowledgeIndexer {
       const meta = opts?.force ? null : readRepoIndexMeta(basePath, repo.name);
       const forceFullReason = fullRebuildReasons.get(repo.name);
 
-      // Use file-level freshness so unstaged/untracked changes are indexed too.
+      // Use per-file freshness so unstaged/untracked changes are indexed too.
       const diff = opts?.force || forceFullReason ? null : detectFileChanges(repo.path, meta?.files);
       const useIncremental = diff && !diff.fallbackToFull && (diff.added.length + diff.modified.length + diff.deleted.length) > 0;
 
@@ -271,7 +272,7 @@ export class KnowledgeIndexer {
       allChunks.push(...result.chunks);
       repoChunkResults.set(repo.name, result);
       const totalChunkCount = Object.values(result.fileIndex).reduce((sum: number, f: any) => sum + f.chunkCount, 0);
-      log(`  ${repo.name}: chunk result -> ${result.changedFiles.length} changed files, ${result.deletedFiles.length} deleted files, ${result.chunks.length} chunks needing embedding, ${totalChunkCount} indexed chunks total`);
+      log(`  ${repo.name}: chunk result -> ${result.changedFiles.length} changed files, ${result.deletedFiles.length} deleted files, ${result.chunks.length} chunks from changed files, ${totalChunkCount} indexed chunks total`);
       log(`  ${repo.name}: chunk diagnostics -> ${formatChunkDiagnostics(result.diagnostics)}`);
       repoStats.push({ name: repo.name, chunkCount: totalChunkCount, language: repo.language });
     }
@@ -488,6 +489,7 @@ export class KnowledgeIndexer {
     for (const [repoName, filePaths] of changedFiles) {
       for (const filePath of filePaths) {
         changedFileKeys.add(`${repoName}\0${filePath}`);
+        // Reuse embeddings for unchanged chunks in files that were re-chunked.
         for (const existing of await vectorStore.getChunksByFile(repoName, filePath)) {
           if (!existing.embedding || !existing.stableKey || !existing.embedHash) continue;
           reusableByKey.set(`${repoName}\0${filePath}\0${existing.stableKey}\0${existing.embedHash}`, existing as CodeChunk & { embedding: number[] });
@@ -625,7 +627,13 @@ export class KnowledgeIndexer {
     log(`Stored ${embeddedChunks.length} new chunks and reused ${reusedChunks.length} chunks in LanceDB (${deletedFiles.length} removed)`);
 
     // Update metadata
-    const repoNames = [...new Set(chunks.map((c) => c.repoName))];
+    const repoNames = [
+      ...new Set([
+        ...chunks.map((c) => c.repoName),
+        ...deletedFiles.map((f) => f.repoName),
+        ...changedFiles.keys(),
+      ]),
+    ];
     for (const repoName of repoNames) {
       const metaPath = join(basePath, repoName, 'index_meta.json');
       if (existsSync(metaPath)) {
@@ -641,6 +649,11 @@ export class KnowledgeIndexer {
 
     const durationMs = Date.now() - startTime;
     report({ phase: 'done', message: `Embedded ${newChunks.length} new chunks (${deletedFiles.length} removed) in ${formatEta(Math.ceil(durationMs / 1000))}`, percent: 100, etaSeconds: 0 });
+
+    if (chunks.length === 0) {
+      const stats = await this.getStats(project);
+      return { ...stats, indexDurationMs: durationMs };
+    }
 
     return {
       project,
@@ -779,7 +792,10 @@ export class KnowledgeIndexer {
     },
   ): Promise<IndexStats> {
     // Phase 1: Build KB (fast)
-    await this.buildKB(project, repos, config, opts);
+    const build = await this.buildKB(project, repos, config, opts);
+    if (build.unchanged) {
+      return this.getStats(project);
+    }
 
     // Phase 2: Embed (slow)
     return this.embedChunks(project, config, opts);

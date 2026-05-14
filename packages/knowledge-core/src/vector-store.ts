@@ -155,7 +155,7 @@ export class VectorStore {
     lookups: Array<{ repoName: string; filePath: string; entityName?: string }>,
   ): Promise<ScoredChunk[]> {
     if (!this.table || lookups.length === 0) return [];
-    const esc = (s: string) => s.replace(/'/g, "''");
+    const esc = escapeSqlString;
     const conditions = lookups.map((l) => {
       const base = `repoName = '${esc(l.repoName)}' AND filePath = '${esc(l.filePath)}'`;
       return l.entityName
@@ -189,12 +189,24 @@ export class VectorStore {
     filePath: string,
   ): Promise<Array<CodeChunk & { embedding?: number[] }>> {
     if (!this.table) return [];
-    const esc = (s: string) => s.replace(/'/g, "''");
+    const esc = escapeSqlString;
     try {
       const results = await this.table
         .filter(`repoName = '${esc(repoName)}' AND filePath = '${esc(filePath)}'`)
         .toArray();
-      return results.map((r: any) => ({ ...rowToChunk(r), embedding: r.vector }));
+      if (results.length > 0) {
+        return results.map((r: any) => ({ ...rowToChunk(r), embedding: rowVectorToArray(r.vector) }));
+      }
+    } catch {
+      // LanceDB SQL string filters can reject Windows paths containing backslashes.
+    }
+
+    try {
+      const normalizedTarget = normalizeStoredPath(filePath);
+      const repoResults = await this.table.query().toArray();
+      return repoResults
+        .filter((r: any) => r.repoName === repoName && normalizeStoredPath(r.filePath ?? '') === normalizedTarget)
+        .map((r: any) => ({ ...rowToChunk(r), embedding: rowVectorToArray(r.vector) }));
     } catch {
       return [];
     }
@@ -218,7 +230,7 @@ export class VectorStore {
   async getChunkIds(project: string): Promise<string[]> {
     if (!this.table) return [];
     try {
-      const escapedProject = project.replace(/'/g, "''");
+      const escapedProject = escapeSqlString(project);
       const results = await this.table
         .query()
         .where(`project = '${escapedProject}'`)
@@ -250,9 +262,19 @@ export class VectorStore {
   /** Delete chunks for specific files within a repo (for incremental re-indexing) */
   async deleteFileChunks(project: string, repoName: string, filePaths: string[]): Promise<void> {
     if (!this.table || filePaths.length === 0) return;
-    const escapedProject = project.replace(/'/g, "''");
-    const escapedRepo = repoName.replace(/'/g, "''");
-    const fileFilter = filePaths.map((f) => `'${f.replace(/'/g, "''")}'`).join(', ');
+    const ids: string[] = [];
+    for (const filePath of filePaths) {
+      for (const chunk of await this.getChunksByFile(repoName, filePath)) {
+        ids.push(chunk.id);
+      }
+    }
+    if (ids.length > 0) {
+      await this.deleteChunksByIds(ids);
+      return;
+    }
+    const escapedProject = escapeSqlString(project);
+    const escapedRepo = escapeSqlString(repoName);
+    const fileFilter = filePaths.map((f) => `'${escapeSqlString(f)}'`).join(', ');
     try {
       await this.table.delete(
         `project = '${escapedProject}' AND repoName = '${escapedRepo}' AND filePath IN (${fileFilter})`,
@@ -383,6 +405,26 @@ function groupFilesByRepo(files: Array<{ repoName: string; filePath: string }>):
     byRepo.set(file.repoName, list);
   }
   return byRepo;
+}
+
+function escapeSqlString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "''");
+}
+
+function normalizeStoredPath(value: string): string {
+  return value.replace(/\\/g, '/');
+}
+
+function rowVectorToArray(vector: unknown): number[] | undefined {
+  if (Array.isArray(vector)) return vector;
+  if (vector && typeof (vector as { toArray?: unknown }).toArray === 'function') {
+    return Array.from((vector as { toArray: () => Iterable<number> }).toArray());
+  }
+  if (vector && typeof (vector as { length?: unknown; get?: unknown }).length === 'number' && typeof (vector as { get?: unknown }).get === 'function') {
+    const typed = vector as { length: number; get: (index: number) => number };
+    return Array.from({ length: typed.length }, (_, index) => typed.get(index));
+  }
+  return undefined;
 }
 
 function rowToChunk(row: any): CodeChunk {
