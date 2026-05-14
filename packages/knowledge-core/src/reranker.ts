@@ -117,14 +117,20 @@ class OllamaReranker implements Reranker {
 // ---------------------------------------------------------------------------
 
 class CohereReranker implements Reranker {
+  private model: string;
+
+  constructor(opts?: { model?: string }) {
+    this.model = opts?.model || process.env.CODE_SEARCH_RERANKER_MODEL || process.env.RERANKER_MODEL || 'rerank-v4.0-pro';
+  }
+
   async rerank(
     query: string,
     documents: string[],
     topN?: number,
   ): Promise<Array<{ index: number; score: number }>> {
-    const apiKey = process.env.COHERE_API_KEY;
+    const apiKey = process.env.COHERE_API_KEY || process.env.CO_API_KEY || process.env.CODE_SEARCH_RERANKER_API_KEY;
     if (!apiKey) {
-      throw new Error('COHERE_API_KEY environment variable is not set');
+      throw new Error('COHERE_API_KEY, CO_API_KEY, or CODE_SEARCH_RERANKER_API_KEY environment variable is not set');
     }
 
     const response = await fetch('https://api.cohere.com/v2/rerank', {
@@ -134,7 +140,7 @@ class CohereReranker implements Reranker {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'rerank-v3.5',
+        model: this.model,
         query,
         documents,
         top_n: topN ?? documents.length,
@@ -151,6 +157,65 @@ class CohereReranker implements Reranker {
     };
 
     return json.results.map((r) => ({ index: r.index, score: r.relevance_score }));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// NVIDIA Reranker
+// ---------------------------------------------------------------------------
+
+class NvidiaReranker implements Reranker {
+  private model: string;
+
+  constructor(opts?: { model?: string }) {
+    this.model = opts?.model || process.env.CODE_SEARCH_RERANKER_MODEL || process.env.NVIDIA_RERANK_MODEL || 'nv-rerank-qa-mistral-4b:1';
+  }
+
+  async rerank(
+    query: string,
+    documents: string[],
+    topN?: number,
+  ): Promise<Array<{ index: number; score: number }>> {
+    const apiKey = process.env.NVIDIA_API_KEY || process.env.CODE_SEARCH_RERANKER_API_KEY;
+    if (!apiKey) {
+      throw new Error('NVIDIA_API_KEY or CODE_SEARCH_RERANKER_API_KEY environment variable is not set');
+    }
+
+    const response = await fetch('https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        query: { text: query },
+        passages: documents.map((text) => ({ text })),
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`NVIDIA rerank request failed (${response.status}): ${body}`);
+    }
+
+    const json = (await response.json()) as {
+      rankings?: Array<{ index?: number; passage_index?: number; document_index?: number; score?: number; logit?: number; relevance_score?: number }>;
+      results?: Array<{ index?: number; passage_index?: number; document_index?: number; score?: number; logit?: number; relevance_score?: number }>;
+      data?: Array<{ index?: number; passage_index?: number; document_index?: number; score?: number; logit?: number; relevance_score?: number }>;
+    };
+    const rows = json.rankings ?? json.results ?? json.data ?? [];
+
+    const ranked = rows
+      .map((r) => ({
+        index: r.index ?? r.passage_index ?? r.document_index ?? -1,
+        score: r.score ?? r.relevance_score ?? r.logit ?? 0,
+      }))
+      .filter((r) => r.index >= 0)
+      .sort((a, b) => b.score - a.score);
+
+    return topN ? ranked.slice(0, topN) : ranked;
   }
 }
 
@@ -298,6 +363,8 @@ export function createReranker(provider: string): Reranker | null {
       return new OllamaReranker();
     case 'cohere':
       return new CohereReranker();
+    case 'nvidia':
+      return new NvidiaReranker();
     case 'voyage':
       return new VoyageReranker();
     case 'openai-compatible':

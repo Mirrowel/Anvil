@@ -39,5 +39,8 @@
     "prettier": "^3.5.3",
     "ts-jest": "^29.3.2",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@lancedb/lancedb-win32-x64-msvc": "^0.27.2"
   }
 }

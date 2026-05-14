@@ -157,6 +157,8 @@ export function loadServerConfig(): ServerConfig {
     const reranker = _config.rerankerProvider;
     if (reranker === 'cohere') {
       process.env.COHERE_API_KEY ??= _config.rerankerApiKey;
+    } else if (reranker === 'nvidia') {
+      process.env.NVIDIA_API_KEY ??= _config.rerankerApiKey;
     } else if (reranker === 'voyage') {
       process.env.VOYAGE_API_KEY ??= _config.rerankerApiKey;
     }

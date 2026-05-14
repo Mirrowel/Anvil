@@ -18,7 +18,7 @@
  *   OLLAMA_HOST                   — Ollama endpoint (local mode)
  */
 
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -35,6 +35,10 @@ let force = false;
 let port: string | undefined;
 let transport: string | undefined;
 let authMode: string | undefined;
+
+function projectNameFromPath(path: string): string {
+  return basename(resolve(path)) || 'project';
+}
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--remote' && args[i + 1]) {
@@ -210,12 +214,12 @@ For help:
         process.exit(1);
       }
       if (!projectName) {
-        projectName = directoryPath.split('/').filter(Boolean).pop() || 'project';
+        projectName = projectNameFromPath(directoryPath);
       }
 
     } else if (!projectName) {
       directoryPath = process.cwd();
-      projectName = directoryPath.split('/').filter(Boolean).pop() || 'project';
+      projectName = projectNameFromPath(directoryPath);
     }
 
     const { startServer } = await import('./server.js');

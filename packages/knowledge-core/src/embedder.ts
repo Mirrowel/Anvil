@@ -24,22 +24,39 @@ export class CodestralEmbedder implements EmbeddingProvider {
       throw new Error('MISTRAL_API_KEY environment variable is not set');
     }
 
-    const response = await fetch('https://api.mistral.ai/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        input: texts,
-        encoding_format: 'float',
-      }),
-    });
+    const maxRetries = parseInt(process.env.CODE_SEARCH_EMBEDDING_MAX_RETRIES ?? '6', 10);
+    let response: Response | null = null;
+    let body = '';
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      response = await fetch('https://api.mistral.ai/v1/embeddings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.model,
+          input: texts,
+          encoding_format: 'float',
+        }),
+      });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Codestral embedding request failed (${response.status}): ${body}`);
+      if (response.ok) break;
+
+      body = await response.text();
+      const retryAfter = response.headers.get('retry-after');
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === maxRetries) {
+        throw new Error(`Codestral embedding request failed (${response.status}): ${body}`);
+      }
+
+      const retryAfterMs = retryAfter ? Number(retryAfter) * 1000 : 0;
+      const backoffMs = retryAfterMs || Math.min(60_000, 1000 * 2 ** attempt);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+
+    if (!response?.ok) {
+      throw new Error(`Codestral embedding request failed: ${body || 'no response'}`);
     }
 
     const json = (await response.json()) as { data: Array<{ embedding: number[] }> };

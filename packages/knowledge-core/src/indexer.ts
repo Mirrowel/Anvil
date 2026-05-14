@@ -435,8 +435,14 @@ export class KnowledgeIndexer {
     // Embed only new/changed chunks
     const embedder = createEmbeddingProvider(config.embedding);
     const isOllama = embedder.name === 'ollama';
-    const batchSize = isOllama ? 10 : 50;
-    const batchDelay = isOllama ? 50 : 100;
+    const envBatchSize = parseInt(process.env.CODE_SEARCH_EMBEDDING_BATCH_SIZE ?? '', 10);
+    const envBatchDelay = parseInt(process.env.CODE_SEARCH_EMBEDDING_BATCH_DELAY_MS ?? '', 10);
+    const batchSize = Number.isFinite(envBatchSize) && envBatchSize > 0
+      ? envBatchSize
+      : isOllama ? 10 : 50;
+    const batchDelay = Number.isFinite(envBatchDelay) && envBatchDelay >= 0
+      ? envBatchDelay
+      : isOllama ? 50 : 100;
 
     log(`Embedding ${newChunks.length} new chunks with ${embedder.name} (${chunks.length - newChunks.length} cached, batch size: ${batchSize})...`);
 
@@ -670,7 +676,7 @@ export async function buildKBFromPath(
   if (repos.length === 0) throw new Error(`No git repos found in ${directoryPath}`);
   log(`Discovered ${repos.length} repos`);
   const indexer = new KnowledgeIndexer();
-  return indexer.buildKB(projectName, repos, DEFAULT_CONFIG, opts);
+  return indexer.buildKB(projectName, repos, loadKnowledgeConfig(projectName), opts);
 }
 
 /**
@@ -685,7 +691,7 @@ export async function embedFromPath(
   },
 ): Promise<IndexStats> {
   const indexer = new KnowledgeIndexer();
-  return indexer.embedChunks(projectName, DEFAULT_CONFIG, opts);
+  return indexer.embedChunks(projectName, loadKnowledgeConfig(projectName), opts);
 }
 
 /**
@@ -706,7 +712,7 @@ export async function indexFromPath(
   if (repos.length === 0) throw new Error(`No git repos found in ${directoryPath}`);
   log(`Discovered ${repos.length} repos`);
   const indexer = new KnowledgeIndexer();
-  return indexer.indexProject(projectName, repos, DEFAULT_CONFIG, opts);
+  return indexer.indexProject(projectName, repos, loadKnowledgeConfig(projectName), opts);
 }
 
 function formatEta(seconds: number): string {

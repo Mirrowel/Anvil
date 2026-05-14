@@ -11,8 +11,8 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 
 import { registerSearchTools, handleSearchTool } from './tools/search.js';
 import { registerGraphTools, handleGraphTool } from './tools/graph.js';
@@ -21,6 +21,7 @@ import { registerIndexTools, handleIndexTool } from './tools/index-tools';
 import { registerResources, handleResource } from './resources/resources';
 import { getKnowledgeBasePath } from '@esankhan3/anvil-knowledge-core';
 import { indexFromPath } from '@esankhan3/anvil-knowledge-core';
+import { KnowledgeIndexer } from '@esankhan3/anvil-knowledge-core';
 import { loadServerConfig, type ServerConfig } from './core/env-config.js';
 import { startHttpTransport } from './transports/http-transport.js';
 
@@ -47,6 +48,35 @@ export interface ServerContext {
   indexReady: boolean;
   startedAt: number;
   indexing: IndexingState;
+  logFile: string | null;
+  autoIndexTask: Promise<void> | null;
+}
+
+function projectNameFromPath(path: string): string {
+  return basename(resolve(path)) || 'project';
+}
+
+function log(ctx: Pick<ServerContext, 'logFile'> | null, message: string, error?: unknown): void {
+  const timestamp = new Date().toISOString();
+  const detail = error instanceof Error ? `${error.stack || error.message}` : error ? String(error) : '';
+  const line = `[${timestamp}] ${message}${detail ? `\n${detail}` : ''}`;
+  console.error(line);
+  if (!ctx?.logFile) return;
+  try {
+    appendFileSync(ctx.logFile, `${line}\n`, 'utf-8');
+  } catch {
+    // Logging must never break the MCP server.
+  }
+}
+
+function initLogFile(projectName: string): string | null {
+  try {
+    const kbPath = getKnowledgeBasePath(projectName);
+    mkdirSync(kbPath, { recursive: true });
+    return join(kbPath, 'code-search-mcp.log');
+  } catch {
+    return null;
+  }
 }
 
 /** Create a wired MCP Server instance (shared logic for stdio and HTTP sessions) */
@@ -110,6 +140,8 @@ export async function startServer(
     directoryPath,
     indexReady: false,
     startedAt: Date.now(),
+    logFile: initLogFile(projectName),
+    autoIndexTask: null,
     indexing: {
       status: 'idle',
       phase: null,
@@ -129,22 +161,27 @@ export async function startServer(
     : config.llmMode === 'api'
       ? `api → ${config.llmProvider}/${config.llmModel}${config.llmApiKey ? '' : ' (WARNING: no API key!)'}`
       : `cli → ${config.claudeBin}`;
-  console.error(`[code-search-mcp] LLM: ${llmInfo}`);
+  log(ctx, `[code-search-mcp] LLM: ${llmInfo}`);
+  log(ctx, `[code-search-mcp] Log file: ${ctx.logFile || 'disabled'}`);
 
-  // --- Auto-index if needed ---
-  await autoIndex(ctx);
+  // --- Auto-index in the background ---
+  // MCP clients expect initialization to complete quickly. Full embedding jobs
+  // can take minutes, so serve immediately and expose progress via index_status.
+  ctx.autoIndexTask = autoIndex(ctx).catch((err) => {
+    log(ctx, `[code-search-mcp] Background auto-index task failed`, err);
+  });
 
   // --- Start transport ---
   if (config.transport === 'stdio') {
     const server = createMcpServerInstance(ctx);
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error(`[code-search-mcp] Server running for "${projectName}" (stdio)`);
+      log(ctx, `[code-search-mcp] Server running for "${projectName}" (stdio)`);
   } else {
     // Security: warn if auth=none with non-localhost binding
     if (config.authMode === 'none' && config.host !== '127.0.0.1' && config.host !== 'localhost') {
-      console.error(`[code-search-mcp] WARNING: Auth is disabled but server binds to ${config.host}. Any machine on the network can access your code search API.`);
-      console.error(`[code-search-mcp] Set CODE_SEARCH_AUTH_MODE=api-key or CODE_SEARCH_HOST=127.0.0.1 for security.`);
+      log(ctx, `[code-search-mcp] WARNING: Auth is disabled but server binds to ${config.host}. Any machine on the network can access your code search API.`);
+      log(ctx, `[code-search-mcp] Set CODE_SEARCH_AUTH_MODE=api-key or CODE_SEARCH_HOST=127.0.0.1 for security.`);
     }
 
     await startHttpTransport({
@@ -153,11 +190,11 @@ export async function startServer(
         server: createMcpServerInstance(ctx),
       }),
       onReady: (url) => {
-        console.error(`[code-search-mcp] Server running for "${projectName}" at ${url}/mcp`);
-        console.error(`[code-search-mcp] Health:  GET  ${url}/health`);
-        console.error(`[code-search-mcp] Status:  GET  ${url}/status`);
-        console.error(`[code-search-mcp] Index:   POST ${url}/index`);
-        console.error(`[code-search-mcp] Auth: ${config.authMode}`);
+        log(ctx, `[code-search-mcp] Server running for "${projectName}" at ${url}/mcp`);
+        log(ctx, `[code-search-mcp] Health:  GET  ${url}/health`);
+        log(ctx, `[code-search-mcp] Status:  GET  ${url}/status`);
+        log(ctx, `[code-search-mcp] Index:   POST ${url}/index`);
+        log(ctx, `[code-search-mcp] Auth: ${config.authMode}`);
       },
       getHealth: () => ({
         project: ctx.projectName,
@@ -190,7 +227,7 @@ export async function startServer(
           throw new Error(`Indexing already in progress (phase: ${ctx.indexing.phase}). Wait for it to complete or check GET /status.`);
         }
 
-        const project = body.project || dirPath.split('/').filter(Boolean).pop() || 'project';
+        const project = body.project || projectNameFromPath(dirPath);
 
         const stats = await trackedIndex(ctx, project, dirPath, {
           force: body.force,
@@ -199,6 +236,7 @@ export async function startServer(
 
         ctx.projectName = project;
         ctx.directoryPath = dirPath;
+        ctx.logFile = initLogFile(project);
 
         return {
           status: 'ok',
@@ -216,13 +254,13 @@ export async function startServer(
   // --- Scheduled reindex interval (server-side only) ---
   const reindexIntervalMs = parseReindexInterval();
   if (reindexIntervalMs > 0 && ctx.directoryPath) {
-    console.error(`[code-search-mcp] Auto-reindex every ${Math.round(reindexIntervalMs / 60_000)}m`);
+    log(ctx, `[code-search-mcp] Auto-reindex every ${Math.round(reindexIntervalMs / 60_000)}m`);
     setInterval(async () => {
       if (!ctx.directoryPath || ctx.indexing.status === 'indexing') return;
       try {
         await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'auto-reindex' });
       } catch (err) {
-        console.error(`[auto-reindex] Failed:`, err);
+        log(ctx, `[auto-reindex] Failed`, err);
       }
     }, reindexIntervalMs).unref();
   }
@@ -272,13 +310,14 @@ async function trackedIndex(
   ctx.indexing.startedAt = Date.now();
   ctx.indexing.error = null;
   pushHistory(ctx, 'start', `${label}: started for "${project}" at ${dirPath}`);
+  log(ctx, `[${label}] started for "${project}" at ${dirPath}`);
 
   try {
     const stats = await indexFromPath(project, dirPath, {
       force: opts?.force,
       onProgress: (m) => {
         ctx.indexing.message = m;
-        console.error(`[${label}] ${m}`);
+        log(ctx, `[${label}] ${m}`);
       },
       onDetailedProgress: (p) => {
         ctx.indexing.phase = p.phase;
@@ -295,6 +334,7 @@ async function trackedIndex(
     ctx.indexing.lastDurationMs = stats.indexDurationMs;
     ctx.indexing.message = `Completed: ${stats.totalChunks} chunks, ${stats.repos.length} repos in ${Math.round(stats.indexDurationMs / 1000)}s`;
     pushHistory(ctx, 'complete', ctx.indexing.message);
+    log(ctx, `[${label}] ${ctx.indexing.message}`);
 
     return stats;
   } catch (err) {
@@ -303,6 +343,7 @@ async function trackedIndex(
     ctx.indexing.error = msg;
     ctx.indexing.message = `Failed: ${msg}`;
     pushHistory(ctx, 'error', msg);
+    log(ctx, `[${label}] failed`, err);
     throw err;
   }
 }
@@ -314,21 +355,38 @@ async function autoIndex(ctx: ServerContext): Promise<void> {
     const hasGraph = existsSync(join(kbPath, 'system_graph_v2.json'));
 
     if (hasLanceDB && hasGraph) {
-      ctx.indexReady = true;
-      console.error(`[code-search-mcp] Index loaded for "${ctx.projectName}"`);
-      return;
+      try {
+        const stats = await new KnowledgeIndexer().getStats(ctx.projectName);
+        const providerReady = stats.repos.length > 0 && stats.repos.every((repo) => repo.chunkCount > 0);
+        const vectorReady = stats.totalChunks > 0;
+        const embedded = stats.embeddingProvider !== 'pending' && stats.embeddingProvider !== 'unknown';
+
+        if (providerReady && vectorReady && embedded) {
+          ctx.indexReady = true;
+          log(ctx, `[code-search-mcp] Index loaded for "${ctx.projectName}" (${stats.totalChunks} chunks, ${stats.embeddingProvider})`);
+          return;
+        }
+
+        log(ctx,
+          `[code-search-mcp] Existing index for "${ctx.projectName}" is incomplete ` +
+          `(chunks=${stats.totalChunks}, provider=${stats.embeddingProvider || 'unknown'}). Rebuilding...`,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log(ctx, `[code-search-mcp] Existing index could not be opened (${msg}). Rebuilding...`, err);
+      }
     }
 
     if (!ctx.directoryPath) {
-      console.error(`[code-search-mcp] No index found and no directory path — tools will return empty results`);
+      log(ctx, `[code-search-mcp] No index found and no directory path — tools will return empty results`);
       return;
     }
 
     // Build KB + Embed
-    console.error(`[code-search-mcp] No index found — building from ${ctx.directoryPath}...`);
+    log(ctx, `[code-search-mcp] No index found — building from ${ctx.directoryPath}...`);
     await trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'auto-index' });
-    console.error(`[code-search-mcp] Index ready.`);
+    log(ctx, `[code-search-mcp] Index ready.`);
   } catch (err) {
-    console.error(`[code-search-mcp] Auto-index failed:`, err);
+    log(ctx, `[code-search-mcp] Auto-index failed`, err);
   }
 }
