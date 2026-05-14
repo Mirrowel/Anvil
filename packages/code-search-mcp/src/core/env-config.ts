@@ -149,6 +149,10 @@ export function loadServerConfig(): ServerConfig {
       process.env.OPENAI_API_KEY ??= _config.embeddingApiKey;
     } else if (provider === 'voyage') {
       process.env.VOYAGE_API_KEY ??= _config.embeddingApiKey;
+    } else if (provider === 'nvidia') {
+      process.env.NVIDIA_API_KEY ??= _config.embeddingApiKey;
+    } else if (provider === 'cohere') {
+      process.env.COHERE_API_KEY ??= _config.embeddingApiKey;
     }
   }
 

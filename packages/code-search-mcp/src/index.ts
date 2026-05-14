@@ -116,7 +116,7 @@ SERVER MODE (deploy as HTTP service):
     CODE_SEARCH_PORT                HTTP port (default: 3100)
     CODE_SEARCH_AUTH_MODE           none | api-key | jwt
     CODE_SEARCH_AUTH_API_KEYS       Comma-separated API keys
-    CODE_SEARCH_EMBEDDING_PROVIDER  auto | codestral | openai | voyage | ollama | custom
+    CODE_SEARCH_EMBEDDING_PROVIDER  auto | codestral | openai | voyage | nvidia | cohere | ollama | custom
     CODE_SEARCH_EMBEDDING_API_KEY   Unified embedding API key
     CODE_SEARCH_DATA_DIR            Data directory override
 `);

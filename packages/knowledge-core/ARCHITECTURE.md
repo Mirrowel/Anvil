@@ -257,8 +257,10 @@ form, same hash.
 
 | Class | Provider | Default model | Dim |
 |---|---|---|---|
-| `CodestralEmbedder` | Mistral | `codestral-embed-2505` | 1024 |
+| `CodestralEmbedder` | Mistral | `codestral-embed` | 1536 |
 | `VoyageEmbedder` | Voyage AI | `voyage-code-3` | 1024 |
+| `NvidiaEmbedder` | NVIDIA | `nvidia/nv-embedcode-7b-v1` | 4096 |
+| `CohereEmbedder` | Cohere | `embed-v4.0` | 1536 |
 | `OpenAIEmbedder` | OpenAI | `text-embedding-3-large` | 1024 |
 | `OllamaEmbedder` | Ollama | `nomic-embed-text` | 768 |
 | `GeminiOAuthEmbedder` | Gemini (OAuth or API key) | `text-embedding-004` | 768 |

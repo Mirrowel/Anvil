@@ -8,6 +8,8 @@ export interface KnowledgeConfig {
       | 'codestral'
       | 'mistral'
       | 'voyage'
+      | 'nvidia'
+      | 'cohere'
       | 'openai'
       | 'nomic-local'
       | 'ollama'
@@ -82,6 +84,10 @@ function applyEnvOverrides(config: KnowledgeConfig): KnowledgeConfig {
       process.env.OPENAI_API_KEY ??= embeddingApiKey;
     } else if (provider === 'voyage') {
       process.env.VOYAGE_API_KEY ??= embeddingApiKey;
+    } else if (provider === 'nvidia') {
+      process.env.NVIDIA_API_KEY ??= embeddingApiKey;
+    } else if (provider === 'cohere') {
+      process.env.COHERE_API_KEY ??= embeddingApiKey;
     } else if (provider === 'openai-compatible' || provider === 'custom') {
       process.env.CODE_SEARCH_EMBEDDING_API_KEY ??= embeddingApiKey;
     }

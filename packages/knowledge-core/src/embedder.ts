@@ -132,8 +132,8 @@ export class CodestralEmbedder implements EmbeddingProvider {
   readonly model: string;
 
   constructor(options?: { model?: string; dimensions?: number }) {
-    this.model = options?.model ?? 'codestral-embed-2505';
-    this.dimensions = options?.dimensions ?? 1024;
+    this.model = options?.model ?? 'codestral-embed';
+    this.dimensions = options?.dimensions ?? 1536;
   }
 
   async embed(texts: string[]): Promise<number[][]> {
@@ -219,7 +219,118 @@ export class VoyageEmbedder implements EmbeddingProvider {
 }
 
 // ---------------------------------------------------------------------------
-// 3. OpenAI Embedder
+// 3. NVIDIA Embedder
+// ---------------------------------------------------------------------------
+
+export class NvidiaEmbedder implements EmbeddingProvider {
+  readonly name = 'nvidia';
+  readonly dimensions: number;
+  readonly model: string;
+
+  constructor(options?: { model?: string; dimensions?: number }) {
+    this.model = options?.model ?? 'nvidia/nv-embedcode-7b-v1';
+    this.dimensions = options?.dimensions ?? 4096;
+  }
+
+  async embed(texts: string[]): Promise<number[][]> {
+    return this.rawEmbed(texts, 'passage');
+  }
+
+  async embedSingle(text: string): Promise<number[]> {
+    const [result] = await this.rawEmbed([text], 'query');
+    return result;
+  }
+
+  private async rawEmbed(texts: string[], inputType: 'passage' | 'query'): Promise<number[][]> {
+    const apiKey = process.env.NVIDIA_API_KEY ?? process.env.CODE_SEARCH_EMBEDDING_API_KEY;
+    if (!apiKey) {
+      throw new Error('NVIDIA_API_KEY or CODE_SEARCH_EMBEDDING_API_KEY environment variable is not set');
+    }
+
+    const response = await fetchWithRetry('https://integrate.api.nvidia.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        input: texts,
+        input_type: inputType,
+        encoding_format: 'float',
+        truncate: 'NONE',
+      }),
+    }, 'NVIDIA embedding');
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`NVIDIA embedding request failed (${response.status}): ${body}`);
+    }
+
+    const json = (await response.json()) as { data: Array<{ embedding: number[]; index?: number }> };
+    const rows = json.data.every((d) => typeof d.index === 'number')
+      ? [...json.data].sort((a, b) => a.index! - b.index!)
+      : json.data;
+    return validateEmbeddings(rows.map((d) => d.embedding), texts.length, this.dimensions, 'NVIDIA embedding');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. Cohere Embedder
+// ---------------------------------------------------------------------------
+
+export class CohereEmbedder implements EmbeddingProvider {
+  readonly name = 'cohere';
+  readonly dimensions: number;
+  readonly model: string;
+
+  constructor(options?: { model?: string; dimensions?: number }) {
+    this.model = options?.model ?? 'embed-v4.0';
+    this.dimensions = options?.dimensions ?? 1536;
+  }
+
+  async embed(texts: string[]): Promise<number[][]> {
+    return this.rawEmbed(texts, 'search_document');
+  }
+
+  async embedSingle(text: string): Promise<number[]> {
+    const [result] = await this.rawEmbed([text], 'search_query');
+    return result;
+  }
+
+  private async rawEmbed(texts: string[], inputType: 'search_document' | 'search_query'): Promise<number[][]> {
+    const apiKey = process.env.COHERE_API_KEY ?? process.env.CO_API_KEY ?? process.env.CODE_SEARCH_EMBEDDING_API_KEY;
+    if (!apiKey) {
+      throw new Error('COHERE_API_KEY, CO_API_KEY, or CODE_SEARCH_EMBEDDING_API_KEY environment variable is not set');
+    }
+
+    const response = await fetchWithRetry('https://api.cohere.com/v2/embed', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        texts,
+        input_type: inputType,
+        embedding_types: ['float'],
+      }),
+    }, 'Cohere embedding');
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Cohere embedding request failed (${response.status}): ${body}`);
+    }
+
+    const json = (await response.json()) as { embeddings: { float: number[][] } };
+    return validateEmbeddings(json.embeddings.float, texts.length, this.dimensions, 'Cohere embedding');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5. OpenAI Embedder
 // ---------------------------------------------------------------------------
 
 export class OpenAIEmbedder implements EmbeddingProvider {
@@ -267,7 +378,7 @@ export class OpenAIEmbedder implements EmbeddingProvider {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Ollama Embedder (local, free)
+// 6. Ollama Embedder (local, free)
 // ---------------------------------------------------------------------------
 
 /** Models that require task-specific prefixes for best performance */
@@ -335,7 +446,7 @@ export class OllamaEmbedder implements EmbeddingProvider {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Gemini OAuth Embedder (uses Gemini CLI's stored OAuth token)
+// 7. Gemini OAuth Embedder (uses Gemini CLI's stored OAuth token)
 // ---------------------------------------------------------------------------
 
 export class GeminiOAuthEmbedder implements EmbeddingProvider {
@@ -403,7 +514,7 @@ export class GeminiOAuthEmbedder implements EmbeddingProvider {
 }
 
 // ---------------------------------------------------------------------------
-// 6. OpenAI-compatible Embedder (works with any embeddings API)
+// 8. OpenAI-compatible Embedder (works with any embeddings API)
 //
 // Supports: OpenAI, Mistral, Together, Fireworks, OpenRouter, Jina,
 //           local vLLM, LM Studio, llama.cpp, text-embeddings-inference, etc.
@@ -495,6 +606,10 @@ export function createEmbeddingProvider(config: {
       return new CodestralEmbedder(opts);
     case 'voyage':
       return new VoyageEmbedder(opts);
+    case 'nvidia':
+      return new NvidiaEmbedder(opts);
+    case 'cohere':
+      return new CohereEmbedder(opts);
     case 'openai':
       return new OpenAIEmbedder(opts);
     case 'ollama':
@@ -512,6 +627,8 @@ export function createEmbeddingProvider(config: {
       if (process.env.MISTRAL_API_KEY) return new CodestralEmbedder(opts);
       if (process.env.OPENAI_API_KEY) return new OpenAIEmbedder(opts);
       if (process.env.VOYAGE_API_KEY) return new VoyageEmbedder(opts);
+      if (process.env.NVIDIA_API_KEY) return new NvidiaEmbedder(opts);
+      if (process.env.COHERE_API_KEY || process.env.CO_API_KEY) return new CohereEmbedder(opts);
       if (process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY) {
         return new GeminiOAuthEmbedder(opts);
       }
@@ -521,7 +638,7 @@ export function createEmbeddingProvider(config: {
     default:
       throw new Error(
         `Unknown embedding provider "${config.provider}". ` +
-          'Supported: codestral, mistral, voyage, openai, ollama, gemini, openai-compatible, custom, auto',
+          'Supported: codestral, mistral, voyage, nvidia, cohere, openai, ollama, gemini, openai-compatible, custom, auto',
       );
   }
 }

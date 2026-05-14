@@ -260,7 +260,7 @@ Everything is `CODE_SEARCH_*` env vars, single source of truth in
 | `CODE_SEARCH_MAX_CHUNKS` | Max chunks before aborting, default `200000` |
 | `CODE_SEARCH_EMBEDDING_TIMEOUT_MS` | Embedding HTTP timeout, default `25000` |
 | `CODE_SEARCH_EMBEDDING_MAX_RETRIES` | Retry count for retryable embedding failures, default `3` |
-| `EMBEDDING_PROVIDER` | `auto` / `voyage` / `openai` / `ollama` / … |
+| `EMBEDDING_PROVIDER` | `auto` / `voyage` / `openai` / `nvidia` / `cohere` / `ollama` / … |
 | `EMBEDDING_API_KEY` | Bridged to provider-specific var |
 | `RERANKER_PROVIDER` | `ollama` / `cohere` / `voyage` / `none` |
 | `OLLAMA_HOST` | Default `http://localhost:11434` |
