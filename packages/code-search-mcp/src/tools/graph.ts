@@ -82,7 +82,7 @@ export async function handleGraphTool(
   if (!['get_repo_graph', 'get_cross_repo_edges', 'find_callers', 'find_dependencies', 'impact_analysis'].includes(name)) return null;
 
   if (!ctx.indexReady) {
-    return { content: [{ type: 'text', text: `Index not ready for "${ctx.projectName}". Run index_start or the /index prompt, then poll index_status until Ready is yes.` }] };
+    return { content: [{ type: 'text', text: `Index not ready for "${ctx.projectName}". Call index_status first if needed. If Ready is no and Indexing is not running, call index_start with no arguments or use the /index prompt; the MCP already knows the current project path. Poll index_status until Ready is yes and Indexing is idle, or stop if status becomes error.` }] };
   }
 
   try {

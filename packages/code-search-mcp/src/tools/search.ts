@@ -65,7 +65,7 @@ export async function handleSearchTool(
       state.pendingFiles ? `pending watcher files: ${state.pendingFiles}` : null,
       state.error ? `last error: ${state.error}` : null,
     ].filter(Boolean).join('\n');
-    return { content: [{ type: 'text', text: `${details}\nRun index_start or the /index prompt to initialize indexing, then poll index_status until it completes.` }] };
+    return { content: [{ type: 'text', text: `${details}\nCall index_status first if you have not already. If Ready is no and Indexing is not running, call index_start with no arguments or use the /index prompt; the MCP already knows the current project path. Then poll index_status until Ready is yes and Indexing is idle, or stop if status becomes error.` }] };
   }
 
   try {

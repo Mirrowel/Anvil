@@ -140,7 +140,7 @@ function createMcpServerInstance(ctx: ServerContext) {
       {
         name: 'index',
         title: 'Index Project',
-        description: 'Start indexing the current project, then poll index_status until indexing completes.',
+        description: 'Check and initialize the current MCP project index using index_status and index_start.',
       },
     ],
   }));
@@ -151,17 +151,22 @@ function createMcpServerInstance(ctx: ServerContext) {
     }
 
     return {
-      description: 'Start and monitor project indexing.',
+      description: 'Check, start, and monitor indexing for the current MCP project.',
       messages: [{
         role: 'user',
         content: {
           type: 'text',
           text: [
-            'Start indexing the current project by calling the `index_start` MCP tool.',
-            'After starting, call `index_status` to monitor progress.',
-            'Indexing can take several minutes. If the agent has a shell/sleep tool available, wait about 30 seconds between status checks instead of polling continuously.',
-            'Keep polling `index_status` until Ready is `yes` and Indexing is `idle`, or stop and report the Error field if status becomes `error`.',
-            'Do not call search, graph, profile, or resource tools until indexing is complete.',
+            'You are helping initialize the code-search MCP index for the current project. The MCP server already knows the project path it was launched with; do not ask for or pass a filesystem path to `index_start`.',
+            'First call `index_status` to inspect the current state.',
+            'If Ready is `yes` and Indexing is `idle`, the index is already usable. Report that code-search tools are ready and do not call `index_start`.',
+            'If Indexing is `indexing`, do not start another run. Monitor with `index_status` until Ready is `yes` and Indexing is `idle`, or until Indexing is `error`.',
+            'If Ready is `no` and Indexing is not `indexing`, call `index_start` with no arguments. If it says the server is still checking for an existing index, call `index_status` and retry `index_start` only if the project remains uninitialized.',
+            'After starting, indexing can take several minutes. If you have a shell/sleep capability, wait about 30 seconds between `index_status` checks instead of polling continuously.',
+            'Stop successfully only when `index_status` shows Ready `yes` and Indexing `idle`. Then report the indexed repo count/chunk count if shown.',
+            'If status becomes `error`, stop and report the Error field and Log file path from `index_status`.',
+            'If `index_start` reports that no project directory is configured, explain that this MCP instance cannot index a folder until it is launched/configured with a local project path. To index a different folder, start/configure a different MCP instance rather than passing a path to this prompt.',
+            'Do not call search, graph, profile, or resource tools until indexing is complete; they require Ready `yes`.',
           ].join('\n'),
         },
       }],
@@ -410,6 +415,10 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
 
   const onChange = async (path: string) => {
     const absPath = resolve(path);
+    const controlPath = isIndexControlPath(ctx, absPath);
+    if (!controlPath && !watchPathIsIndexRelevant(ctx, absPath)) {
+      return;
+    }
     if (!watchPathNeedsRefresh(ctx, absPath)) {
       log(ctx, `[watcher] ignored unchanged path event: ${absPath}`);
       return;
@@ -419,7 +428,7 @@ async function startFileWatcher(ctx: ServerContext): Promise<void> {
     ctx.staleWatchFiles.add(absPath);
     ctx.indexing.pendingFiles = ctx.pendingWatchFiles.size;
     log(ctx, `[watcher] queued path (${ctx.indexing.pendingFiles} pending): ${absPath}`);
-    if (isIndexControlPath(ctx, absPath)) {
+    if (controlPath) {
       log(ctx, '[watcher] index ignore control changed — refreshing immediately');
       scheduleWatchDrain(ctx, 0);
     } else {
@@ -486,6 +495,13 @@ function watchPathNeedsRefresh(ctx: ServerContext, absPath: string): boolean {
   } catch {
     return true;
   }
+}
+
+function watchPathIsIndexRelevant(ctx: ServerContext, absPath: string): boolean {
+  const repo = findRepoForPath(ctx, absPath);
+  if (!repo) return false;
+  if (!existsSync(absPath)) return true;
+  return isIndexableFile(repo.path, absPath);
 }
 
 function findRepoForPath(ctx: ServerContext, absPath: string): { name: string; path: string; language: string } | null {
@@ -754,7 +770,7 @@ async function startManualIndex(ctx: ServerContext): Promise<{ started: boolean;
       log(ctx, '[manual-index] failed', err);
     });
 
-  return { started: true, message: `Indexing started for "${ctx.projectName}" at ${ctx.directoryPath}. Use index_status to monitor progress.` };
+  return { started: true, message: `Indexing started for "${ctx.projectName}" at ${ctx.directoryPath}. Use index_status to monitor progress until Ready is yes and Indexing is idle.` };
 }
 
 async function initializeExistingIndex(ctx: ServerContext): Promise<void> {
@@ -825,7 +841,7 @@ async function initializeExistingIndex(ctx: ServerContext): Promise<void> {
     ctx.indexing.status = 'uninitialized';
     ctx.indexing.phase = null;
     ctx.indexing.percent = 0;
-    ctx.indexing.message = `No existing index found. Run index_start or the /index prompt to index ${ctx.directoryPath}.`;
+    ctx.indexing.message = `No existing index found. Run index_start with no arguments, or use the /index prompt, to index the configured project path: ${ctx.directoryPath}.`;
     log(ctx, `[code-search-mcp] No index found for "${ctx.projectName}". Waiting for manual index_start.`);
   } catch (err) {
     ctx.indexing.status = 'error';

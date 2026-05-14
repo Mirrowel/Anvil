@@ -136,6 +136,15 @@ already know.
 | `index_status` | Reports whether the current project index is ready, idle/running/errored, progress, watcher state, stale-file warnings, log file, chunks, embedding provider, last indexed time, and indexed repos. |
 | `index_start` | Starts indexing the current MCP project path. It does not accept a path. Poll `index_status` about every 30 seconds until Ready is `yes` and Indexing is `idle`. |
 
+### Index Prompt
+
+The MCP prompt named `index` is for agents that need help making the
+code-search tools usable. It tells agents to call `index_status` first,
+avoid passing paths, call `index_start` only when Ready is `no` and no
+index run is already active, and monitor with `index_status` until Ready
+is `yes` and Indexing is `idle`. If indexing fails, agents should report
+the Error and Log file fields from `index_status`.
+
 Plus four MCP resources via `code-search://`:
 `repos`, `system-graph`, `repo/{name}/profile`, `repo/{name}/graph`.
 

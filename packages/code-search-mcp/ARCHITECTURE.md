@@ -27,11 +27,11 @@ compiles today.
        ┌──────────────┐  ┌──────────────────────────────────────┐
        │ remote-proxy │  │ server.ts:startServer                │
        │ (stdio loop  │  │   loadServerConfig                   │
-       │  forwards to │  │   autoIndex(ctx)                     │
+       │  forwards to │  │   initializeExistingIndex(ctx)       │
        │  /mcp)       │  │   transport === 'stdio'              │
        └──────────────┘  │     ? StdioServerTransport           │
                          │     : startHttpTransport(opts)       │
-                         │   schedule auto-reindex              │
+                         │   manual index_start + auto-reindex  │
                          └──────────────────────────────────────┘
                                             │
                   ┌─────────────────────────┼─────────────────────┐
@@ -120,10 +120,12 @@ interface ServerContext {
 
 1. `loadServerConfig()` — pull every `CODE_SEARCH_*` env var.
 2. Log resolved LLM mode (`disabled` / `api → ...` / `cli → ...`).
-3. `await autoIndex(ctx)` — if `<KB>/lancedb` + `system_graph_v2.json`
-   exist → `ctx.indexReady = true`. Else if `directoryPath` set →
-   `trackedIndex(ctx, ..., { label: 'auto-index' })`. Else log "tools
-   will return empty results."
+3. `initializeExistingIndex(ctx)` runs in the background. If
+   `<KB>/lancedb` + `system_graph_v2.json` exist and stats are usable,
+   `ctx.indexReady = true`. If an existing index is incomplete and a
+   directory is configured, startup may repair-refresh it. First-run
+   indexing is otherwise manual: agents/users call the `index_start`
+   tool or the `index` MCP prompt.
 4. Pick transport:
    - `stdio` → `new StdioServerTransport()` + `server.connect`.
    - else → `startHttpTransport(opts)` with `createMcpServer` factory
@@ -135,7 +137,7 @@ interface ServerContext {
 
 ```
 const server = new Server({ name: 'code-search-mcp', version: '0.1.0' },
-                          { capabilities: { tools: {}, resources: {} } });
+                          { capabilities: { tools: {}, resources: {}, prompts: {} } });
 allTools = [...registerSearchTools, ...registerGraphTools,
             ...registerProfileTools, ...registerIndexTools];
 server.setRequestHandler(ListToolsRequestSchema,  () => ({ tools: allTools }));
@@ -144,7 +146,17 @@ server.setRequestHandler(CallToolRequestSchema,   handleSearchTool || handleGrap
                                                   || { error: 'Unknown tool: ...' });
 server.setRequestHandler(ListResourcesRequestSchema, () => ({ resources }));
 server.setRequestHandler(ReadResourceRequestSchema,  handleResource);
+server.setRequestHandler(ListPromptsRequestSchema,   () => ({ prompts: ['index'] }));
+server.setRequestHandler(GetPromptRequestSchema,     returns index_status/index_start workflow);
 ```
+
+The `index` prompt is intentionally explicit for agents that only see
+MCP prompt text: call `index_status` first, call `index_start` with no
+arguments only when Ready is `no` and no indexing run is active, poll
+`index_status` about every 30 seconds until Ready is `yes` and Indexing
+is `idle`, and report Error plus Log file on failure. `index_start`
+does not accept a path because the MCP server already knows its
+configured project directory.
 
 ### 3.4 `trackedIndex(ctx, project, dirPath, opts)`
 
@@ -300,6 +312,7 @@ profiles exist (renders `(not yet profiled)` list).
 | Tool | Source |
 |---|---|
 | `index_status` | `KnowledgeIndexer.getStats(project)` |
+| `index_start` | `ctx.startIndexing()` → `trackedIndex(ctx, ctx.projectName, ctx.directoryPath, { label: 'manual-index' })` |
 
 ## 8. Resources (`src/resources/resources.ts`)
 
@@ -398,11 +411,10 @@ packages/code-search-mcp/
 ├── README.md
 ├── CLAUDE.md
 ├── ARCHITECTURE.md
-├── FLOW.md
 ├── build.mjs                                ← esbuild bundle script
 └── src/
     ├── index.ts                             ← CLI entry + mode dispatch
-    ├── server.ts                            ← startServer + ServerContext + autoIndex + trackedIndex
+    ├── server.ts                            ← startServer + ServerContext + prompts + trackedIndex
     │
     ├── core/
     │   └── env-config.ts                    ← loadServerConfig + resolveLlmMode
@@ -418,7 +430,7 @@ packages/code-search-mcp/
     │   ├── search.ts                        ← search_code / _semantic / _exact
     │   ├── graph.ts                         ← 5 graph tools
     │   ├── profile.ts                       ← list_repos / get_repo_profile
-    │   └── index-tools.ts                   ← index_status
+    │   └── index-tools.ts                   ← index_status / index_start
     │
     ├── resources/
     │   └── resources.ts                     ← static + dynamic URIs

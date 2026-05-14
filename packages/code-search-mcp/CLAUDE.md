@@ -39,8 +39,10 @@ All implemented in `src/tools/`:
 - **Profiles** (`profile.ts`) — `list_repos`, `get_repo_profile`. Read
   from `<KB>/<repo>/profile.json` via `loadProfile` /
   `loadAllProfiles`.
-- **Index** (`index-tools.ts`) — `index_status`. Reads
-  `KnowledgeIndexer.getStats(project)`.
+- **Index** (`index-tools.ts`) — `index_status` reads
+  `KnowledgeIndexer.getStats(project)` and indexing state;
+  `index_start` starts indexing the MCP-configured project path with no
+  arguments.
 
 ### Resources
 
@@ -53,9 +55,10 @@ All implemented in `src/tools/`:
 
 ### Server core
 
-- `src/server.ts:startServer(projectName, dirPath?)` — wires tools +
-  resources, calls `autoIndex` if no index found, picks transport
-  (stdio or HTTP), schedules optional reindex via
+- `src/server.ts:startServer(projectName, dirPath?)` — wires tools,
+  prompts, and resources; loads existing indexes in the background;
+  waits for manual `index_start` on first-run indexing; picks transport
+  (stdio or HTTP); schedules optional reindex via
   `CODE_SEARCH_REINDEX_INTERVAL`.
 - `src/transports/http-transport.ts:startHttpTransport(opts)` —
   `node:http` server with per-session `StreamableHTTPServerTransport`
@@ -137,6 +140,16 @@ which:
 
 History capped at 50 entries (FIFO). Available via `GET /status`.
 
+### MCP index prompt
+
+`src/server.ts` exposes a prompt named `index`. It should instruct
+agents to call `index_status` first, call `index_start` with no
+arguments only when Ready is `no` and no indexing run is active, poll
+`index_status` about every 30 seconds until Ready is `yes` and Indexing
+is `idle`, and report Error plus Log file if status becomes `error`.
+Do not tell agents to pass a filesystem path to `index_start`; the MCP
+server already knows the configured project path.
+
 ### Auto-reindex schedule
 
 `CODE_SEARCH_REINDEX_INTERVAL` accepts `30m` / `1h` / `6h` / `0` (off).
@@ -175,5 +188,6 @@ Parsed by `parseReindexInterval()`. Skips when
 
 - `ARCHITECTURE.md` — module map, mode dispatch, HTTP routes, tool
   surface, session lifecycle.
-- `FLOW.md` — sequence diagrams: remote-proxy startup, serve-mode
-  startup, search call, graph call, admin index, auto-reindex.
+- Flow diagrams, if reintroduced, should cover remote-proxy startup,
+  serve-mode startup, search call, graph call, admin index, manual
+  `index_start`, and auto-reindex.

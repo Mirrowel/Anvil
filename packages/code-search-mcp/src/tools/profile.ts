@@ -46,7 +46,7 @@ export async function handleProfileTool(
   if (!['list_repos', 'get_repo_profile'].includes(name)) return null;
 
   if (!ctx.indexReady) {
-    return { content: [{ type: 'text', text: `Index not ready for "${ctx.projectName}". Run index_start or the /index prompt, then poll index_status until Ready is yes.` }] };
+    return { content: [{ type: 'text', text: `Index not ready for "${ctx.projectName}". Call index_status first if needed. If Ready is no and Indexing is not running, call index_start with no arguments or use the /index prompt; the MCP already knows the current project path. Poll index_status until Ready is yes and Indexing is idle, or stop if status becomes error.` }] };
   }
 
   try {
@@ -69,7 +69,7 @@ export async function handleProfileTool(
             : 'profiling disabled: CODE_SEARCH_LLM_MODE=none';
           return { content: [{ type: 'text', text: `# Repos (${repos.length}, ${reason})\n\n${text}` }] };
         }
-        return { content: [{ type: 'text', text: 'No repos found. Run reindex first.' }] };
+        return { content: [{ type: 'text', text: 'No repos found. Run index_start with no arguments, or use the /index prompt, then monitor with index_status.' }] };
       }
 
       const text = profiles.map(p =>
@@ -84,7 +84,7 @@ export async function handleProfileTool(
       const profile = loadProfile(ctx.projectName, repo);
       if (!profile) {
         const reason = ctx.profilingEnabled
-          ? 'Run reindex to generate profiles.'
+          ? 'Run index_start with no arguments, or use the /index prompt, to generate profiles when profiling is enabled.'
           : 'Profiling is disabled (CODE_SEARCH_LLM_MODE=none).';
         return { content: [{ type: 'text', text: `No profile found for "${repo}". ${reason}` }] };
       }

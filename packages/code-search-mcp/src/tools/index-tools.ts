@@ -1,5 +1,5 @@
 /**
- * Index management tools — status, reindex, and dynamic index_path.
+ * Index management tools — status and manual start for the configured project path.
  */
 
 import type { ServerContext } from '../server.js';
@@ -42,9 +42,9 @@ export async function handleIndexTool(
         ? await indexer.getStats(ctx.projectName)
         : { totalChunks: 0, embeddingProvider: 'n/a', lastIndexed: '', repos: [] };
       const manualHint = !ctx.indexReady && ctx.indexing.status !== 'indexing'
-        ? 'Run `index_start` or the `/index` prompt to initialize indexing for this project.'
+        ? 'Run `index_start` with no arguments, or use the `/index` prompt, to initialize indexing for the MCP-configured project path.'
         : ctx.indexing.status === 'indexing'
-          ? 'Indexing is running. Poll `index_status` until Ready is yes and Indexing is idle.'
+          ? 'Indexing is running. Poll `index_status` about every 30 seconds until Ready is yes and Indexing is idle, or stop if status becomes error.'
           : 'Index is ready. Other code-search tools are available.';
 
       const lines = [
@@ -85,7 +85,7 @@ export async function handleIndexTool(
           text: [
             result.message,
             result.started
-              ? 'Indexing may take several minutes. Call index_status every ~30 seconds until Ready is yes and Indexing is idle.'
+              ? 'Indexing may take several minutes. Call index_status every ~30 seconds until Ready is yes and Indexing is idle. Stop and report the Error and Log file fields if status becomes error.'
               : 'Call index_status for the current state.',
           ].join('\n'),
         }],
